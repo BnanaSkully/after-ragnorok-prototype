@@ -16,6 +16,8 @@ class Faction:
 	var city_pos: Vector2i
 	var unit_pos: Vector2i
 	var unit_moves := 1
+	var unit_alive := true
+	var strength := 3 # higher strength = better odds in combat
 	var food := 0
 	var industry := 0
 
@@ -34,6 +36,7 @@ var unit_selected := false
 var turn := 1
 var game_over := false
 var end_turn_button: Button
+var message := "" # shown at the bottom of the screen, e.g. combat results
 
 func _ready() -> void:
 	end_turn_button = Button.new()
@@ -45,20 +48,31 @@ func _ready() -> void:
 func end_turn() -> void:
 	if game_over:
 		return
+	message = ""
 	rival_take_turn()
 	turn += 1
 	for f in factions:
 		f.food += 2
 		f.industry += 1
 		f.unit_moves = 1
+		# A destroyed unit returns at its city, as long as the city hex is free.
+		if not f.unit_alive and not unit_at(f.city_pos):
+			f.unit_alive = true
+			f.unit_pos = f.city_pos
 	unit_selected = false
 	if turn >= DOOM_TURN:
 		game_over = true
 		end_turn_button.disabled = true
 	queue_redraw()
 
-# Placeholder rival behaviour: step its unit to a random free neighbouring hex.
+# Placeholder rival behaviour: attack the player's unit if it's next door,
+# otherwise step to a random free neighbouring hex.
 func rival_take_turn() -> void:
+	if not rival.unit_alive:
+		return
+	if player.unit_alive and is_neighbour(rival.unit_pos, player.unit_pos):
+		resolve_combat(rival, player)
+		return
 	var options: Array[Vector2i] = []
 	for row in ROWS:
 		for col in COLS:
@@ -68,10 +82,26 @@ func rival_take_turn() -> void:
 	if not options.is_empty():
 		rival.unit_pos = options.pick_random()
 
-# Returns the faction whose unit stands on this hex, or null if it's empty.
+# Auto-resolve: the attacker wins with chance attacker / (attacker + defender).
+# The loser's unit is destroyed; a winning attacker moves into the hex.
+func resolve_combat(attacker: Faction, defender: Faction) -> void:
+	var chance := float(attacker.strength) / (attacker.strength + defender.strength)
+	var target := defender.unit_pos
+	var odds := "%d%% chance" % roundi(chance * 100)
+	if randf() < chance:
+		defender.unit_alive = false
+		defender.unit_pos = NO_CELL
+		attacker.unit_pos = target
+		message = "%s attacked %s and won (%s)." % [attacker.name, defender.name, odds]
+	else:
+		attacker.unit_alive = false
+		attacker.unit_pos = NO_CELL
+		message = "%s attacked %s and lost (%s)." % [attacker.name, defender.name, odds]
+
+# Returns the faction whose living unit stands on this hex, or null if it's empty.
 func unit_at(cell: Vector2i) -> Faction:
 	for f in factions:
-		if f.unit_pos == cell:
+		if f.unit_alive and f.unit_pos == cell:
 			return f
 	return null
 
@@ -107,7 +137,8 @@ func cell_at(pos: Vector2) -> Vector2i:
 
 func _draw() -> void:
 	# Map: green by default, tinted for each faction's city territory,
-	# yellow for hexes the selected player unit can move to.
+	# yellow for hexes the selected player unit can move to,
+	# orange-red for an enemy it can attack.
 	for row in ROWS:
 		for col in COLS:
 			var c := Vector2i(col, row)
@@ -116,8 +147,12 @@ func _draw() -> void:
 			for f in factions:
 				if c == f.city_pos or is_neighbour(f.city_pos, c):
 					fill = f.territory_color
-			if unit_selected and is_neighbour(player.unit_pos, c) and not unit_at(c):
-				fill = Color(0.9, 0.75, 0.3)
+			if unit_selected and is_neighbour(player.unit_pos, c):
+				var other := unit_at(c)
+				if not other:
+					fill = Color(0.9, 0.75, 0.3)
+				elif other != player:
+					fill = Color(0.95, 0.45, 0.2)
 			draw_colored_polygon(pts, fill)
 			pts.append(pts[0])
 			draw_polyline(pts, Color(0.1, 0.1, 0.1), 2.0)
@@ -128,6 +163,8 @@ func _draw() -> void:
 		draw_rect(Rect2(cc - Vector2(14, 14), Vector2(28, 28)), f.unit_color, false, 3.0)
 
 	for f in factions:
+		if not f.unit_alive:
+			continue
 		var selected := f == player and unit_selected
 		var ring := Color.WHITE if selected else Color(0.1, 0.1, 0.1)
 		draw_circle(hex_center(f.unit_pos), HEX_SIZE * 0.55, ring)
@@ -138,6 +175,8 @@ func _draw() -> void:
 	draw_string(font, Vector2(20, 35), info, HORIZONTAL_ALIGNMENT_LEFT, -1, 20)
 	var rival_info := "Rival:  Food %d    Industry %d" % [rival.food, rival.industry]
 	draw_string(font, Vector2(20, 60), rival_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.9, 0.6, 0.6))
+	if message != "":
+		draw_string(font, Vector2(20, get_viewport_rect().size.y - 30), message, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1, 0.85, 0.4))
 
 	if game_over:
 		var screen := get_viewport_rect().size
@@ -151,10 +190,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var cell := cell_at(get_local_mouse_position())
-		if cell == player.unit_pos and player.unit_moves > 0:
+		if player.unit_alive and cell == player.unit_pos and player.unit_moves > 0:
 			unit_selected = not unit_selected
-		elif unit_selected and is_neighbour(player.unit_pos, cell) and not unit_at(cell):
-			player.unit_pos = cell
+		elif unit_selected and is_neighbour(player.unit_pos, cell):
+			var other := unit_at(cell)
+			if other and other != player:
+				resolve_combat(player, other) # moving into an enemy = attack
+			else:
+				player.unit_pos = cell
 			player.unit_moves -= 1
 			unit_selected = false
 		else:
