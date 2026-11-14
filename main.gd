@@ -6,6 +6,10 @@ const ROWS := 10
 const OFFSET := Vector2(60, 100)
 const DOOM_TURN := 20 # the turn the Doom arrives and the game ends
 const NO_CELL := Vector2i(-1, -1)
+const MIN_LANDING_DISTANCE := 4 # how many hexes away from the rival's city you must land
+
+# The stages of a game. LANDING = choosing where to found your city.
+enum Phase { LANDING, PLAYING }
 
 # Everything one side owns. Each faction gets its own copy of these,
 # so the player and the rival keep separate cities, units and resources.
@@ -28,10 +32,13 @@ class Faction:
 		city_pos = p_city
 		unit_pos = p_unit_pos
 
-var player := Faction.new("Player", Color(0.3, 0.4, 0.6), Color(0.2, 0.4, 0.9), Vector2i(2, 2), Vector2i(3, 3))
+# The player has no city or unit until they land (see try_land below).
+var player := Faction.new("Player", Color(0.3, 0.4, 0.6), Color(0.2, 0.4, 0.9), NO_CELL, NO_CELL)
 var rival := Faction.new("Rival", Color(0.6, 0.3, 0.3), Color(0.85, 0.2, 0.2), Vector2i(9, 7), Vector2i(8, 6))
 var factions: Array[Faction] = [player, rival]
 
+var phase := Phase.LANDING
+var hover_cell := NO_CELL # the hex under the mouse while landing
 var unit_selected := false
 var turn := 1
 var game_over := false
@@ -44,9 +51,35 @@ func _ready() -> void:
 	end_turn_button.position = Vector2(700, 20)
 	end_turn_button.pressed.connect(end_turn)
 	add_child(end_turn_button)
+	start_landing()
+
+# Landing: the player has no city or unit yet and must pick a hex to settle.
+func start_landing() -> void:
+	phase = Phase.LANDING
+	player.city_pos = NO_CELL
+	player.unit_pos = NO_CELL
+	player.unit_alive = false
+	end_turn_button.disabled = true
+	message = "Choose where to land: click a hex to found your city."
+	queue_redraw()
+
+func can_land_at(cell: Vector2i) -> bool:
+	return in_bounds(cell) and hex_distance(cell, rival.city_pos) >= MIN_LANDING_DISTANCE
+
+func try_land(cell: Vector2i) -> void:
+	if not can_land_at(cell):
+		return
+	player.city_pos = cell
+	player.unit_pos = cell # the unit starts standing on the new city
+	player.unit_alive = true
+	phase = Phase.PLAYING
+	hover_cell = NO_CELL
+	end_turn_button.disabled = false
+	message = "Your people have landed. Click your unit to move it."
+	queue_redraw()
 
 func end_turn() -> void:
-	if game_over:
+	if game_over or phase != Phase.PLAYING:
 		return
 	message = ""
 	rival_take_turn()
@@ -56,7 +89,7 @@ func end_turn() -> void:
 		f.industry += 1
 		f.unit_moves = 1
 		# A destroyed unit returns at its city, as long as the city hex is free.
-		if not f.unit_alive and not unit_at(f.city_pos):
+		if not f.unit_alive and f.city_pos != NO_CELL and not unit_at(f.city_pos):
 			f.unit_alive = true
 			f.unit_pos = f.city_pos
 	unit_selected = false
@@ -120,6 +153,15 @@ func hex_points(center: Vector2) -> PackedVector2Array:
 		pts.append(center + Vector2(cos(a), sin(a)) * HEX_SIZE)
 	return pts
 
+# How many steps apart two hexes are. Converts our offset rows into
+# "cube" hex coordinates, where distance is easy to work out.
+func hex_distance(a: Vector2i, b: Vector2i) -> int:
+	var aq := a.x - (a.y - (a.y & 1)) / 2
+	var bq := b.x - (b.y - (b.y & 1)) / 2
+	var dq := aq - bq
+	var dr := a.y - b.y
+	return (absi(dq) + absi(dr) + absi(dq + dr)) / 2
+
 func is_neighbour(a: Vector2i, b: Vector2i) -> bool:
 	return in_bounds(b) and a != b and hex_center(a).distance_to(hex_center(b)) < HEX_SIZE * 1.9
 
@@ -145,8 +187,13 @@ func _draw() -> void:
 			var pts := hex_points(hex_center(c))
 			var fill := Color(0.25, 0.45, 0.3)
 			for f in factions:
-				if c == f.city_pos or is_neighbour(f.city_pos, c):
+				if f.city_pos != NO_CELL and (c == f.city_pos or is_neighbour(f.city_pos, c)):
 					fill = f.territory_color
+			if phase == Phase.LANDING:
+				if not can_land_at(c):
+					fill = fill.darkened(0.6) # too close to the rival
+				elif c == hover_cell:
+					fill = Color(0.9, 0.75, 0.3)
 			if unit_selected and is_neighbour(player.unit_pos, c):
 				var other := unit_at(c)
 				if not other:
@@ -158,9 +205,11 @@ func _draw() -> void:
 			draw_polyline(pts, Color(0.1, 0.1, 0.1), 2.0)
 
 	for f in factions:
+		if f.city_pos == NO_CELL:
+			continue
 		var cc := hex_center(f.city_pos)
-		draw_rect(Rect2(cc - Vector2(14, 14), Vector2(28, 28)), Color(0.95, 0.95, 0.85))
-		draw_rect(Rect2(cc - Vector2(14, 14), Vector2(28, 28)), f.unit_color, false, 3.0)
+		draw_rect(Rect2(cc - Vector2(20, 20), Vector2(40, 40)), Color(0.95, 0.95, 0.85))
+		draw_rect(Rect2(cc - Vector2(20, 20), Vector2(40, 40)), f.unit_color, false, 3.0)
 
 	for f in factions:
 		if not f.unit_alive:
@@ -187,6 +236,15 @@ func _draw() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if game_over:
+		return
+	if phase == Phase.LANDING:
+		if event is InputEventMouseMotion:
+			var cell := cell_at(get_local_mouse_position())
+			if cell != hover_cell:
+				hover_cell = cell
+				queue_redraw()
+		elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			try_land(cell_at(get_local_mouse_position()))
 		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var cell := cell_at(get_local_mouse_position())

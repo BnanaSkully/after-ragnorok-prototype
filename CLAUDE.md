@@ -31,3 +31,4 @@ Survivors of Ragnarök cross the void on Yggdrasil (the Crossing), then land on 
 - Politics between factions (truces, deals, betrayal) needs a design before it can be built
 - Give the two factions real names
 - What surviving the Doom means (win/lose conditions)
+- The rival should choose its own landing spot instead of a fixed one
