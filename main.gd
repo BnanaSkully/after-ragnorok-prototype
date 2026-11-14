@@ -7,9 +7,11 @@ const OFFSET := Vector2(60, 100)
 const DOOM_TURN := 20 # the turn the Doom arrives and the game ends
 const NO_CELL := Vector2i(-1, -1)
 const MIN_LANDING_DISTANCE := 4 # how many hexes away from the rival's city you must land
+const Crossing := preload("res://crossing_events.gd") # the Crossing's events live in this file
 
-# The stages of a game. LANDING = choosing where to found your city.
-enum Phase { LANDING, PLAYING }
+# The stages of a game, in order:
+# CROSSING = journey events, LANDING = choosing where to found your city, PLAYING = the turns.
+enum Phase { CROSSING, LANDING, PLAYING }
 
 # Everything one side owns. Each faction gets its own copy of these,
 # so the player and the rival keep separate cities, units and resources.
@@ -37,7 +39,11 @@ var player := Faction.new("Player", Color(0.3, 0.4, 0.6), Color(0.2, 0.4, 0.9), 
 var rival := Faction.new("Rival", Color(0.6, 0.3, 0.3), Color(0.85, 0.2, 0.2), Vector2i(9, 7), Vector2i(8, 6))
 var factions: Array[Faction] = [player, rival]
 
-var phase := Phase.LANDING
+var phase := Phase.CROSSING
+var crossing_step := 0 # which Crossing event we're on
+var crossing_panel: VBoxContainer
+var crossing_label: Label
+var crossing_buttons: VBoxContainer
 var hover_cell := NO_CELL # the hex under the mouse while landing
 var unit_selected := false
 var turn := 1
@@ -51,11 +57,82 @@ func _ready() -> void:
 	end_turn_button.position = Vector2(700, 20)
 	end_turn_button.pressed.connect(end_turn)
 	add_child(end_turn_button)
-	start_landing()
+	build_crossing_ui()
+	start_crossing()
 
-# Landing: the player has no city or unit yet and must pick a hex to settle.
+# --- The Crossing -----------------------------------------------------------
+# A panel with the event text and one button per choice. Built once, then
+# its text and buttons are swapped for each event.
+func build_crossing_ui() -> void:
+	crossing_panel = VBoxContainer.new()
+	crossing_panel.position = Vector2(150, 120)
+	crossing_panel.custom_minimum_size = Vector2(850, 0)
+	crossing_panel.add_theme_constant_override("separation", 16)
+	add_child(crossing_panel)
+	crossing_label = Label.new()
+	crossing_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	crossing_label.add_theme_font_size_override("font_size", 22)
+	crossing_panel.add_child(crossing_label)
+	crossing_buttons = VBoxContainer.new()
+	crossing_buttons.add_theme_constant_override("separation", 10)
+	crossing_panel.add_child(crossing_buttons)
+
+func start_crossing() -> void:
+	phase = Phase.CROSSING
+	crossing_step = 0
+	player.city_pos = NO_CELL
+	player.unit_pos = NO_CELL
+	player.unit_alive = false
+	player.food = Crossing.START_FOOD
+	player.industry = Crossing.START_INDUSTRY
+	end_turn_button.visible = false
+	crossing_panel.visible = true
+	message = ""
+	show_crossing_step()
+
+func show_crossing_step() -> void:
+	for b in crossing_buttons.get_children():
+		b.queue_free()
+	var tally := "Your people carry:  Food %d    Industry %d    Strength %d" % [player.food, player.industry, player.strength]
+	if crossing_step < Crossing.EVENTS.size():
+		var event: Dictionary = Crossing.EVENTS[crossing_step]
+		crossing_label.text = "THE CROSSING  (%d of %d)\n\n%s\n\n%s" % [crossing_step + 1, Crossing.EVENTS.size(), event["text"], tally]
+		for choice in event["choices"]:
+			add_crossing_button("%s   (%s)" % [choice["label"], describe_effects(choice["effects"])], choose.bind(choice["effects"]))
+	else:
+		crossing_label.text = "THE CROSSING\n\nThe branches of Yggdrasil give way. Land lies below.\n\n%s" % tally
+		add_crossing_button("Begin the Landing", start_landing)
+	queue_redraw()
+
+func add_crossing_button(text: String, action: Callable) -> void:
+	var b := Button.new()
+	b.text = text
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.add_theme_font_size_override("font_size", 18)
+	b.pressed.connect(action)
+	crossing_buttons.add_child(b)
+
+# Turns {"food": 3, "strength": -1} into "Food +3, Strength -1".
+func describe_effects(effects: Dictionary) -> String:
+	var parts: Array[String] = []
+	for key in effects:
+		parts.append("%s %+d" % [String(key).capitalize(), effects[key]])
+	return ", ".join(parts)
+
+# Apply a choice's effects. Nothing can drop below 0 (Strength below 1).
+func choose(effects: Dictionary) -> void:
+	player.food = maxi(0, player.food + effects.get("food", 0))
+	player.industry = maxi(0, player.industry + effects.get("industry", 0))
+	player.strength = maxi(1, player.strength + effects.get("strength", 0))
+	crossing_step += 1
+	show_crossing_step()
+
+# --- The Landing ------------------------------------------------------------
+# The player has no city or unit yet and must pick a hex to settle.
 func start_landing() -> void:
 	phase = Phase.LANDING
+	crossing_panel.visible = false
+	end_turn_button.visible = true
 	player.city_pos = NO_CELL
 	player.unit_pos = NO_CELL
 	player.unit_alive = false
@@ -67,7 +144,7 @@ func can_land_at(cell: Vector2i) -> bool:
 	return in_bounds(cell) and hex_distance(cell, rival.city_pos) >= MIN_LANDING_DISTANCE
 
 func try_land(cell: Vector2i) -> void:
-	if not can_land_at(cell):
+	if phase != Phase.LANDING or not can_land_at(cell):
 		return
 	player.city_pos = cell
 	player.unit_pos = cell # the unit starts standing on the new city
@@ -178,6 +255,8 @@ func cell_at(pos: Vector2) -> Vector2i:
 	return best if best_d <= HEX_SIZE else NO_CELL
 
 func _draw() -> void:
+	if phase == Phase.CROSSING:
+		return # the Crossing panel is shown instead of the map
 	# Map: green by default, tinted for each faction's city territory,
 	# yellow for hexes the selected player unit can move to,
 	# orange-red for an enemy it can attack.
@@ -220,7 +299,7 @@ func _draw() -> void:
 		draw_circle(hex_center(f.unit_pos), HEX_SIZE * 0.45, f.unit_color)
 
 	var font := ThemeDB.fallback_font
-	var info := "Turn %d    Food %d    Industry %d    Moves %d    Doom in %d" % [turn, player.food, player.industry, player.unit_moves, DOOM_TURN - turn]
+	var info := "Turn %d    Food %d    Industry %d    Strength %d    Moves %d    Doom in %d" % [turn, player.food, player.industry, player.strength, player.unit_moves, DOOM_TURN - turn]
 	draw_string(font, Vector2(20, 35), info, HORIZONTAL_ALIGNMENT_LEFT, -1, 20)
 	var rival_info := "Rival:  Food %d    Industry %d" % [rival.food, rival.industry]
 	draw_string(font, Vector2(20, 60), rival_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.9, 0.6, 0.6))
@@ -235,7 +314,7 @@ func _draw() -> void:
 		draw_string(font, Vector2(0, screen.y / 2 + 30), totals, HORIZONTAL_ALIGNMENT_CENTER, screen.x, 20)
 
 func _unhandled_input(event: InputEvent) -> void:
-	if game_over:
+	if game_over or phase == Phase.CROSSING:
 		return
 	if phase == Phase.LANDING:
 		if event is InputEventMouseMotion:

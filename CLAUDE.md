@@ -21,7 +21,9 @@ Survivors of Ragnarök cross the void on Yggdrasil (the Crossing), then land on 
 
 ## Code notes
 
-- Everything is in main.gd for now; suggest splitting it into files when it gets too big
+- Game logic is in main.gd; suggest splitting it further when it gets too big
+- The Crossing's events (text, choices, effects) are in crossing_events.gd, kept separate so they can be edited without touching game logic
+- Game phases in order: CROSSING, LANDING, PLAYING
 - Pointy-top hexes, offset rows, drawn with code in _draw()
 
 ## Later (parked until the full loop is playable)
@@ -32,3 +34,4 @@ Survivors of Ragnarök cross the void on Yggdrasil (the Crossing), then land on 
 - Give the two factions real names
 - What surviving the Doom means (win/lose conditions)
 - The rival should choose its own landing spot instead of a fixed one
+- Crossing event text is placeholder: rewrite in the game's own voice
