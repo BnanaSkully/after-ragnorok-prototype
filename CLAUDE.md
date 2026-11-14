@@ -23,3 +23,11 @@ Survivors of Ragnarök cross the void on Yggdrasil (the Crossing), then land on 
 
 - Everything is in main.gd for now; suggest splitting it into files when it gets too big
 - Pointy-top hexes, offset rows, drawn with code in _draw()
+
+## Later (parked until the full loop is playable)
+
+- Combat: +1 strength when defending in your own territory, so it isn't a pure coin flip
+- Respawning a destroyed unit should cost Industry (gives Industry a use)
+- Politics between factions (truces, deals, betrayal) needs a design before it can be built
+- Give the two factions real names
+- What surviving the Doom means (win/lose conditions)
