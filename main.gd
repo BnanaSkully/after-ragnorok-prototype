@@ -3,17 +3,35 @@ extends Node2D
 const HEX_SIZE := 32.0
 const COLS := 12
 const ROWS := 10
-const OFFSET := Vector2(60, 80)
+const OFFSET := Vector2(60, 100)
 const DOOM_TURN := 20 # the turn the Doom arrives and the game ends
+const NO_CELL := Vector2i(-1, -1)
 
-var unit_pos := Vector2i(3, 3)
+# Everything one side owns. Each faction gets its own copy of these,
+# so the player and the rival keep separate cities, units and resources.
+class Faction:
+	var name: String
+	var territory_color: Color
+	var unit_color: Color
+	var city_pos: Vector2i
+	var unit_pos: Vector2i
+	var unit_moves := 1
+	var food := 0
+	var industry := 0
+
+	func _init(p_name: String, p_territory: Color, p_unit: Color, p_city: Vector2i, p_unit_pos: Vector2i) -> void:
+		name = p_name
+		territory_color = p_territory
+		unit_color = p_unit
+		city_pos = p_city
+		unit_pos = p_unit_pos
+
+var player := Faction.new("Player", Color(0.3, 0.4, 0.6), Color(0.2, 0.4, 0.9), Vector2i(2, 2), Vector2i(3, 3))
+var rival := Faction.new("Rival", Color(0.6, 0.3, 0.3), Color(0.85, 0.2, 0.2), Vector2i(9, 7), Vector2i(8, 6))
+var factions: Array[Faction] = [player, rival]
+
 var unit_selected := false
-var unit_moves := 1
-
-var city_pos := Vector2i(2, 2)
 var turn := 1
-var food := 0
-var industry := 0
 var game_over := false
 var end_turn_button: Button
 
@@ -27,15 +45,38 @@ func _ready() -> void:
 func end_turn() -> void:
 	if game_over:
 		return
+	rival_take_turn()
 	turn += 1
-	food += 2
-	industry += 1
-	unit_moves = 1
+	for f in factions:
+		f.food += 2
+		f.industry += 1
+		f.unit_moves = 1
 	unit_selected = false
 	if turn >= DOOM_TURN:
 		game_over = true
 		end_turn_button.disabled = true
 	queue_redraw()
+
+# Placeholder rival behaviour: step its unit to a random free neighbouring hex.
+func rival_take_turn() -> void:
+	var options: Array[Vector2i] = []
+	for row in ROWS:
+		for col in COLS:
+			var c := Vector2i(col, row)
+			if is_neighbour(rival.unit_pos, c) and not unit_at(c):
+				options.append(c)
+	if not options.is_empty():
+		rival.unit_pos = options.pick_random()
+
+# Returns the faction whose unit stands on this hex, or null if it's empty.
+func unit_at(cell: Vector2i) -> Faction:
+	for f in factions:
+		if f.unit_pos == cell:
+			return f
+	return null
+
+func in_bounds(cell: Vector2i) -> bool:
+	return cell.x >= 0 and cell.x < COLS and cell.y >= 0 and cell.y < ROWS
 
 func hex_center(cell: Vector2i) -> Vector2:
 	var w := sqrt(3.0) * HEX_SIZE
@@ -50,10 +91,10 @@ func hex_points(center: Vector2) -> PackedVector2Array:
 	return pts
 
 func is_neighbour(a: Vector2i, b: Vector2i) -> bool:
-	return a != b and hex_center(a).distance_to(hex_center(b)) < HEX_SIZE * 1.9
+	return in_bounds(b) and a != b and hex_center(a).distance_to(hex_center(b)) < HEX_SIZE * 1.9
 
 func cell_at(pos: Vector2) -> Vector2i:
-	var best := Vector2i(-1, -1)
+	var best := NO_CELL
 	var best_d := INF
 	for row in ROWS:
 		for col in COLS:
@@ -62,38 +103,47 @@ func cell_at(pos: Vector2) -> Vector2i:
 			if d < best_d:
 				best_d = d
 				best = c
-	return best if best_d <= HEX_SIZE else Vector2i(-1, -1)
+	return best if best_d <= HEX_SIZE else NO_CELL
 
 func _draw() -> void:
+	# Map: green by default, tinted for each faction's city territory,
+	# yellow for hexes the selected player unit can move to.
 	for row in ROWS:
 		for col in COLS:
 			var c := Vector2i(col, row)
 			var pts := hex_points(hex_center(c))
 			var fill := Color(0.25, 0.45, 0.3)
-			if c == city_pos or is_neighbour(city_pos, c):
-				fill = Color(0.3, 0.4, 0.6)
-			if unit_selected and is_neighbour(unit_pos, c):
+			for f in factions:
+				if c == f.city_pos or is_neighbour(f.city_pos, c):
+					fill = f.territory_color
+			if unit_selected and is_neighbour(player.unit_pos, c) and not unit_at(c):
 				fill = Color(0.9, 0.75, 0.3)
 			draw_colored_polygon(pts, fill)
 			pts.append(pts[0])
 			draw_polyline(pts, Color(0.1, 0.1, 0.1), 2.0)
 
-	var cc := hex_center(city_pos)
-	draw_rect(Rect2(cc - Vector2(14, 14), Vector2(28, 28)), Color(0.95, 0.95, 0.85))
+	for f in factions:
+		var cc := hex_center(f.city_pos)
+		draw_rect(Rect2(cc - Vector2(14, 14), Vector2(28, 28)), Color(0.95, 0.95, 0.85))
+		draw_rect(Rect2(cc - Vector2(14, 14), Vector2(28, 28)), f.unit_color, false, 3.0)
 
-	var ring := Color.WHITE if unit_selected else Color(0.1, 0.1, 0.1)
-	draw_circle(hex_center(unit_pos), HEX_SIZE * 0.55, ring)
-	draw_circle(hex_center(unit_pos), HEX_SIZE * 0.45, Color(0.8, 0.2, 0.2))
+	for f in factions:
+		var selected := f == player and unit_selected
+		var ring := Color.WHITE if selected else Color(0.1, 0.1, 0.1)
+		draw_circle(hex_center(f.unit_pos), HEX_SIZE * 0.55, ring)
+		draw_circle(hex_center(f.unit_pos), HEX_SIZE * 0.45, f.unit_color)
 
 	var font := ThemeDB.fallback_font
-	var info := "Turn %d    Food %d    Industry %d    Moves %d    Doom in %d" % [turn, food, industry, unit_moves, DOOM_TURN - turn]
+	var info := "Turn %d    Food %d    Industry %d    Moves %d    Doom in %d" % [turn, player.food, player.industry, player.unit_moves, DOOM_TURN - turn]
 	draw_string(font, Vector2(20, 35), info, HORIZONTAL_ALIGNMENT_LEFT, -1, 20)
+	var rival_info := "Rival:  Food %d    Industry %d" % [rival.food, rival.industry]
+	draw_string(font, Vector2(20, 60), rival_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.9, 0.6, 0.6))
 
 	if game_over:
 		var screen := get_viewport_rect().size
 		draw_rect(Rect2(Vector2.ZERO, screen), Color(0, 0, 0, 0.75))
 		draw_string(font, Vector2(0, screen.y / 2 - 20), "The Doom has come", HORIZONTAL_ALIGNMENT_CENTER, screen.x, 40, Color(0.9, 0.2, 0.2))
-		var totals := "You survived %d turns.    Food %d    Industry %d" % [turn, food, industry]
+		var totals := "You survived %d turns.    Food %d    Industry %d" % [turn, player.food, player.industry]
 		draw_string(font, Vector2(0, screen.y / 2 + 30), totals, HORIZONTAL_ALIGNMENT_CENTER, screen.x, 20)
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -101,11 +151,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var cell := cell_at(get_local_mouse_position())
-		if cell == unit_pos and unit_moves > 0:
+		if cell == player.unit_pos and player.unit_moves > 0:
 			unit_selected = not unit_selected
-		elif unit_selected and is_neighbour(unit_pos, cell):
-			unit_pos = cell
-			unit_moves -= 1
+		elif unit_selected and is_neighbour(player.unit_pos, cell) and not unit_at(cell):
+			player.unit_pos = cell
+			player.unit_moves -= 1
 			unit_selected = false
 		else:
 			unit_selected = false
