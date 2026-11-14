@@ -13,27 +13,7 @@ const Crossing := preload("res://crossing_events.gd") # the Crossing's events li
 # CROSSING = journey events, LANDING = choosing where to found your city, PLAYING = the turns.
 enum Phase { CROSSING, LANDING, PLAYING }
 
-# Everything one side owns. Each faction gets its own copy of these,
-# so the player and the rival keep separate cities, units and resources.
-class Faction:
-	var name: String
-	var territory_color: Color
-	var unit_color: Color
-	var city_pos: Vector2i
-	var unit_pos: Vector2i
-	var unit_moves := 1
-	var unit_alive := true
-	var strength := 3 # higher strength = better odds in combat
-	var food := 0
-	var industry := 0
-
-	func _init(p_name: String, p_territory: Color, p_unit: Color, p_city: Vector2i, p_unit_pos: Vector2i) -> void:
-		name = p_name
-		territory_color = p_territory
-		unit_color = p_unit
-		city_pos = p_city
-		unit_pos = p_unit_pos
-
+# Faction (a side's city, unit and resources) is defined in faction.gd.
 # The player has no city or unit until they land (see try_land below).
 var player := Faction.new("Player", Color(0.3, 0.4, 0.6), Color(0.2, 0.4, 0.9), NO_CELL, NO_CELL)
 var rival := Faction.new("Rival", Color(0.6, 0.3, 0.3), Color(0.85, 0.2, 0.2), Vector2i(9, 7), Vector2i(8, 6))

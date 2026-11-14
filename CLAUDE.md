@@ -22,6 +22,7 @@ Survivors of Ragnarök cross the void on Yggdrasil (the Crossing), then land on 
 ## Code notes
 
 - Game logic is in main.gd; suggest splitting it further when it gets too big
+- Faction (one side's city, unit and resources) is in faction.gd, registered with class_name so any script can use it
 - The Crossing's events (text, choices, effects) are in crossing_events.gd, kept separate so they can be edited without touching game logic
 - Game phases in order: CROSSING, LANDING, PLAYING
 - Pointy-top hexes, offset rows, drawn with code in _draw()
