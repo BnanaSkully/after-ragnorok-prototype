@@ -16,6 +16,8 @@ CLAUDE.md holds the rules for working; this file holds the history.
 9. Rifts: rolled on turn 2, hidden, one per map section; Sköll comes through one at random, only that one is revealed; re-rolled each time he's driven back.
 10. Fog of war: player sees 3 around city, 2 around units; Sköll sees 2 (only spots a rogue Daughter within 2).
 11. Code split: game_state.gd (rules) vs main.gd (2D view); hex_map.gd (grid rules) vs hex_view_2d.gd (pixels).
+12. Phase 3 designed (not built): bind Sköll with a 3-link chain; see CLAUDE.md.
+13. Early game fix (Nathan's playtest: "turns 1-10 are dead, I just press End Turn"): fog of war with memory for every faction, scouts, ruins, rifts found by exploring, outposts (capturable), 2 Industry a turn + 5 at the Landing, small events every 2-3 turns, and a choice pop-up. All standard 4X, chosen without asking as CLAUDE.md says.
 
 ## Decisions Nathan made (and why)
 
@@ -39,6 +41,10 @@ CLAUDE.md holds the rules for working; this file holds the history.
 
 ## Things learnt (bugs found and fixed)
 
+- A pop-up that blocks end_turn makes every headless test loop forever (the turn never advances). Tests must answer pop-ups (tests/helpers.gd answer_choices), and early_game_test checks the turn always advances.
+- Beating a city's garrison used to move the attacker INTO the city (an old bug, found by the new "unit in someone else's city" check).
+- Two tests (balance_state, rift_timing_test) still used the two-faction names (s.rival, s.diplomacy) and had silently stopped working. Run every test after big changes, not only the new one.
+- Count a message once: the same messages can still be on screen after the player's moves and again after End Turn (the outpost-capture count was doubled at first).
 - Sköll's "nearest city" targeting was biased by map geometry (2:1 against the player). Measure fairness with many simulated games before trusting a rule.
 - Without the Daughter, a city made +0 Food with two units and could never grow: added standard city growth.
 - Stored Industry counting as defence (an invented rule) made walls worth only +2. Removed; use genre standards.
@@ -55,7 +61,9 @@ CLAUDE.md holds the rules for working; this file holds the history.
 - With hidden rifts (two factions, earlier): city falls ~21% with the Daughter, ~29% without.
 - A scared AI offers her in ~31% of games where it holds her.
 - About 4 AI offers per game; AIs break agreements ~1 per game.
+- Early game (300 games, a test player that explores and builds): 0 of 3000 early turns without a decision; endings 225 survived / 49 fell / 26 Daughter found (before the change, four_test: 229 / 50 / 21).
+- Before vs after the early-game change, same simple player that never expands: each AI's units on turn 10 2.7 -> 6.0, AI demands per game 0.5 -> 1.25, oath offers 4.9 -> 5.0.
 
 ## Ideas parked (see CLAUDE.md "Later")
 
-Faction names, the Daughter's name, Crossing text, AI landing choice, AI-to-AI diplomacy and trading, combat defence bonus, mini-games, full rifts (Doom-creatures, seasons, underground travel). Phase 3 is designed (CLAUDE.md), not built.
+Faction names, the Daughter's name, Crossing text, small-event and ruin text, a choice when you find a rift (e.g. seal it: changes Sköll, ask first), AIs using fog of war to chase a rogue Daughter, AI landing choice, AI-to-AI diplomacy and trading, combat defence bonus, mini-games, full rifts (Doom-creatures, seasons, underground travel). Phase 3 is designed (CLAUDE.md), not built.
