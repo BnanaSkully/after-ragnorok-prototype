@@ -52,6 +52,7 @@ var walls_button: Button
 var oath_button: Button
 var demand_food_button: Button
 var demand_industry_button: Button
+var play_again_button: Button # shown on the end screen
 var offer_panel: PanelContainer # the rival's Accept/Refuse pop-up
 var offer_label: Label
 var offer_accept_button: Button
@@ -75,7 +76,7 @@ func _ready() -> void:
 	build_button.pressed.connect(player_build_unit)
 	add_child(build_button)
 	walls_button = Button.new()
-	walls_button.position = Vector2(920, 58)
+	walls_button.position = Vector2(820, 58)
 	walls_button.pressed.connect(player_build_walls)
 	add_child(walls_button)
 	oath_button = Button.new()
@@ -90,6 +91,12 @@ func _ready() -> void:
 	demand_industry_button.position = Vector2(820, 172)
 	demand_industry_button.pressed.connect(player_demand.bind("industry"))
 	add_child(demand_industry_button)
+	play_again_button = Button.new()
+	play_again_button.text = "Play Again"
+	play_again_button.add_theme_font_size_override("font_size", 22)
+	play_again_button.pressed.connect(restart)
+	play_again_button.visible = false
+	add_child(play_again_button)
 	build_offer_ui()
 	build_crossing_ui()
 	start_crossing()
@@ -285,8 +292,17 @@ func starve(f: Faction) -> void:
 	else:
 		add_message("%s is starving: one of its units deserted." % f.name)
 
+# Start a fresh game by reloading the scene from scratch.
+func restart() -> void:
+	get_tree().reload_current_scene()
+
 func end_game(title: String, detail: String) -> void:
 	game_over = true
+	# The Play Again button sits under the end-screen text (see _draw).
+	var screen := get_viewport_rect().size
+	var lines := detail.split("\n").size()
+	play_again_button.visible = true
+	play_again_button.position = Vector2(screen.x / 2 - 70, screen.y / 2 + 40 + lines * 30)
 	end_turn_button.disabled = true
 	build_button.disabled = true
 	walls_button.disabled = true
@@ -612,7 +628,7 @@ func _draw() -> void:
 			draw_circle(sc, r * 0.28, Color(1.0, 0.9, 0.3))
 
 	var font := ThemeDB.fallback_font
-	var info := "Turn %d    Food %d (%+d/turn)    Industry %d    Units %d    Strength %d    Doom in %d" % [turn, player.food, food_change(player), player.industry, player.units.size(), player.strength, DOOM_TURN - turn]
+	var info := "Turn %d    Food %d (%+d/turn)    Industry %d    Units %d    Army Strength %d    Doom in %d" % [turn, player.food, food_change(player), player.industry, player.units.size(), diplomacy.army_power(player), DOOM_TURN - turn]
 	draw_string(font, Vector2(20, 35), info, HORIZONTAL_ALIGNMENT_LEFT, -1, 20)
 	var rival_info := "Rival:  Food %d    Industry %d    Units %d" % [rival.food, rival.industry, rival.units.size()]
 	if rival.city_pos == NO_CELL:
@@ -657,7 +673,7 @@ func _draw() -> void:
 		var lines := end_detail.split("\n")
 		for i in lines.size():
 			draw_string(font, Vector2(0, screen.y / 2 - 10 + i * 30), lines[i], HORIZONTAL_ALIGNMENT_CENTER, screen.x, 20)
-		var totals := "Turn %d    Food %d    Industry %d    Strength %d" % [turn, player.food, player.industry, player.strength]
+		var totals := "Turn %d    Food %d    Industry %d    Units %d    Army Strength %d" % [turn, player.food, player.industry, player.units.size(), diplomacy.army_power(player)]
 		draw_string(font, Vector2(0, screen.y / 2 + 10 + lines.size() * 30), totals, HORIZONTAL_ALIGNMENT_CENTER, screen.x, 18, Color(0.7, 0.7, 0.7))
 
 # A small sun: a gold circle with rays.
