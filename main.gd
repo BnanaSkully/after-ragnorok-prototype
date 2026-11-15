@@ -50,7 +50,11 @@ var build_button: Button
 var scout_button: Button
 var outpost_button: Button
 var walls_button: Button
-var faction_buttons := {} # AI faction -> {"pact": Button, "food": Button, "industry": Button}
+var faction_buttons := {} # AI faction -> {"pact": Button, "deal": Button}
+var deal_panel: PanelContainer # every deal with one AI faction (demand, trade, gift, pay for peace)
+var deal_heading: Label
+var deal_buttons: VBoxContainer
+var deal_with: Faction = null # whose deals the panel shows
 var trade_button: Button # opens the "trade the Sun's Daughter" panel
 var trade_panel: PanelContainer
 var trade_label: Label
@@ -83,8 +87,7 @@ func _ready() -> void:
 		var y := BLOCK_Y + i * BLOCK_H + 46
 		var set := {
 			"pact": add_button("", Vector2(PANEL_X, y), on_propose_pact.bind(f)),
-			"food": add_button("", Vector2(PANEL_X + 108, y), on_demand.bind(f, "food")),
-			"industry": add_button("", Vector2(PANEL_X + 216, y), on_demand.bind(f, "industry")),
+			"deal": add_button("Deal...", Vector2(PANEL_X + 120, y), on_open_deals.bind(f)),
 		}
 		for b in set.values():
 			b.add_theme_font_size_override("font_size", 13)
@@ -94,6 +97,7 @@ func _ready() -> void:
 	play_again_button.visible = false
 	build_offer_ui()
 	build_choice_ui()
+	build_deal_ui()
 	build_trade_ui()
 	build_crossing_ui()
 	state.start_crossing()
@@ -172,12 +176,9 @@ func update_buttons() -> void:
 				pact.text = "%s %d%%" % [word, roundi(d.accept_chance() * 100)]
 			pact.disabled = not playing or not d.can_propose() or d.is_oathbreaker()
 		pact.tooltip_text = "Ask for peace (uses your diplomatic action)." if d.at_war else "%s: a defensive alliance for %d turns. If anyone declares war on one of you, the other joins the war." % [word, Diplomacy.PACT_LENGTH]
-		for resource in ["food", "industry"]:
-			var button: Button = set[resource]
-			var chance: float = d.demand_chance(resource)
-			var short := "Food" if resource == "food" else "Industry"
-			button.text = "%s: none" % short if chance <= 0.0 else "%s %d%%" % [short, roundi(chance * 100)]
-			button.disabled = not playing or not d.can_demand()
+		var deal: Button = set["deal"]
+		deal.disabled = not playing or not d.can_deal()
+		deal.tooltip_text = "Demand, trade, give gifts, or pay for peace (uses your diplomatic action)."
 
 func show_end_screen() -> void:
 	# The Play Again button sits under the end-screen text (see _draw).
@@ -226,6 +227,87 @@ func on_propose_pact(f: Faction) -> void:
 
 func on_demand(f: Faction, resource: String) -> void:
 	state.player_demand(f, resource)
+	close_deals()
+
+# --- Deals with one AI faction (panel) ------------------------------------------------
+func build_deal_ui() -> void:
+	deal_panel = PanelContainer.new()
+	deal_panel.position = Vector2(170, 150)
+	deal_panel.custom_minimum_size = Vector2(540, 0)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.1, 0.09, 0.08)
+	style.border_color = Color(0.6, 0.85, 0.6)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(6)
+	style.set_content_margin_all(18)
+	deal_panel.add_theme_stylebox_override("panel", style)
+	add_child(deal_panel)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 8)
+	deal_panel.add_child(box)
+	deal_heading = Label.new()
+	deal_heading.add_theme_font_size_override("font_size", 16)
+	deal_heading.add_theme_color_override("font_color", Color(0.6, 0.85, 0.6))
+	box.add_child(deal_heading)
+	deal_buttons = VBoxContainer.new()
+	deal_buttons.add_theme_constant_override("separation", 6)
+	box.add_child(deal_buttons)
+	deal_panel.visible = false
+
+func add_deal(text: String, enabled: bool, action: Callable) -> void:
+	var b := Button.new()
+	b.text = text
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.add_theme_font_size_override("font_size", 15)
+	b.disabled = not enabled
+	b.pressed.connect(action)
+	deal_buttons.add_child(b)
+
+# Every deal with faction f and its terms, worked out by the rules (diplomacy.gd).
+func on_open_deals(f: Faction) -> void:
+	var d: Diplomacy = state.relation(f)
+	if not state.can_act() or not d.can_deal():
+		return
+	deal_with = f
+	deal_heading.text = "DEALS WITH THE %s   (Trust %+d%s)   Each uses your diplomatic action." % [f.name.to_upper(), d.trust, ", AT WAR" if d.at_war else ""]
+	for b in deal_buttons.get_children():
+		deal_buttons.remove_child(b)
+		b.queue_free()
+	var p := state.player
+	if d.at_war:
+		add_deal("Offer %d Industry for peace (%d%% chance; you keep it if they refuse)" % [Diplomacy.PEACE_TRIBUTE, roundi(d.tribute_peace_chance() * 100)], d.can_offer_tribute(), on_deal.bind(func(): state.player_tribute_for_peace(f)))
+	for res in ["food", "industry"]:
+		var chance: float = d.demand_chance(res)
+		var label := "Demand %d %s" % [Diplomacy.DEMAND_AMOUNT, res.capitalize()]
+		label += "  (they have none to give)" if chance <= 0.0 else "  (%d%% they pay; Trust %+d if they pay, %+d if not)" % [roundi(chance * 100), Diplomacy.TRUST_DEMAND_PAID, Diplomacy.TRUST_DEMAND_REFUSED]
+		add_deal(label, d.can_demand(), on_deal.bind(func(): state.player_demand(f, res)))
+	if not d.at_war:
+		for give in ["food", "industry"]:
+			var get := d.other_resource(give)
+			var amount: int = d.trade_quote(give)
+			var label := "Trade %d %s for %d %s" % [Diplomacy.TRADE_AMOUNT, give.capitalize(), amount, get.capitalize()]
+			if amount <= 0:
+				label = "Trade %d %s for %s  (they have none)" % [Diplomacy.TRADE_AMOUNT, give.capitalize(), get.capitalize()]
+			elif p.get(give) < Diplomacy.TRADE_AMOUNT:
+				label += "  (you don't have %d)" % Diplomacy.TRADE_AMOUNT
+			add_deal(label, amount > 0 and p.get(give) >= Diplomacy.TRADE_AMOUNT, on_deal.bind(func(): state.player_trade(f, give)))
+		for res in ["food", "industry"]:
+			var gain := d.gift_trust_gain()
+			var label := "Give %d %s as a gift (Trust %+d%s)" % [Diplomacy.GIFT_AMOUNT, res.capitalize(), gain, "" if gain > 0 else ": they already trust you enough"]
+			add_deal(label, d.can_gift(res), on_deal.bind(func(): state.player_gift(f, res)))
+	add_deal("Never mind", true, close_deals)
+	deal_panel.size = Vector2.ZERO
+	deal_panel.visible = true
+	for b in all_game_buttons():
+		b.disabled = true
+
+func on_deal(action: Callable) -> void:
+	action.call()
+	close_deals()
+
+func close_deals() -> void:
+	deal_panel.visible = false
+	deal_with = null
 	refresh()
 
 # --- The Crossing screen ------------------------------------------------------
@@ -328,7 +410,7 @@ func show_offer() -> void:
 	offer_heading.text = "A MESSAGE FROM THE %s" % r.other.name.to_upper()
 	offer_label.text = r.pending_text()
 	var kind: String = r.pending.get("type")
-	offer_accept_button.text = {"demand": "Pay", "daughter": "Take her", "peace": "Make peace"}.get(kind, "Accept")
+	offer_accept_button.text = {"demand": "Pay", "daughter": "Take her", "peace": "Make peace", "trade": "Trade"}.get(kind, "Accept")
 	offer_panel.visible = true
 	update_buttons()
 
@@ -468,7 +550,7 @@ func close_trade() -> void:
 
 # --- Mouse clicks: turn screen positions into hexes, then ask the state ---------
 func _unhandled_input(event: InputEvent) -> void:
-	if state.game_over or state.phase == GameState.Phase.CROSSING or state.is_waiting() or trade_panel.visible:
+	if state.game_over or state.phase == GameState.Phase.CROSSING or state.is_waiting() or trade_panel.visible or deal_panel.visible:
 		return
 	if event is InputEventMouseMotion:
 		var cell := HexView2D.cell_at(get_local_mouse_position())

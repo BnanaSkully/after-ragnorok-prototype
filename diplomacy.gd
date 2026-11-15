@@ -39,6 +39,16 @@ const RIVAL_WAR_CHANCE := 0.1 # chance each turn when one of those is true
 const RIVAL_PEACE_TURNS := 5 # at war this long (or weaker, or afraid of Sköll), it may offer peace
 const RIVAL_PEACE_CHANCE := 0.25
 const ALLY_ABANDON_GAP := -4 # an AI ally breaks its word rather than join a war on someone this much stronger
+# Trading (standard 4X deals). Each uses the player's diplomatic action.
+const TRADE_AMOUNT := 5 # you give this much Food or Industry...
+const TRADE_BASE := 4 # ...and they give back this much of the other, adjusted:
+# +1 if they need what you give, -1 if they need what they'd give up,
+# +1 at Trust 3+, -1 at Trust -3 or less (never below 1, never more than they have)
+const GIFT_AMOUNT := 5
+const GIFT_TRUST := 1 # a gift raises their Trust...
+const GIFT_TRUST_CAP := 5 # ...but only up to this (you can't buy friendship forever)
+const PEACE_TRIBUTE := 6 # Industry you can offer to sweeten a peace offer...
+const PEACE_TRIBUTE_BONUS := 0.3 # ...for this much more chance (kept if they refuse)
 
 # The AI faction's own diplomacy
 const RIVAL_OFFER_CHANCE := 0.15 # chance each turn that it proposes or demands something (per faction; with 3 AIs about 1 turn in 3 has an offer)
@@ -161,6 +171,92 @@ func demand(resource: String) -> bool:
 
 func can_propose() -> bool:
 	return not action_used and not pact_active() and not at_war and other.is_alive()
+
+# --- Trading -------------------------------------------------------------------
+func other_resource(res: String) -> String:
+	return "industry" if res == "food" else "food"
+
+# Is this faction short of Food or Industry? (Short of Food: stores under 5
+# or not growing; short of Industry: can't afford an army unit.)
+func needs(f: Faction, res: String) -> bool:
+	if res == "food":
+		return f.food < 5 or game.food_change(f) <= 0
+	return f.industry < GameState.UNIT_COST
+
+# How much of the other resource they'd give for TRADE_AMOUNT of "give" from
+# the player (0 = no deal: at war, or they have nothing to give).
+func trade_quote(give: String) -> int:
+	if at_war or not other.is_alive():
+		return 0
+	var get := other_resource(give)
+	var amount := TRADE_BASE
+	if needs(other, give):
+		amount += 1
+	if needs(other, get):
+		amount -= 1
+	if trust >= 3:
+		amount += 1
+	elif trust <= -3:
+		amount -= 1
+	return clampi(amount, 1, other.get(get)) if other.get(get) > 0 else 0
+
+func can_deal() -> bool:
+	return not action_used and other.is_alive()
+
+# The player trades TRADE_AMOUNT of "give" for the quoted amount of the other.
+func trade(give: String) -> bool:
+	var amount := trade_quote(give)
+	var player: Faction = game.player
+	if not can_deal() or amount <= 0 or player.get(give) < TRADE_AMOUNT:
+		return false
+	action_used = true
+	var get := other_resource(give)
+	player.set(give, player.get(give) - TRADE_AMOUNT)
+	other.set(give, other.get(give) + TRADE_AMOUNT)
+	other.set(get, other.get(get) - amount)
+	player.set(get, player.get(get) + amount)
+	remember("Turn %d: you traded %d %s to %s for %d %s." % [game.turn, TRADE_AMOUNT, give.capitalize(), other.name, amount, get.capitalize()])
+	return true
+
+func gift_trust_gain() -> int:
+	return GIFT_TRUST if trust < GIFT_TRUST_CAP else 0
+
+func can_gift(res: String) -> bool:
+	return can_deal() and not at_war and game.player.get(res) >= GIFT_AMOUNT
+
+# A gift of GIFT_AMOUNT: Trust +1 (until Trust reaches GIFT_TRUST_CAP).
+func gift(res: String) -> bool:
+	if not can_gift(res):
+		return false
+	action_used = true
+	var player: Faction = game.player
+	player.set(res, player.get(res) - GIFT_AMOUNT)
+	other.set(res, other.get(res) + GIFT_AMOUNT)
+	var gain := gift_trust_gain()
+	change_trust(gain)
+	remember("Turn %d: you gave %s %d %s. Trust %+d." % [game.turn, other.name, GIFT_AMOUNT, res.capitalize(), gain])
+	return true
+
+func tribute_peace_chance() -> float:
+	return clampf(peace_chance() + PEACE_TRIBUTE_BONUS, 0.05, 0.95)
+
+func can_offer_tribute() -> bool:
+	return can_propose_peace() and game.player.industry >= PEACE_TRIBUTE
+
+# At war: offer PEACE_TRIBUTE Industry for peace. Paid only if they accept.
+func offer_tribute_for_peace() -> bool:
+	if not can_offer_tribute():
+		return false
+	action_used = true
+	var chance := tribute_peace_chance()
+	if randf() < chance:
+		game.player.industry -= PEACE_TRIBUTE
+		other.industry += PEACE_TRIBUTE
+		make_peace()
+		remember("Turn %d: you paid %s %d Industry for peace (%d%% chance). Truce for %d turns." % [game.turn, other.name, PEACE_TRIBUTE, roundi(chance * 100), TRUCE_TURNS])
+		return true
+	remember("Turn %d: %s refused %d Industry for peace (%d%% chance). You keep it." % [game.turn, other.name, PEACE_TRIBUTE, roundi(chance * 100)])
+	return false
 
 func can_propose_peace() -> bool:
 	return not action_used and at_war and other.is_alive()
@@ -326,6 +422,14 @@ func rival_make_offer() -> void:
 				options.append(resource)
 		if not options.is_empty():
 			pending = {"type": "demand", "resource": options.pick_random()}
+			return
+	# Short of one thing and with plenty of the other: it offers a trade.
+	for want in ["food", "industry"]:
+		var give := other_resource(want)
+		var amount := trade_quote(want) # what it would pay for TRADE_AMOUNT of "want"
+		if needs(rival, want) and not needs(rival, give) and amount > 0 and player.get(want) >= TRADE_AMOUNT:
+			pending = {"type": "trade", "want": want, "give": give, "amount": amount}
+			return
 
 func has_pending() -> bool:
 	return not pending.is_empty()
@@ -335,6 +439,8 @@ func pending_text() -> String:
 	var rival: Faction = other
 	if pending.get("type") == "oath":
 		return "%s proposes %s, a defensive alliance for %d turns: if anyone declares war on one of you, the other joins the war.\n\nAccept: the %s begins, Trust %+d.\nRefuse: Trust %+d." % [rival.name, a_pact(), PACT_LENGTH, pact_word(), TRUST_ACCEPTED_THEIR_OATH, TRUST_REFUSED_THEIR_OATH]
+	if pending.get("type") == "trade":
+		return "%s is short of %s and offers a trade: %d %s for %d of your %s.\n\nAccept: the trade is made.\nRefuse: no harm done." % [rival.name, String(pending["want"]).capitalize(), pending["amount"], String(pending["give"]).capitalize(), TRADE_AMOUNT, String(pending["want"]).capitalize()]
 	if pending.get("type") == "peace":
 		return "%s is tired of the war and offers peace.\n\nAccept: peace, and a truce for %d turns. Trust %+d.\nRefuse: the war goes on." % [rival.name, TRUCE_TURNS, TRUST_PEACE_MADE]
 	if pending.get("type") == "demand":
@@ -361,6 +467,18 @@ func answer(accept: bool) -> void:
 		else:
 			change_trust(TRUST_REFUSED_THEIR_OATH)
 			remember("Turn %d: you refused %s's %s. Trust %+d." % [game.turn, rival.name, pact_word(), TRUST_REFUSED_THEIR_OATH])
+	elif offer["type"] == "trade":
+		var want: String = offer["want"]
+		var give: String = offer["give"]
+		var amount: int = mini(offer["amount"], rival.get(give))
+		if accept and player.get(want) >= TRADE_AMOUNT and amount > 0:
+			player.set(want, player.get(want) - TRADE_AMOUNT)
+			rival.set(want, rival.get(want) + TRADE_AMOUNT)
+			rival.set(give, rival.get(give) - amount)
+			player.set(give, player.get(give) + amount)
+			remember("Turn %d: you accepted %s's trade: %d %s for %d %s." % [game.turn, rival.name, TRADE_AMOUNT, want.capitalize(), amount, give.capitalize()])
+		else:
+			game.add_message("You turned down %s's trade." % rival.name)
 	elif offer["type"] == "peace":
 		if accept and at_war:
 			make_peace()

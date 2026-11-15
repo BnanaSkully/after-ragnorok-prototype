@@ -610,6 +610,22 @@ func player_demand(f: Faction, resource: String) -> void:
 	messages.clear()
 	relation(f).demand(resource) # posts its own message
 
+# Deals (each uses the turn's diplomatic action; see diplomacy.gd).
+func player_trade(f: Faction, give: String) -> void:
+	if can_act():
+		messages.clear()
+		relation(f).trade(give)
+
+func player_gift(f: Faction, res: String) -> void:
+	if can_act():
+		messages.clear()
+		relation(f).gift(res)
+
+func player_tribute_for_peace(f: Faction) -> void:
+	if can_act():
+		messages.clear()
+		relation(f).offer_tribute_for_peace()
+
 func player_build_walls() -> void:
 	if not can_act():
 		return
