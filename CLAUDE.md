@@ -16,9 +16,9 @@ Survivors of Ragnarök cross the void on Yggdrasil (the Crossing), then land on 
 
 ## The Sun's Daughter: design in progress
 
-Built so far: she chooses her protector at the Landing by Favour, and she judges her protector (step 1). Planned, in this order:
+Built so far: she chooses her protector at the Landing by Favour, judges her protector (step 1) and can go rogue (step 2). Planned, in this order:
 1. DONE (Step B): treating her well = how well you run your kingdom. Each turn her protector starves (a unit deserts): her Favour -2; every 3 turns in a row fed: +1. On turn 14 (Sköll arrives) she checks city defence 10+ and army Strength 6+: both +2, one 0, neither -3. From turn 10 she warns the player what she wants, and the line under the top bar shows progress. Only her protector is judged. Numbers at the top of sun_daughter.gd
-2. If her Favour with her protector drops too low she leaves and goes rogue: she appears on the map and moves away from Sköll. If Sköll reaches her in the open he swallows her with no battle. A faction's unit that reaches her can persuade her to join (odds based on its Favour)
+2. DONE: going rogue. When her Favour toward her protector is 2 or less she walks out onto a hex next to the city (the player is warned at 4 or less) and the protector loses her bonuses. In the open she moves 1 hex a turn away from Sköll. If Sköll is within 4 hexes he hunts her instead of a city and sprints 2 hexes a turn; reaching her, he swallows her with no battle. Moving a unit onto her tries to persuade her: chance = that faction's Favour x 10%; success, she shelters in its city. The rival's units go after her too. Numbers: LEAVE_FAVOUR etc. in sun_daughter.gd, SMELL_RANGE and SPRINT in skoll.gd
 3. Trading her from turn 10: her protector can offer her to another faction. Factions afraid of Sköll refuse. She is a liability as much as a prize, so her trade value can be NEGATIVE: a powerful faction may not want her, and the giver may have to pay extra for someone to take her. Trading her costs Favour with whoever gave her away
 - Trading only gets interesting with 3+ factions; with two, the rival's fear of Sköll is the only variable
 

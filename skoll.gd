@@ -23,6 +23,8 @@ const SWALLOWED_STRENGTH := 20 # his Strength after swallowing the Sun's Daughte
 const RIFT_SECTIONS_X := 3
 const RIFT_SECTIONS_Y := 2
 const RIFT_MIN_CITY_DISTANCE := 3 # rifts stay at least this far from the rival's city
+const SMELL_RANGE := 4 # if the Daughter is rogue this close, he hunts her instead
+const SPRINT := 2 # hexes a turn he runs when hunting her in the open (she runs 1)
 
 var game # main.gd
 var active := false # false until he arrives
@@ -48,6 +50,11 @@ func take_turn() -> void:
 		active = true
 		come_through_rift()
 		game.add_message("Sköll, the wolf who swallowed the sun, tears through a rift! He is hunting %s." % target_text())
+		return
+	# The Daughter out in the open: if he can smell her, he goes for her.
+	var daughter: SunDaughter = game.daughter
+	if daughter.is_rogue() and HexMap.hex_distance(pos, daughter.pos) <= SMELL_RANGE:
+		hunt_daughter(daughter)
 		return
 	if target == null or not target.is_alive():
 		pick_target()
@@ -101,10 +108,34 @@ func attack_city(f: Faction) -> void:
 			game.end_game("Sköll has found %s" % SunDaughter.NAME,
 				"He lost the battle, but now he knows she hides in %s.\nPHASE 3 BEGINS EARLY on turn %d: he will charge there again.\n(Phase 3 is not built yet.)" % [whose, game.turn])
 
+# She's out in the open: he sprints toward her (SPRINT hexes a turn), and if
+# he reaches her he swallows her with no battle.
+func hunt_daughter(d: SunDaughter) -> void:
+	for step in SPRINT:
+		if HexMap.is_neighbour(pos, d.pos):
+			pos = d.pos
+			game.add_message("Sköll caught %s out in the open." % SunDaughter.NAME)
+			swallow_daughter()
+			return
+		var best := HexMap.NO_CELL
+		var best_d := HexMap.hex_distance(pos, d.pos)
+		for c in HexMap.neighbours(pos):
+			if game.is_city(c) or game.is_blocked(c):
+				continue
+			var dist := HexMap.hex_distance(c, d.pos)
+			if dist < best_d:
+				best_d = dist
+				best = c
+		if best == HexMap.NO_CELL:
+			break
+		pos = best
+	game.add_message("Sköll smells %s in the open and sprints after her!" % SunDaughter.NAME)
+
 # Sköll becomes the sun: much stronger, and the whole map goes dark.
 func swallow_daughter() -> void:
 	game.daughter.state = SunDaughter.State.SWALLOWED
 	game.daughter.holder = null
+	game.daughter.pos = HexMap.NO_CELL
 	strength = SWALLOWED_STRENGTH
 	game.add_message("Sköll swallowed %s! He is the sun now (Strength %d), and the world goes dark." % [SunDaughter.NAME, strength])
 

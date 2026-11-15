@@ -230,6 +230,7 @@ func end_turn() -> void:
 	skoll.take_turn()
 	if game_over: # Sköll may have destroyed the player's city or found the Daughter
 		return
+	daughter_flee()
 	for f in factions:
 		if f.city_pos == NO_CELL:
 			continue # this faction's city has fallen; it's out of the game
@@ -249,6 +250,7 @@ func end_turn() -> void:
 		for u in f.units:
 			u.moves = 1
 	judge_readiness()
+	check_daughter_leaving()
 	rival_build()
 	diplomacy.new_turn()
 	selected = null
@@ -262,6 +264,57 @@ func end_turn() -> void:
 		end_game("You survived until the Doom",
 			"Sköll howls, and chaos pours out of the void.\nPHASE 3 BEGINS: chaos factions rise and rogues join Sköll.\n(Phase 3 is not built yet.)")
 	queue_redraw()
+
+# --- The Sun's Daughter going rogue --------------------------------------------
+# If her Favour toward her protector falls too low, she walks out of the city.
+func check_daughter_leaving() -> void:
+	var holder := daughter.holder
+	if daughter.state != SunDaughter.State.SHELTERED or holder == null or not holder.is_alive():
+		return
+	if holder.favour > SunDaughter.LEAVE_FAVOUR:
+		return
+	var spot := NO_CELL
+	var best := -1
+	for c in HexMap.neighbours(holder.city_pos):
+		if is_blocked(c) or is_city(c):
+			continue
+		var away := HexMap.hex_distance(c, skoll.pos) if skoll.active else 0
+		if away > best:
+			best = away
+			spot = c
+	if spot == NO_CELL:
+		return # nowhere to step out; she stays for now
+	daughter.go_rogue(spot)
+	var whose := "your" if holder == player else holder.name + "'s"
+	add_message("%s has lost faith and walked out of %s city! She is alone in the open." % [SunDaughter.NAME.capitalize(), whose])
+
+# In the open she moves one hex away from Sköll each turn.
+func daughter_flee() -> void:
+	if not daughter.is_rogue() or not skoll.active:
+		return
+	var best := NO_CELL
+	var best_d := HexMap.hex_distance(daughter.pos, skoll.pos)
+	for c in HexMap.neighbours(daughter.pos):
+		if is_blocked(c) or is_city(c):
+			continue
+		var d := HexMap.hex_distance(c, skoll.pos)
+		if d > best_d:
+			best_d = d
+			best = c
+	if best != NO_CELL:
+		daughter.pos = best
+
+# A unit moving into her hex tries to persuade her: chance = its faction's Favour x 10%.
+func try_persuade(u: Unit) -> void:
+	var f := u.faction
+	var chance := daughter.persuade_chance(f)
+	var who := "You" if f == player else f.name
+	if randf() < chance:
+		daughter.join(f)
+		var where := "your city" if f == player else "%s's city" % f.name
+		add_message("%s persuaded %s (%s). She shelters in %s." % [who, SunDaughter.NAME, odds_text(chance), where])
+	else:
+		add_message("%s tried to persuade %s, but she refused (%s)." % [who, SunDaughter.NAME, odds_text(chance)])
 
 # The Sun's Daughter warns at the howling and judges her protector when Sköll arrives.
 func judge_readiness() -> void:
@@ -356,6 +409,14 @@ func rival_take_turn() -> void:
 			continue
 		if u.pos == rival.city_pos and rival.units.size() > 1:
 			continue # this one guards the city
+		if daughter.is_rogue():
+			if HexMap.is_neighbour(u.pos, daughter.pos):
+				try_persuade(u)
+				continue
+			var toward := step_toward(u.pos, daughter.pos)
+			if toward != NO_CELL:
+				u.pos = toward
+				continue
 		if skoll.active and HexMap.hex_distance(u.pos, rival.city_pos) > 1:
 			# Sköll is loose: fall back toward the city to help defend it
 			var home := step_toward(u.pos, rival.city_pos)
@@ -590,7 +651,7 @@ func unit_at(cell: Vector2i) -> Unit:
 
 # True if a unit or Sköll is standing on this hex.
 func is_blocked(cell: Vector2i) -> bool:
-	return unit_at(cell) != null or skoll.is_at(cell)
+	return unit_at(cell) != null or skoll.is_at(cell) or (daughter.is_rogue() and cell == daughter.pos)
 
 func is_city(cell: Vector2i) -> bool:
 	for f in factions:
@@ -625,7 +686,9 @@ func _draw() -> void:
 					fill = Color(0.9, 0.75, 0.3)
 			if selected and HexMap.is_neighbour(selected.pos, c):
 				var other := unit_at(c)
-				if skoll.is_at(c) or (other and other.faction != player):
+				if daughter.is_rogue() and c == daughter.pos:
+					fill = Color(1.0, 0.95, 0.55) # persuade her
+				elif skoll.is_at(c) or (other and other.faction != player):
 					fill = Color(0.95, 0.45, 0.2) # something to attack
 				elif not other:
 					fill = Color(0.9, 0.75, 0.3) # free to move
@@ -661,6 +724,12 @@ func _draw() -> void:
 			draw_circle(HexMap.hex_center(u.pos), HexMap.HEX_SIZE * 0.55, ring)
 			draw_circle(HexMap.hex_center(u.pos), HexMap.HEX_SIZE * 0.45, col)
 
+	# The Sun's Daughter alone in the open: a bright sun on her hex.
+	if daughter.is_rogue():
+		var dc := HexMap.hex_center(daughter.pos)
+		draw_circle(dc, HexMap.HEX_SIZE * 0.7, Color(1.0, 0.85, 0.3, 0.25))
+		draw_sun(dc, 11.0)
+
 	# Sköll: a big black circle with fire inside and the swallowed sun at its heart.
 	# After swallowing the Daughter he blazes: bigger, with a glow around him.
 	if skoll.active:
@@ -692,9 +761,13 @@ func _draw() -> void:
 		daughter_info = "Sköll swallowed %s. He is the sun now (Strength %d)." % [SunDaughter.NAME, skoll.strength]
 	elif daughter.holder != null:
 		var note := "(Sköll doesn't know which city)"
-		if daughter.holder == player and turn < Skoll.ARRIVAL_TURN:
+		if daughter.holder == player and player.favour <= SunDaughter.WARN_FAVOUR:
+			note = "(UNHAPPY: at Favour %d she leaves)" % SunDaughter.LEAVE_FAVOUR
+		elif daughter.holder == player and turn < Skoll.ARRIVAL_TURN:
 			note = "(for turn %d: defence %d/%d, army %d/%d)" % [Skoll.ARRIVAL_TURN, city_defence(player), SunDaughter.READY_DEFENCE, diplomacy.army_power(player), SunDaughter.READY_ARMY]
 		daughter_info = "%s %s %s    Her Favour: you %d, %s %d" % ["You shelter" if daughter.holder == player else daughter.holder.name + " shelters", SunDaughter.NAME, note, player.favour, rival.name, rival.favour]
+	if daughter.is_rogue():
+		daughter_info = "She is ALONE IN THE OPEN! Move a unit onto her to persuade her: you %d%%, %s %d%%" % [roundi(daughter.persuade_chance(player) * 100), rival.name, roundi(daughter.persuade_chance(rival) * 100)]
 	draw_string(font, Vector2(20, 82), daughter_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.9, 0.5))
 
 	# Diplomacy panel (right side): trust, the oath, and the memory of promises.
@@ -757,6 +830,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			messages.clear()
 			if skoll.is_at(cell):
 				skoll.attacked_by(selected)
+			elif daughter.is_rogue() and cell == daughter.pos:
+				try_persuade(selected)
 			elif clicked and clicked.faction != player:
 				if diplomacy.pact_active() and break_warning_cell != cell:
 					# first click only warns; a second click on the same unit breaks the oath

@@ -26,17 +26,24 @@ const READY_ARMY := 6 #   city defence and total army Strength
 const READY_FAVOUR := 2 # both met
 const UNREADY_FAVOUR := -3 # neither met (one met: no change)
 
-enum State { SHELTERED, SWALLOWED }
+# Going rogue
+const LEAVE_FAVOUR := 2 # at this Favour or below she leaves her protector
+const WARN_FAVOUR := 4 # at this Favour or below the player is warned
+const PERSUADE_PER_FAVOUR := 0.1 # chance to persuade her = Favour x 10%
+
+enum State { SHELTERED, ROGUE, SWALLOWED }
 
 var state := State.SHELTERED
 var holder: Faction = null # who shelters her (she chooses at the Landing)
 var fed_turns := 0 # turns in a row her protector has kept its people fed
+var pos := HexMap.NO_CELL # where she stands while ROGUE
 
 # Start of a new game: nobody holds her yet, and Favour is set.
 func reset(player: Faction, rival: Faction) -> void:
 	state = State.SHELTERED
 	holder = null
 	fed_turns = 0
+	pos = HexMap.NO_CELL
 	player.favour = PLAYER_START_FAVOUR
 	rival.favour = randi_range(RIVAL_FAVOUR_MIN, RIVAL_FAVOUR_MAX) # hidden from the player
 
@@ -52,6 +59,26 @@ func shelters_with(f: Faction) -> bool:
 
 func is_swallowed() -> bool:
 	return state == State.SWALLOWED
+
+func is_rogue() -> bool:
+	return state == State.ROGUE
+
+func persuade_chance(f: Faction) -> float:
+	return clampf(f.favour * PERSUADE_PER_FAVOUR, 0.0, 1.0)
+
+# She walks out of her protector's city onto the given hex.
+func go_rogue(cell: Vector2i) -> void:
+	state = State.ROGUE
+	holder = null
+	fed_turns = 0
+	pos = cell
+
+# She agrees to shelter in this faction's city.
+func join(f: Faction) -> void:
+	state = State.SHELTERED
+	holder = f
+	fed_turns = 0
+	pos = HexMap.NO_CELL
 
 func change_favour(f: Faction, amount: int) -> void:
 	f.favour = clampi(f.favour + amount, 0, MAX_FAVOUR)
