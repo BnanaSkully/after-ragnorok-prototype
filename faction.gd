@@ -21,6 +21,11 @@ var is_player := false
 # stay explored; what's on them now is only known while they're in sight.
 var explored := {}
 var known_rifts := {} # rifts it has found (hex -> true); forgotten when the rifts shift
+# Tributary (standard 4X vassal): the name of the faction that took its city in
+# a war ("" = free). A tributary pays half its Industry income to its overlord
+# and can't be at war with it until it rises up. (A name, not a link, so two
+# factions never hold each other.)
+var overlord := ""
 
 # (How a faction looks on screen, its colours, is up to the view: see main.gd.)
 func _init(p_name: String, p_city: Vector2i, p_pact_word := "oath") -> void:

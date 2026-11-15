@@ -170,7 +170,7 @@ func demand(resource: String) -> bool:
 	return false
 
 func can_propose() -> bool:
-	return not action_used and not pact_active() and not at_war and other.is_alive()
+	return not action_used and not pact_active() and not at_war and other.is_alive() and not game.tribute_bound(other, game.player)
 
 # --- Trading -------------------------------------------------------------------
 func other_resource(res: String) -> String:
@@ -293,6 +293,17 @@ func make_peace() -> void:
 func player_declare_war(defending := false) -> void:
 	if at_war:
 		return
+	if game.player.overlord == other.name:
+		# Rising up against your overlord: you're free, and at war with them.
+		game.player.overlord = ""
+		pact_turns_left = 0
+		at_war = true
+		war_since = game.turn
+		change_trust(TRUST_DECLARED_WAR)
+		remember("Turn %d: YOU ROSE UP against the %s. No more tribute, and you are at war. Trust %+d." % [game.turn, other.name, TRUST_DECLARED_WAR])
+		return
+	if other.overlord == game.player.name:
+		other.overlord = "" # attacking your own tributary sets it free
 	if pact_active():
 		break_pact()
 	elif defending:
@@ -368,6 +379,8 @@ func new_turn() -> void:
 func rival_consider_war() -> void:
 	if at_war or in_truce() or not other.is_alive() or not game.player.is_alive():
 		return
+	if game.tribute_bound(other, game.player):
+		return # overlord and tributary: only an uprising (GameState.ai_rebellions)
 	var rival: Faction = other
 	var gap := army_power(rival) - army_power(game.player)
 	var starving: bool = rival.food <= 0 and game.food_change(rival) < 0
@@ -412,7 +425,7 @@ func rival_make_offer() -> void:
 		return
 	if randf() >= RIVAL_OFFER_CHANCE:
 		return
-	if not pact_active() and not is_oathbreaker() and (afraid or gap < 0 or trust >= 2):
+	if not pact_active() and not is_oathbreaker() and not game.tribute_bound(rival, player) and (afraid or gap < 0 or trust >= 2):
 		pending = {"type": "oath"}
 		return
 	if gap >= RIVAL_DEMAND_GAP:

@@ -38,6 +38,12 @@ const AI_WAR_GAP := 4 # an AI may declare war on another AI whose army is this m
 const AI_WAR_CHANCE := 0.05 # ...with this chance each turn
 const AI_PEACE_AFTER := 4 # after this many turns of war, two AIs may make peace...
 const AI_PEACE_CHANCE := 0.2 # ...with this chance each turn (twice as likely once Sköll howls)
+# Taking cities in war: the city becomes the winner's tributary
+const TRIBUTE_SHARE := 0.5 # a tributary pays this share of its Industry income to its overlord
+const REBEL_CHANCE := 0.2 # each turn, a tributary AI whose army is stronger than its overlord's may rise up
+const SIEGE_SUPPORT := 2 # each other army of the attacker's next to the city adds this to the attack
+const AI_SIEGE_ODDS := 0.4 # an AI army attacks an enemy city when its chance is at least this
+const AI_MARCH_ARMIES := 2 # an AI at war sends spare armies at enemy cities once it has this many
 const GROWTH_BASE := 10 # Food stored to grow from population 1 to 2...
 const GROWTH_STEP := 5 # ...and each later growth costs this much more
 const WALL_COST := 10 # Industry per wall level
@@ -179,6 +185,7 @@ func end_turn() -> void:
 	if game_over or phase != Phase.PLAYING or is_waiting():
 		return # (answer the offer or choice first)
 	messages.clear()
+	ai_rebellions()
 	for r in relations:
 		r.rival_consider_war() # before its units move, so a war (or betrayal) can strike at once
 	ai_wars_turn()
@@ -197,6 +204,7 @@ func end_turn() -> void:
 			continue # this faction's city has fallen; it's out of the game
 		f.food += food_change(f)
 		f.industry += industry_change(f)
+		pay_tribute(f)
 		var starved := f.food < 0
 		if starved:
 			starve(f)
@@ -368,10 +376,12 @@ func ai_take_turn(f: Faction) -> void:
 			var other := unit_at(c)
 			if other == null or not at_war(f, other.faction):
 				continue # only enemies it is at war with
+			if c == other.faction.city_pos and win_chance(siege_strength(u, other.faction), city_defence(other.faction)) < AI_SIEGE_ODDS:
+				continue # a garrison behind walls: too strong to attack
 			target = other
 			break
 		if target:
-			resolve_combat(u, target)
+			attack_hex(u, target.pos)
 			continue
 		if u.pos == f.city_pos and f.units.size() > 1:
 			continue # this one guards the city
@@ -388,6 +398,18 @@ func ai_take_turn(f: Faction) -> void:
 			var home := step_toward(u.pos, f.city_pos)
 			if home != NO_CELL:
 				enter_hex(u, home)
+				continue
+		# At war: spare armies march on the nearest enemy city and attack it
+		# when the odds are good enough (the city becomes their tributary).
+		var siege := ai_siege_target(f)
+		if siege != null and u.pos != f.city_pos:
+			if HexMap.is_neighbour(u.pos, siege.city_pos):
+				if win_chance(siege_strength(u, siege), city_defence(siege)) >= AI_SIEGE_ODDS:
+					attack_hex(u, siege.city_pos)
+				continue # (otherwise it waits outside for help)
+			var march := step_toward(u.pos, siege.city_pos)
+			if march != NO_CELL:
+				enter_hex(u, march)
 				continue
 		# An enemy outpost next door with nobody guarding it: take it.
 		var grab := NO_CELL
@@ -673,6 +695,9 @@ func war_target(cell: Vector2i) -> Faction:
 	var other := unit_at(cell)
 	if other != null:
 		return other.faction if other.faction != player and not at_war(player, other.faction) else null
+	var owner_city := city_owner(cell)
+	if owner_city != null and owner_city != player and not at_war(player, owner_city):
+		return owner_city
 	var owner := outpost_owner(cell)
 	if owner != null and owner != player and not at_war(player, owner):
 		return owner
@@ -692,8 +717,6 @@ func player_unit_act(u: Unit, cell: Vector2i) -> bool:
 	var other := unit_at(cell)
 	if other and other.faction == player:
 		return false # can't move onto your own unit
-	if other == null and is_city(cell) and cell != player.city_pos:
-		return false # you can't walk into another faction's city
 	messages.clear()
 	if skoll.is_at(cell):
 		skoll.attacked_by(u)
@@ -703,8 +726,8 @@ func player_unit_act(u: Unit, cell: Vector2i) -> bool:
 		var enemy := war_target(cell)
 		if enemy != null:
 			relation(enemy).player_declare_war() # (breaks your oath if you were allies)
-		if other:
-			resolve_combat(u, other) # moving into an enemy = attack
+		if other or (is_city(cell) and cell != player.city_pos):
+			attack_hex(u, cell) # moving into an enemy (or its city) = attack
 		else:
 			enter_hex(u, cell)
 			spend_move(u, cell)
@@ -769,10 +792,12 @@ func ai_wars_turn() -> void:
 						ai_war_since.erase(key)
 						ai_truce_until[key] = turn + Diplomacy.TRUCE_TURNS
 						add_message("The %s and the %s made peace." % [a.name, b.name])
-			elif turn >= ai_truce_until.get(key, 0) and army_power(a) - army_power(b) >= AI_WAR_GAP and randf() < AI_WAR_CHANCE:
+			elif turn >= ai_truce_until.get(key, 0) and not tribute_bound(a, b) and army_power(a) - army_power(b) >= AI_WAR_GAP and randf() < AI_WAR_CHANCE:
 				ai_declare_war(a, b)
 
 func ai_declare_war(a: Faction, b: Faction) -> void:
+	if tribute_bound(a, b):
+		return
 	ai_war_since[pair_key(a, b)] = turn
 	add_message("The %s declared war on the %s." % [a.name, b.name])
 	# Your ally was attacked: your oath says you join the war. You decide (pop-up).
@@ -795,6 +820,8 @@ func player_attacked(aggressor: Faction) -> void:
 		var ally := r.other
 		if ally == aggressor or not ally.is_alive() or not r.pact_active() or at_war(ally, aggressor):
 			continue
+		if tribute_bound(ally, aggressor):
+			continue # it can't go to war with its own overlord (or tributary)
 		if army_power(ally) - army_power(aggressor) <= Diplomacy.ALLY_ABANDON_GAP:
 			r.pact_turns_left = 0
 			r.rival_broken_oaths += 1
@@ -803,6 +830,115 @@ func player_attacked(aggressor: Faction) -> void:
 		else:
 			ai_war_since[pair_key(ally, aggressor)] = turn
 			remember("Turn %d: the %s honour their %s and declare war on the %s!" % [turn, ally.name, r.pact_word(), aggressor.name])
+
+# --- Taking cities: tributaries ----------------------------------------------
+# A unit attacks a hex next to it: a city (its garrison, walls, land and the
+# Daughter all defend it) or a unit in the open.
+func attack_hex(u: Unit, cell: Vector2i) -> void:
+	var owner := city_owner(cell)
+	if owner != null and owner != u.faction:
+		attack_city(u, owner)
+	else:
+		resolve_combat(u, unit_at(cell))
+
+# The attacker against the whole city defence. Winning: the garrison dies,
+# the walls lose a level, and the city becomes the attacker's tributary (the
+# attacker stays outside). Losing: the attacking unit is destroyed.
+func attack_city(u: Unit, f: Faction) -> void:
+	var conqueror := u.faction
+	var defence := city_defence(f)
+	var chance := win_chance(siege_strength(u, f), defence)
+	var whose := "your city" if f == player else "the %s city" % f.name
+	var who := "You" if conqueror == player else "The " + conqueror.name
+	if randf() >= chance:
+		conqueror.remove_unit(u)
+		add_message("%s attacked %s (defence %d) and lost the unit (%s)." % [who, whose, defence, odds_text(chance)])
+		return
+	var garrison := unit_at(f.city_pos)
+	if garrison and garrison.faction == f:
+		f.remove_unit(garrison)
+	f.walls = maxi(0, f.walls - 1)
+	make_tributary(f, conqueror)
+	remember("Turn %d: %s took %s (defence %d, %s). It pays them tribute now." % [turn, who, whose, defence, odds_text(chance)])
+
+# f becomes conqueror's tributary: their war ends and f pays tribute. If the
+# conqueror was f's own tributary, it is free again.
+func make_tributary(f: Faction, conqueror: Faction) -> void:
+	if conqueror.overlord == f.name:
+		conqueror.overlord = ""
+	f.overlord = conqueror.name
+	if f == player or conqueror == player:
+		var r := relation(conqueror if f == player else f)
+		r.at_war = false
+		r.pact_turns_left = 0
+	else:
+		ai_war_since.erase(pair_key(f, conqueror))
+
+# A unit attacking a city: its own Strength, +SIEGE_SUPPORT for every other
+# army of its faction next to that city (the usual 4X flanking bonus), so
+# taking a city takes several units.
+func siege_strength(u: Unit, f: Faction) -> int:
+	var attack := u.strength
+	for other in u.faction.units:
+		if other != u and not other.is_scout() and HexMap.is_neighbour(other.pos, f.city_pos):
+			attack += SIEGE_SUPPORT
+	return attack
+
+func overlord_of(f: Faction) -> Faction:
+	var o := faction_named(f.overlord) if f.overlord != "" else null
+	return o if o != null and o.is_alive() else null
+
+# Overlord and tributary: no war between them except an uprising.
+func tribute_bound(a: Faction, b: Faction) -> bool:
+	return a.overlord == b.name or b.overlord == a.name
+
+# Half its Industry income goes to its overlord (after the turn's income).
+func pay_tribute(f: Faction) -> void:
+	var lord := overlord_of(f)
+	if lord == null:
+		f.overlord = "" # the overlord's city is gone: free
+		return
+	var pay := tribute_amount(f)
+	f.industry -= pay
+	lord.industry += pay
+
+func tribute_amount(f: Faction) -> int:
+	return int(maxi(0, industry_change(f)) * TRIBUTE_SHARE) if overlord_of(f) != null else 0
+
+# A tributary AI stronger than its overlord may rise up: it is free and at war.
+func ai_rebellions() -> void:
+	for f in ais:
+		var lord := overlord_of(f)
+		if lord == null or army_power(f) <= army_power(lord) or randf() >= REBEL_CHANCE:
+			continue
+		f.overlord = ""
+		if lord == player:
+			relation(f).rival_declare_war("they rose up against your rule")
+		else:
+			ai_war_since[pair_key(f, lord)] = turn
+			add_message("The %s rose up against the %s." % [f.name, lord.name])
+
+# The nearest enemy city (at war) for this AI's spare armies to march on, or
+# null if it isn't at war or has too few armies to spare.
+func ai_siege_target(f: Faction) -> Faction:
+	var armies := f.units.filter(func(x): return not x.is_scout()).size()
+	if armies < AI_MARCH_ARMIES:
+		return null
+	var best: Faction = null
+	var best_d := 999
+	for g in factions:
+		if g.is_alive() and at_war(f, g):
+			var d := HexMap.hex_distance(f.city_pos, g.city_pos)
+			if d < best_d:
+				best_d = d
+				best = g
+	return best
+
+func city_owner(cell: Vector2i) -> Faction:
+	for f in factions:
+		if f.is_alive() and f.city_pos == cell:
+			return f
+	return null
 
 func faction_named(n: String) -> Faction:
 	for f in factions:

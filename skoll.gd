@@ -108,6 +108,10 @@ func attack_city(f: Faction) -> void:
 		f.city_pos = HexMap.NO_CELL
 		f.units.clear() # with its city gone, the faction's army scatters
 		f.outposts.clear() # and its outposts are abandoned
+		f.overlord = ""
+		for g in game.factions:
+			if g.overlord == f.name:
+				g.overlord = "" # its tributaries are free
 		if she_is_here:
 			swallow_daughter()
 		if f == game.player:

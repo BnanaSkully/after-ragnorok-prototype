@@ -587,7 +587,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				# first click only warns; a second click on the same hex declares war
 				break_warning_cell = cell
 				var d: Diplomacy = state.relation(them)
-				if d.pact_active():
+				if state.player.overlord == them.name:
+					state.messages = ["The %s are your overlords. Attacking RISES UP against them:" % them.name, "no more tribute, but you are at war with them (Trust %+d). Click again to go ahead." % Diplomacy.TRUST_DECLARED_WAR]
+				elif d.pact_active():
 					var word: String = them.pact_word
 					state.messages = ["The %s are your ALLIES. This breaks your %s and declares war:" % [them.name, word], "Trust %+d, %sbreaker for %d turns, and she will see. Click again to go ahead." % [Diplomacy.TRUST_BROKEN, word, Diplomacy.OATHBREAKER_TURNS]]
 				else:
@@ -654,6 +656,8 @@ func _draw() -> void:
 					fill = Color(1.0, 0.95, 0.55) # persuade her
 				elif (skoll.is_at(c) or (other and other.faction != player)) and s.player_can_see(c):
 					fill = Color(0.95, 0.45, 0.2) # something to attack
+				elif s.is_city(c) and c != player.city_pos:
+					fill = Color(0.95, 0.45, 0.2) # a city you could attack (it would become your tributary)
 				elif not other and not (s.is_city(c) and c != player.city_pos) and s.passable(c) and s.can_afford_move(selected, c):
 					fill = Color(0.9, 0.75, 0.3) # free to move
 			draw_colored_polygon(pts, fill)
@@ -742,12 +746,15 @@ func _draw() -> void:
 			draw_circle(sc, r * 0.28, Color(1.0, 0.9, 0.3))
 
 	var font := ThemeDB.fallback_font
-	var info := "Turn %d   City %d   Food %d/%d (%+d)   Industry %d (%+d)   Units %d   Outposts %d   Army %d   Doom in %d" % [s.turn, player.population, player.food, s.growth_cost(player), s.food_change(player), player.industry, s.industry_change(player), player.units.size(), player.outposts.size(), s.army_power(player), GameState.DOOM_TURN - s.turn]
+	var info := "Turn %d   City %d   Food %d/%d (%+d)   Industry %d (%+d)   Units %d   Outposts %d   Army %d   Doom in %d" % [s.turn, player.population, player.food, s.growth_cost(player), s.food_change(player), player.industry, s.industry_change(player) - s.tribute_amount(player), player.units.size(), player.outposts.size(), s.army_power(player), GameState.DOOM_TURN - s.turn]
 	draw_string(font, Vector2(20, 35), info, HORIZONTAL_ALIGNMENT_LEFT, -1, 18)
+	var line2: Array[String] = [] # second line: tribute you pay, and where Sköll is
+	if player.overlord != "":
+		line2.append("TRIBUTARY of the %s: %d Industry a turn to them (attack them to rise up)" % [player.overlord, s.tribute_amount(player)])
 	if skoll.active and player.city_pos != NO_CELL:
 		var where := "%d hexes from yours" % HexMap.hex_distance(skoll.pos, player.city_pos) if s.player_can_see(skoll.pos) else "out of sight"
-		var skoll_info := "Sköll hunts %s (%s)   Your defence: %d" % [skoll.target_text(), where, s.city_defence(player)]
-		draw_string(font, Vector2(20, 60), skoll_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.6, 0.2))
+		line2.append("Sköll hunts %s (%s)   Your defence: %d" % [skoll.target_text(), where, s.city_defence(player)])
+	draw_string(font, Vector2(20, 60), "   ".join(line2), HORIZONTAL_ALIGNMENT_LEFT, 780, 16, Color(1.0, 0.6, 0.2))
 	var daughter_info := ""
 	if daughter.is_swallowed():
 		daughter_info = "Sköll swallowed %s. He is the sun now (Strength %d)." % [SunDaughter.NAME, skoll.strength]
@@ -781,6 +788,11 @@ func _draw() -> void:
 				stance = "truce to turn %d" % d.truce_until
 			else:
 				stance = "at peace"
+		if f.overlord == player.name:
+			stance = "your TRIBUTARY"
+		elif player.overlord == f.name:
+			stance = "your OVERLORD"
+			stance_col = Color(1.0, 0.6, 0.3)
 		if not f.is_alive():
 			stance = ""
 		draw_string(font, Vector2(PANEL_X, y + 32), stance, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, stance_col)
@@ -795,6 +807,8 @@ func _draw() -> void:
 				foes.append(g.name)
 		if not foes.is_empty():
 			line += "  war: " + ", ".join(foes)
+		if f.overlord != "" and f.overlord != player.name:
+			line += "  pays " + f.overlord
 		var stance_w := font.get_string_size(stance + "  ", HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x if stance != "" else 0.0
 		draw_string(font, Vector2(PANEL_X + stance_w, y + 32), line, HORIZONTAL_ALIGNMENT_LEFT, 330 - stance_w, 13, Color(0.85, 0.85, 0.85))
 	var hy := BLOCK_Y + s.ais.size() * BLOCK_H + 8
