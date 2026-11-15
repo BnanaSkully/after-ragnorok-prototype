@@ -216,7 +216,7 @@ func end_turn() -> void:
 			if verdict != "":
 				add_message(verdict)
 		for u in f.units:
-			u.moves = u.max_moves()
+			u.moves = 0 if turn < u.busy_until else u.max_moves() # (standing watch: can't move)
 	judge_readiness()
 	check_daughter_leaving()
 	for f in ais:
@@ -1028,7 +1028,19 @@ func option_problem(effects: Dictionary) -> String:
 		return "you can't afford it"
 	if effects.get("favour", 0) > 0 and player.favour >= SunDaughter.MAX_FAVOUR:
 		return "her Favour is already at its highest"
+	if effects.has("guard_turns") and guard_unit() == null:
+		return "you have no army unit"
 	return ""
+
+# The army unit that stands watch for an event: the one in the city, or the nearest to it.
+func guard_unit() -> Unit:
+	var best: Unit = null
+	for u in player.units:
+		if u.is_scout():
+			continue
+		if best == null or HexMap.hex_distance(u.pos, player.city_pos) < HexMap.hex_distance(best.pos, player.city_pos):
+			best = u
+	return best
 
 # The player picks option i of the first waiting choice.
 func answer_choice(i: int) -> void:
@@ -1072,6 +1084,16 @@ func apply_effects(effects: Dictionary) -> void:
 		var r_ally := relation(faction_named(effects["abandon_ally"]))
 		if r_ally.pact_active():
 			r_ally.break_pact()
+	if effects.has("guard_turns"):
+		var g := guard_unit()
+		if g != null:
+			g.busy_until = turn + effects["guard_turns"]
+			g.moves = 0
+	if effects.has("spoil"):
+		player.food = maxi(0, player.food - effects["spoil"])
+	if effects.has("trust_all"):
+		for r in relations:
+			r.change_trust(effects["trust_all"])
 	if effects.get("reveal", false):
 		var hidden := ais.filter(func(f): return f.is_alive() and not player.explored.has(f.city_pos))
 		if hidden.is_empty():

@@ -26,6 +26,7 @@ var kind := Kind.ARMY
 var pos: Vector2i # which hex it stands on
 var moves := 1 # moves left this turn
 var strength: int # an army copies its faction's Strength when built
+var busy_until := 0 # standing watch (an event): it can't move before this turn
 
 func _init(p_faction: Faction, p_pos: Vector2i, p_kind := Kind.ARMY) -> void:
 	_faction = weakref(p_faction)

@@ -20,6 +20,8 @@ func costs_of(effects: Dictionary) -> Array:
 		if effects.get(k, 0) < 0: c.append(k)
 	if effects.has("gamble"): c.append("risk")
 	if effects.has("guard_turns"): c.append("a unit's turns")
+	if effects.get("trust_all", 0) < 0: c.append("trust")
+	if effects.has("spoil"): c.append("food lost")
 	return c
 
 func _initialize() -> void:
@@ -46,5 +48,16 @@ func _initialize() -> void:
 			if not e["options"].any(func(o): return s.can_afford(o["effects"])): stuck.append("%s (favour %d, nothing in store, no units)" % [e["title"], fav])
 	print("3. options that cost nothing: %s" % [free if free.size() > 0 else "none"])
 	print("   events with no possible answer when you have nothing: %s" % [stuck if stuck.size() > 0 else "none"])
+	m.queue_free()
+	# 4. posting guards ties up an army unit for 2 turns
+	m = new_game(); s = m.state
+	var guard = s.guard_unit()
+	s.apply_effects({"guard_turns": 2})
+	var moves := [guard.moves]
+	for t in 3:
+		H.answer_choices(s); s.end_turn()
+		if s.has_pending_offer(): s.pending_relation().answer(false)
+		moves.append(guard.moves)
+	print("4. guard posted on turn 1: its moves on turns 1-4 %s (expect [0, 0, 1, 1])" % [moves])
 	m.queue_free()
 	quit()
