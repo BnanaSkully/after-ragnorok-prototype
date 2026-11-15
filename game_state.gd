@@ -767,7 +767,7 @@ func enter_hex(u: Unit, cell: Vector2i) -> void:
 		if r["cell"] == cell and not r["taken"]:
 			r["taken"] = true
 			if f == player:
-				pending_choices.append(Discoveries.ruin_choice())
+				pending_choices.append(Discoveries.ruin_choice(self))
 			else:
 				Discoveries.ai_take_ruin(self, f)
 				if player_can_see(cell):
@@ -1017,9 +1017,18 @@ func is_waiting() -> bool:
 func can_act() -> bool:
 	return can_play() and not is_waiting()
 
-# Can the player pay for these effects? (Only costs count: negative Food or Industry.)
+# Can the player pick an option with these effects? (See option_problem.)
 func can_afford(effects: Dictionary) -> bool:
-	return player.food + effects.get("food", 0) >= 0 and player.industry + effects.get("industry", 0) >= 0
+	return option_problem(effects) == ""
+
+# Why the player can't pick an option with these effects ("" = they can): a
+# cost they can't pay, or Favour they can't gain (already at the top).
+func option_problem(effects: Dictionary) -> String:
+	if player.food + effects.get("food", 0) < 0 or player.industry + effects.get("industry", 0) < 0:
+		return "you can't afford it"
+	if effects.get("favour", 0) > 0 and player.favour >= SunDaughter.MAX_FAVOUR:
+		return "her Favour is already at its highest"
+	return ""
 
 # The player picks option i of the first waiting choice.
 func answer_choice(i: int) -> void:

@@ -470,8 +470,9 @@ func show_choice() -> void:
 		b.text = options[i]["label"]
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		b.add_theme_font_size_override("font_size", 16)
-		if not state.can_afford(options[i]["effects"]):
-			b.text += "  (you can't afford it)"
+		var problem: String = state.option_problem(options[i]["effects"])
+		if problem != "":
+			b.text += "  (%s)" % problem
 			b.disabled = true
 		b.pressed.connect(on_choice.bind(i))
 		choice_buttons.add_child(b)
