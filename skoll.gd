@@ -3,7 +3,7 @@ extends RefCounted
 
 # Sköll, the wolf who swallowed the sun at Ragnarök. He followed the survivors
 # through the void. He warns from WARNING_TURN, arrives at the map edge on
-# ARRIVAL_TURN through one of the RIFTS (chosen at random), hunts the city
+# ARRIVAL_TURN through one of the rifts (chosen at random), hunts the city
 # nearest that rift, walks one hex a turn toward it and attacks it.
 # He can't be killed, only driven back to the edge of the map.
 #
@@ -15,19 +15,21 @@ const ARRIVAL_TURN := 14 # he arrives on this turn
 const STRENGTH := 12 # his starting Strength
 const SWALLOWED_STRENGTH := 20 # his Strength after swallowing the Sun's Daughter
 
-# Rifts in the void: the hexes Sköll can come through. Each time he arrives or
-# is driven back he comes through one at random. They're shown on the map from
-# the Landing on, so where you found your city matters. Add, move or remove freely.
-const RIFTS: Array[Vector2i] = [
-	Vector2i(0, 0), Vector2i(6, 0), Vector2i(0, 9),
-	Vector2i(11, 4), Vector2i(5, 9), Vector2i(11, 9),
-]
+# Rifts in the void: the hexes Sköll can come through. The map is split into
+# RIFT_SECTIONS_X x RIFT_SECTIONS_Y sections (3 x 2 = 6), and each new game puts
+# one rift on a random hex in every section, so they're always spread out but
+# never in the same places twice. Each time he arrives or is driven back he
+# comes through one at random. They're shown from the Landing on.
+const RIFT_SECTIONS_X := 3
+const RIFT_SECTIONS_Y := 2
+const RIFT_MIN_CITY_DISTANCE := 3 # rifts stay at least this far from the rival's city
 
 var game # main.gd
 var active := false # false until he arrives
 var pos := HexMap.NO_CELL
 var strength := STRENGTH
 var target: Faction = null # the city he is hunting right now
+var rifts: Array[Vector2i] = [] # this game's rifts (see place_rifts)
 
 func _init(p_game) -> void:
 	game = p_game
@@ -132,10 +134,27 @@ func drive_back() -> void:
 	if target:
 		game.add_message("Sköll slinks back into the void... and bursts out of another rift, hunting %s." % target_text())
 
+# One rift on a random hex in each section of the map, away from the given city.
+func place_rifts(avoid: Vector2i) -> void:
+	rifts.clear()
+	for sy in RIFT_SECTIONS_Y:
+		for sx in RIFT_SECTIONS_X:
+			var options: Array[Vector2i] = []
+			for row in range(sy * HexMap.ROWS / RIFT_SECTIONS_Y, (sy + 1) * HexMap.ROWS / RIFT_SECTIONS_Y):
+				for col in range(sx * HexMap.COLS / RIFT_SECTIONS_X, (sx + 1) * HexMap.COLS / RIFT_SECTIONS_X):
+					var c := Vector2i(col, row)
+					if avoid == HexMap.NO_CELL or HexMap.hex_distance(c, avoid) >= RIFT_MIN_CITY_DISTANCE:
+						options.append(c)
+			if not options.is_empty():
+				rifts.append(options.pick_random())
+
+func is_rift(cell: Vector2i) -> bool:
+	return cell in rifts
+
 # Come out of a random free rift and hunt the city nearest to it.
 func come_through_rift() -> void:
 	var free: Array[Vector2i] = []
-	for r in RIFTS:
+	for r in rifts:
 		if not game.is_blocked(r) and not game.is_city(r):
 			free.append(r)
 	pos = free.pick_random() if not free.is_empty() else random_edge_cell()

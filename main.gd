@@ -128,6 +128,7 @@ func start_crossing() -> void:
 	player.food = Crossing.START_FOOD
 	player.industry = Crossing.START_INDUSTRY
 	daughter.reset(player, rival)
+	skoll.place_rifts(rival.city_pos) # a new rift layout every game
 	end_turn_button.visible = false
 	build_button.visible = false
 	walls_button.visible = false
@@ -199,7 +200,7 @@ func start_landing() -> void:
 	queue_redraw()
 
 func can_land_at(cell: Vector2i) -> bool:
-	return HexMap.in_bounds(cell) and HexMap.hex_distance(cell, rival.city_pos) >= MIN_LANDING_DISTANCE
+	return HexMap.in_bounds(cell) and HexMap.hex_distance(cell, rival.city_pos) >= MIN_LANDING_DISTANCE and not skoll.is_rift(cell)
 
 func try_land(cell: Vector2i) -> void:
 	if phase != Phase.LANDING or not can_land_at(cell):
@@ -633,7 +634,7 @@ func _draw() -> void:
 			draw_polyline(pts, Color(0.1, 0.1, 0.1), 2.0)
 
 	# Rifts in the void: where Sköll can come through (a dark swirl).
-	for r in Skoll.RIFTS:
+	for r in skoll.rifts:
 		var rc := HexMap.hex_center(r)
 		draw_circle(rc, HexMap.HEX_SIZE * 0.5, Color(0.12, 0.05, 0.18))
 		draw_arc(rc, HexMap.HEX_SIZE * 0.5, 0, TAU, 24, Color(0.6, 0.3, 0.8), 2.0)
