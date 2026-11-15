@@ -30,4 +30,13 @@ const EVENTS := [
 			{"label": "Drop the heavy gear and run", "effects": {"industry": -2}},
 		],
 	},
+	# The Sun's Daughter. "daughter": 1 means she joins the player; if the player
+	# lets her pass, the rival's people take her in instead.
+	{
+		"text": "A girl made of light stumbles through the branches: the Sun's Daughter, born just before the wolf swallowed her mother. She begs to come with you. Whatever hunts her will hunt whoever shelters her.",
+		"choices": [
+			{"label": "Take her in", "effects": {"daughter": 1, "food": -2}},
+			{"label": "Let her pass (the other survivors will take her in)", "effects": {}},
+		],
+	},
 ]
