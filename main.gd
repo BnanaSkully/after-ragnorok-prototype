@@ -14,6 +14,9 @@ const DOOM_TURN := 20 # survive until this turn and Phase 3 (chaos) begins
 const INDUSTRY_PER_DEFENCE := 5 # every 5 stored Industry adds 1 to a city's defence
 const MIN_LANDING_DISTANCE := 4 # how many hexes away from the rival's city you must land
 const UNIT_COST := 5 # Industry to build a new unit
+const CITY_FOOD := 2 # Food a city produces each turn
+const CITY_INDUSTRY := 1 # Industry a city produces each turn
+const UNIT_FOOD_UPKEEP := 1 # Food each unit eats each turn
 const NO_CELL := HexMap.NO_CELL
 const Crossing := preload("res://crossing_events.gd")
 
@@ -50,12 +53,12 @@ func _init() -> void:
 func _ready() -> void:
 	end_turn_button = Button.new()
 	end_turn_button.text = "End Turn"
-	end_turn_button.position = Vector2(700, 20)
+	end_turn_button.position = Vector2(820, 20)
 	end_turn_button.pressed.connect(end_turn)
 	add_child(end_turn_button)
 	build_button = Button.new()
 	build_button.text = "Build Unit (%d Industry)" % UNIT_COST
-	build_button.position = Vector2(800, 20)
+	build_button.position = Vector2(920, 20)
 	build_button.pressed.connect(player_build_unit)
 	add_child(build_button)
 	build_crossing_ui()
@@ -181,11 +184,12 @@ func end_turn() -> void:
 	for f in factions:
 		if f.city_pos == NO_CELL:
 			continue # this faction's city has fallen; it's out of the game
-		f.food += 2
-		f.industry += 1
+		f.food += food_change(f)
+		f.industry += CITY_INDUSTRY
 		if daughter.shelters_with(f):
-			f.food += SunDaughter.FOOD
 			f.industry += SunDaughter.INDUSTRY
+		if f.food < 0:
+			starve(f)
 		for u in f.units:
 			u.moves = 1
 	rival_build()
@@ -195,6 +199,30 @@ func end_turn() -> void:
 		end_game("You survived until the Doom",
 			"Sköll howls, and chaos pours out of the void.\nPHASE 3 BEGINS: chaos factions rise and rogues join Sköll.\n(Phase 3 is not built yet.)")
 	queue_redraw()
+
+# --- Food -------------------------------------------------------------------
+# Food made by the city (and the Daughter's bonus) minus what the army eats.
+func food_change(f: Faction) -> int:
+	var made := CITY_FOOD
+	if daughter.shelters_with(f):
+		made += SunDaughter.FOOD
+	return made - f.units.size() * UNIT_FOOD_UPKEEP
+
+# Not enough Food: stores stay at 0 and one unit deserts (the one farthest
+# from the city, so the garrison stays).
+func starve(f: Faction) -> void:
+	f.food = 0
+	if f.units.is_empty():
+		return
+	var farthest: Unit = f.units[0]
+	for u in f.units:
+		if HexMap.hex_distance(u.pos, f.city_pos) > HexMap.hex_distance(farthest.pos, f.city_pos):
+			farthest = u
+	f.remove_unit(farthest)
+	if f == player:
+		add_message("Your people are starving: a unit deserted. (Each unit eats %d Food a turn.)" % UNIT_FOOD_UPKEEP)
+	else:
+		add_message("%s is starving: one of its units deserted." % f.name)
 
 func end_game(title: String, detail: String) -> void:
 	game_over = true
@@ -234,8 +262,9 @@ func rival_take_turn() -> void:
 			u.pos = options.pick_random()
 
 # The rival builds a new unit whenever it can afford one.
+# Only if it can still feed its army afterwards.
 func rival_build() -> void:
-	if rival.is_alive() and rival.industry >= UNIT_COST:
+	if rival.is_alive() and rival.industry >= UNIT_COST and food_change(rival) - UNIT_FOOD_UPKEEP >= 0:
 		build_unit(rival)
 
 # --- Building units -----------------------------------------------------------
@@ -263,6 +292,8 @@ func player_build_unit() -> void:
 		return
 	if build_unit(player):
 		messages = ["You built a new unit (%d Industry). It can move next turn." % UNIT_COST]
+		if food_change(player) < 0:
+			add_message("Warning: your army now eats more Food than you make (%+d a turn). If your stores run out, a unit will desert." % food_change(player))
 		player.units[-1].moves = 0 # a freshly built unit waits a turn, as is usual
 	else:
 		messages = ["Can't build: you need %d Industry and a free hex at your city." % UNIT_COST]
@@ -393,7 +424,7 @@ func _draw() -> void:
 			draw_circle(sc, r * 0.28, Color(1.0, 0.9, 0.3))
 
 	var font := ThemeDB.fallback_font
-	var info := "Turn %d    Food %d    Industry %d    Units %d    Strength %d    Doom in %d" % [turn, player.food, player.industry, player.units.size(), player.strength, DOOM_TURN - turn]
+	var info := "Turn %d    Food %d (%+d/turn)    Industry %d    Units %d    Strength %d    Doom in %d" % [turn, player.food, food_change(player), player.industry, player.units.size(), player.strength, DOOM_TURN - turn]
 	draw_string(font, Vector2(20, 35), info, HORIZONTAL_ALIGNMENT_LEFT, -1, 20)
 	var rival_info := "Rival:  Food %d    Industry %d    Units %d" % [rival.food, rival.industry, rival.units.size()]
 	if rival.city_pos == NO_CELL:

@@ -23,7 +23,7 @@ Built so far: she chooses her protector at the Landing by Favour. Planned, in th
 
 ### Step A: economy with costs (standard 4X), in this order
 1. DONE: several units per faction, built with Industry from the city (one unit per hex, destroyed units are gone, no free respawn; the rival builds too)
-2. Food upkeep: every unit eats Food each turn; starving loses a unit
+2. DONE: food upkeep: a city makes 2 Food a turn (+2 with the Daughter), every unit eats 1. Running out keeps Food at 0 and the unit farthest from the city deserts. The rival only builds units it can feed. Numbers are constants at the top of main.gd (CITY_FOOD, UNIT_FOOD_UPKEEP, UNIT_COST)
 3. Walls: spend Industry on permanent city defence
 
 ## Current scope: prototype only
