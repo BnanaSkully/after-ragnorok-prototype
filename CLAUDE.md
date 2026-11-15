@@ -88,3 +88,9 @@ Keep game rules separate from drawing. The game state and rules (map data, terra
 - Give the Sun's Daughter a real name
 - Sköll's and the Daughter's numbers need tuning once played (in simulated games: building walls ~66% reach turn 20, building nothing ~54%)
 - Mini-games: rare, high-stakes moments tied to politics only (e.g. a bluffing exchange during negotiation, a short tactical choice when Sköll hits a city). Never routine or repeatable. Main fix for dead turns is that every turn asks the player a real decision.
+- Rifts, full version: openings into the roots of Yggdrasil, which tore through the new world when the ark landed.
+  - Players discover rifts by exploring; once found they stay visible.
+  - During a recurring dangerous season, Doom-creatures emerge from rifts and roam nearby (non-hostile unless provoked, but they settle in territory and drain it, like a corruption that removes colour and output).
+  - Armies can travel underground between discovered rifts, but only during the dangerous season, so using the shortcut means braving the creatures.
+  - Sköll keeps using rifts as his way in.
+  - Build only after the current prototype has been played end to end.
