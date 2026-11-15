@@ -25,7 +25,7 @@ const RIFT_SECTIONS_X := 3
 const RIFT_SECTIONS_Y := 2
 const RIFT_TURN := 2 # the turn the rifts are first rolled
 const RIFT_MIN_CITY_DISTANCE := 3 # rifts stay at least this far from every city
-const SMELL_RANGE := 4 # if the Daughter is rogue this close, he hunts her instead
+const SIGHT_RANGE := 2 # fog of war: he only sees this far; a rogue Daughter further away is hidden from him
 const SPRINT := 2 # hexes a turn he runs when hunting her in the open (she runs 1)
 
 # The GameState (game_state.gd). A "weak" link: the game keeps this object alive,
@@ -44,6 +44,10 @@ var revealed_rift := HexMap.NO_CELL # the rift he last came through (the only on
 func _init(p_game: GameState) -> void:
 	_game = weakref(p_game)
 
+# Fog of war: what Sköll can see from where he stands.
+func can_see(cell: Vector2i) -> bool:
+	return active and HexMap.hex_distance(pos, cell) <= SIGHT_RANGE
+
 func is_at(cell: Vector2i) -> bool:
 	return active and cell == pos
 
@@ -61,7 +65,7 @@ func take_turn() -> void:
 		return
 	# The Daughter out in the open: if he can smell her, he goes for her.
 	var daughter: SunDaughter = game.daughter
-	if daughter.is_rogue() and HexMap.hex_distance(pos, daughter.pos) <= SMELL_RANGE:
+	if daughter.is_rogue() and can_see(daughter.pos):
 		hunt_daughter(daughter)
 		return
 	if target == null or not target.is_alive():
@@ -137,7 +141,7 @@ func hunt_daughter(d: SunDaughter) -> void:
 		if best == HexMap.NO_CELL:
 			break
 		pos = best
-	game.add_message("Sköll smells %s in the open and sprints after her!" % SunDaughter.NAME)
+	game.add_message("Sköll has spotted %s in the open and sprints after her!" % SunDaughter.NAME)
 
 # Sköll becomes the sun: much stronger, and the whole map goes dark.
 func swallow_daughter() -> void:
