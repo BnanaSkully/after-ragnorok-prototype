@@ -76,7 +76,7 @@ func _initialize() -> void:
 							if s.unit_at(o) == null: goal = o; break
 					if goal == HexMap.NO_CELL or goal == u.pos: break
 					var step: Vector2i = s.step_toward(u.pos, goal)
-					if step == HexMap.NO_CELL or s.would_break_pact(step): break
+					if step == HexMap.NO_CELL or s.war_target(step) != null: break
 					if not s.player_unit_act(u, step): break
 					for msg in s.messages:
 						if msg.begins_with("You took the"): stats["you took one"] += 1
