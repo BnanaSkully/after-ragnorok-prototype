@@ -227,10 +227,16 @@ func end_turn() -> void:
 		f.industry += CITY_INDUSTRY
 		if daughter.shelters_with(f):
 			f.industry += SunDaughter.INDUSTRY
-		if f.food < 0:
+		var starved := f.food < 0
+		if starved:
 			starve(f)
+		if daughter.shelters_with(f):
+			var verdict := daughter.judge_feeding(starved)
+			if verdict != "":
+				add_message(verdict)
 		for u in f.units:
 			u.moves = 1
+	judge_readiness()
 	rival_build()
 	diplomacy.new_turn()
 	selected = null
@@ -244,6 +250,16 @@ func end_turn() -> void:
 		end_game("You survived until the Doom",
 			"Sköll howls, and chaos pours out of the void.\nPHASE 3 BEGINS: chaos factions rise and rogues join Sköll.\n(Phase 3 is not built yet.)")
 	queue_redraw()
+
+# The Sun's Daughter warns at the howling and judges her protector when Sköll arrives.
+func judge_readiness() -> void:
+	var holder := daughter.holder
+	if holder == null or not holder.is_alive():
+		return
+	if turn == Skoll.WARNING_TURN and holder == player:
+		add_message("%s is afraid. When Sköll comes (turn %d) she wants city defence %d+ and army Strength %d+." % [SunDaughter.NAME.capitalize(), Skoll.ARRIVAL_TURN, SunDaughter.READY_DEFENCE, SunDaughter.READY_ARMY])
+	if turn == Skoll.ARRIVAL_TURN:
+		add_message(daughter.judge_readiness(city_defence(holder), diplomacy.army_power(holder)))
 
 # --- Food -------------------------------------------------------------------
 # Food made by the city (and the Daughter's bonus) minus what the army eats.
@@ -609,7 +625,10 @@ func _draw() -> void:
 	if daughter.is_swallowed():
 		daughter_info = "Sköll swallowed %s. He is the sun now (Strength %d)." % [SunDaughter.NAME, skoll.strength]
 	elif daughter.holder != null:
-		daughter_info = "%s %s (Sköll doesn't know which city)    Her Favour: you %d, %s %d" % ["You shelter" if daughter.holder == player else daughter.holder.name + " shelters", SunDaughter.NAME, player.favour, rival.name, rival.favour]
+		var note := "(Sköll doesn't know which city)"
+		if daughter.holder == player and turn < Skoll.ARRIVAL_TURN:
+			note = "(for turn %d: defence %d/%d, army %d/%d)" % [Skoll.ARRIVAL_TURN, city_defence(player), SunDaughter.READY_DEFENCE, diplomacy.army_power(player), SunDaughter.READY_ARMY]
+		daughter_info = "%s %s %s    Her Favour: you %d, %s %d" % ["You shelter" if daughter.holder == player else daughter.holder.name + " shelters", SunDaughter.NAME, note, player.favour, rival.name, rival.favour]
 	draw_string(font, Vector2(20, 82), daughter_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.9, 0.5))
 
 	# Diplomacy panel (right side): trust, the oath, and the memory of promises.
