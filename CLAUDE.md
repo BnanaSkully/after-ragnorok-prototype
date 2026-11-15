@@ -33,6 +33,7 @@ Built so far: she chooses her protector at the Landing by Favour, and she judges
 - Do not add factions, pantheons, rogue factions or lore unless asked
 - Goal: a playable loop of Crossing, Landing, turns, cities, auto-resolve and the Doom
 - Basic diplomacy with the rival: pacts, demands, and a memory of whether promises were kept. This is the core hook and should be built before more combat or Sköll features.
+- Planned step: support 3+ factions on the map, before Phase 3 and before trading the Daughter (both need it). Each extra faction needs its own AI, Trust and oaths with every other faction, more map space and room on screen. Several factions also spread out Sköll's targeting and make the Daughter a less decisive prize. Until then the prototype stays at two factions
 
 ## Diplomacy: agreed design
 
