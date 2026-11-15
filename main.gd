@@ -3,7 +3,8 @@ extends Node2D
 # The game's main script: runs the flow of a game (Crossing -> Landing -> turns),
 # the rival, combat, drawing and mouse clicks.
 # Other pieces live in their own files:
-#   faction.gd          one side's city, unit and resources
+#   faction.gd          one side's city, units and resources
+#   unit.gd             one army unit on the map
 #   hex_map.gd          hex maths (positions, distances, neighbours)
 #   skoll.gd            Sköll, the wolf boss
 #   sun_daughter.gd     the Sun's Daughter
@@ -12,6 +13,7 @@ extends Node2D
 const DOOM_TURN := 20 # survive until this turn and Phase 3 (chaos) begins
 const INDUSTRY_PER_DEFENCE := 5 # every 5 stored Industry adds 1 to a city's defence
 const MIN_LANDING_DISTANCE := 4 # how many hexes away from the rival's city you must land
+const UNIT_COST := 5 # Industry to build a new unit
 const NO_CELL := HexMap.NO_CELL
 const Crossing := preload("res://crossing_events.gd")
 
@@ -19,9 +21,9 @@ const Crossing := preload("res://crossing_events.gd")
 # CROSSING = journey events, LANDING = choosing where to found your city, PLAYING = the turns.
 enum Phase { CROSSING, LANDING, PLAYING }
 
-# The player has no city or unit until they land (see try_land below).
-var player := Faction.new("Player", Color(0.3, 0.4, 0.6), Color(0.2, 0.4, 0.9), NO_CELL, NO_CELL)
-var rival := Faction.new("Rival", Color(0.6, 0.3, 0.3), Color(0.85, 0.2, 0.2), Vector2i(9, 7), Vector2i(8, 6))
+# The player has no city or units until they land (see try_land below).
+var player := Faction.new("Player", Color(0.3, 0.4, 0.6), Color(0.2, 0.4, 0.9), NO_CELL)
+var rival := Faction.new("Rival", Color(0.6, 0.3, 0.3), Color(0.85, 0.2, 0.2), Vector2i(9, 7))
 var factions: Array[Faction] = [player, rival]
 var daughter := SunDaughter.new()
 var skoll: Skoll
@@ -32,16 +34,18 @@ var crossing_panel: VBoxContainer
 var crossing_label: Label
 var crossing_buttons: VBoxContainer
 var hover_cell := NO_CELL # the hex under the mouse while landing
-var unit_selected := false
+var selected: Unit = null # the player's unit chosen to move (null = none)
 var turn := 1
 var game_over := false
 var end_title := "" # big text on the end screen
 var end_detail := "" # smaller text under it (can have several lines)
 var end_turn_button: Button
+var build_button: Button
 var messages: Array[String] = [] # shown at the bottom of the screen, e.g. combat results
 
 func _init() -> void:
 	skoll = Skoll.new(self)
+	rival.add_unit(Vector2i(8, 6))
 
 func _ready() -> void:
 	end_turn_button = Button.new()
@@ -49,6 +53,11 @@ func _ready() -> void:
 	end_turn_button.position = Vector2(700, 20)
 	end_turn_button.pressed.connect(end_turn)
 	add_child(end_turn_button)
+	build_button = Button.new()
+	build_button.text = "Build Unit (%d Industry)" % UNIT_COST
+	build_button.position = Vector2(800, 20)
+	build_button.pressed.connect(player_build_unit)
+	add_child(build_button)
 	build_crossing_ui()
 	start_crossing()
 
@@ -73,12 +82,12 @@ func start_crossing() -> void:
 	phase = Phase.CROSSING
 	crossing_step = 0
 	player.city_pos = NO_CELL
-	player.unit_pos = NO_CELL
-	player.unit_alive = false
+	player.units.clear()
 	player.food = Crossing.START_FOOD
 	player.industry = Crossing.START_INDUSTRY
 	daughter.reset(player, rival)
 	end_turn_button.visible = false
+	build_button.visible = false
 	crossing_panel.visible = true
 	messages.clear()
 	show_crossing_step()
@@ -131,10 +140,11 @@ func start_landing() -> void:
 	daughter.choose_protector(player, rival)
 	crossing_panel.visible = false
 	end_turn_button.visible = true
+	build_button.visible = true
 	player.city_pos = NO_CELL
-	player.unit_pos = NO_CELL
-	player.unit_alive = false
+	player.units.clear()
 	end_turn_button.disabled = true
+	build_button.disabled = true
 	messages = ["Choose where to land: click a hex to found your city."]
 	queue_redraw()
 
@@ -145,12 +155,12 @@ func try_land(cell: Vector2i) -> void:
 	if phase != Phase.LANDING or not can_land_at(cell):
 		return
 	player.city_pos = cell
-	player.unit_pos = cell # the unit starts standing on the new city
-	player.unit_alive = true
+	player.add_unit(cell) # your first unit starts standing on the new city
 	phase = Phase.PLAYING
 	hover_cell = NO_CELL
 	end_turn_button.disabled = false
-	messages = ["Your people have landed. Click your unit to move it."]
+	update_build_button()
+	messages = ["Your people have landed. Click a unit to move it, or build more."]
 	var scores := "(her Favour: you %d, %s %d)" % [player.favour, rival.name, rival.favour]
 	if daughter.holder == player:
 		add_message("%s chose you %s: +%d Food, +%d Industry a turn, +%d city defence." % [SunDaughter.NAME.capitalize(), scores, SunDaughter.FOOD, SunDaughter.INDUSTRY, SunDaughter.DEFENCE])
@@ -176,12 +186,11 @@ func end_turn() -> void:
 		if daughter.shelters_with(f):
 			f.food += SunDaughter.FOOD
 			f.industry += SunDaughter.INDUSTRY
-		f.unit_moves = 1
-		# A destroyed unit returns at its city, as long as the city hex is free.
-		if not f.unit_alive and not is_blocked(f.city_pos):
-			f.unit_alive = true
-			f.unit_pos = f.city_pos
-	unit_selected = false
+		for u in f.units:
+			u.moves = 1
+	rival_build()
+	selected = null
+	update_build_button()
 	if turn >= DOOM_TURN:
 		end_game("You survived until the Doom",
 			"Sköll howls, and chaos pours out of the void.\nPHASE 3 BEGINS: chaos factions rise and rogues join Sköll.\n(Phase 3 is not built yet.)")
@@ -190,7 +199,8 @@ func end_turn() -> void:
 func end_game(title: String, detail: String) -> void:
 	game_over = true
 	end_turn_button.disabled = true
-	unit_selected = false
+	build_button.disabled = true
+	selected = null
 	end_title = title
 	end_detail = detail
 	queue_redraw()
@@ -198,20 +208,69 @@ func end_game(title: String, detail: String) -> void:
 func add_message(text: String) -> void:
 	messages.append(text)
 
-# Placeholder rival behaviour: attack the player's unit if it's next door,
-# otherwise step to a random free neighbouring hex.
+# Placeholder rival behaviour, for each of its units: attack a player unit
+# next door; otherwise stay home if it's guarding the city and there are other
+# units; otherwise step to a random free neighbouring hex.
 func rival_take_turn() -> void:
-	if not rival.unit_alive:
+	for u in rival.units.duplicate(): # copy: units can die during the loop
+		if not u in rival.units:
+			continue
+		var target: Unit = null
+		for c in HexMap.neighbours(u.pos):
+			var other := unit_at(c)
+			if other and other.faction == player:
+				target = other
+				break
+		if target:
+			resolve_combat(u, target)
+			continue
+		if u.pos == rival.city_pos and rival.units.size() > 1:
+			continue # this one guards the city
+		var options: Array[Vector2i] = []
+		for c in HexMap.neighbours(u.pos):
+			if not is_blocked(c):
+				options.append(c)
+		if not options.is_empty():
+			u.pos = options.pick_random()
+
+# The rival builds a new unit whenever it can afford one.
+func rival_build() -> void:
+	if rival.is_alive() and rival.industry >= UNIT_COST:
+		build_unit(rival)
+
+# --- Building units -----------------------------------------------------------
+# A new unit appears on the city, or on a free hex next to it if the city is occupied.
+# Returns false if there's no room or not enough Industry.
+func build_unit(f: Faction) -> bool:
+	if not f.is_alive() or f.industry < UNIT_COST:
+		return false
+	var spot := NO_CELL
+	if not is_blocked(f.city_pos):
+		spot = f.city_pos
+	else:
+		for c in HexMap.neighbours(f.city_pos):
+			if not is_blocked(c) and not is_city(c):
+				spot = c
+				break
+	if spot == NO_CELL:
+		return false
+	f.industry -= UNIT_COST
+	f.add_unit(spot)
+	return true
+
+func player_build_unit() -> void:
+	if game_over or phase != Phase.PLAYING:
 		return
-	if player.unit_alive and HexMap.is_neighbour(rival.unit_pos, player.unit_pos):
-		resolve_combat(rival, player)
-		return
-	var options: Array[Vector2i] = []
-	for c in HexMap.neighbours(rival.unit_pos):
-		if not is_blocked(c):
-			options.append(c)
-	if not options.is_empty():
-		rival.unit_pos = options.pick_random()
+	if build_unit(player):
+		messages = ["You built a new unit (%d Industry). It can move next turn." % UNIT_COST]
+		player.units[-1].moves = 0 # a freshly built unit waits a turn, as is usual
+	else:
+		messages = ["Can't build: you need %d Industry and a free hex at your city." % UNIT_COST]
+	update_build_button()
+	queue_redraw()
+
+func update_build_button() -> void:
+	build_button.disabled = game_over or phase != Phase.PLAYING or player.industry < UNIT_COST
 
 # --- Combat -----------------------------------------------------------------
 # Every fight uses the same rule: the attacker wins with chance
@@ -224,37 +283,36 @@ func win_chance(attack: int, defence: int) -> float:
 func odds_text(chance: float) -> String:
 	return "%d%% chance" % roundi(chance * 100)
 
-# Unit against unit. The loser's unit is destroyed; a winning attacker moves into the hex.
-func resolve_combat(attacker: Faction, defender: Faction) -> void:
+# Unit against unit. The loser is destroyed; a winning attacker moves into the hex.
+func resolve_combat(attacker: Unit, defender: Unit) -> void:
 	var chance := win_chance(attacker.strength, defender.strength)
-	var target := defender.unit_pos
 	if randf() < chance:
-		defender.unit_alive = false
-		defender.unit_pos = NO_CELL
-		attacker.unit_pos = target
-		add_message("%s attacked %s and won (%s)." % [attacker.name, defender.name, odds_text(chance)])
+		defender.faction.remove_unit(defender)
+		attacker.pos = defender.pos
+		add_message("%s attacked %s and won (%s)." % [attacker.faction.name, defender.faction.name, odds_text(chance)])
 	else:
-		attacker.unit_alive = false
-		attacker.unit_pos = NO_CELL
-		add_message("%s attacked %s and lost (%s)." % [attacker.name, defender.name, odds_text(chance)])
+		attacker.faction.remove_unit(attacker)
+		add_message("%s attacked %s and lost (%s)." % [attacker.faction.name, defender.faction.name, odds_text(chance)])
 
-# A city's defence: its unit's Strength if the unit is standing in it,
+# A city's defence: the Strength of its own unit standing in it (the garrison),
 # plus 1 for every INDUSTRY_PER_DEFENCE Industry stored,
 # plus the Daughter's bonus if it shelters her.
 func city_defence(f: Faction) -> int:
 	var defence := f.industry / INDUSTRY_PER_DEFENCE
-	if f.unit_alive and f.unit_pos == f.city_pos:
-		defence += f.strength
+	var garrison := unit_at(f.city_pos)
+	if garrison and garrison.faction == f:
+		defence += garrison.strength
 	if daughter.shelters_with(f):
 		defence += SunDaughter.DEFENCE
 	return defence
 
 # --- Who is where -----------------------------------------------------------
-# Returns the faction whose living unit stands on this hex, or null if it's empty.
-func unit_at(cell: Vector2i) -> Faction:
+# The unit standing on this hex (any faction), or null if there's none.
+func unit_at(cell: Vector2i) -> Unit:
 	for f in factions:
-		if f.unit_alive and f.unit_pos == cell:
-			return f
+		for u in f.units:
+			if u.pos == cell:
+				return u
 	return null
 
 # True if a unit or Sköll is standing on this hex.
@@ -292,9 +350,9 @@ func _draw() -> void:
 					fill = fill.darkened(0.6) # too close to the rival
 				elif c == hover_cell:
 					fill = Color(0.9, 0.75, 0.3)
-			if unit_selected and HexMap.is_neighbour(player.unit_pos, c):
+			if selected and HexMap.is_neighbour(selected.pos, c):
 				var other := unit_at(c)
-				if skoll.is_at(c) or (other and other != player):
+				if skoll.is_at(c) or (other and other.faction != player):
 					fill = Color(0.95, 0.45, 0.2) # something to attack
 				elif not other:
 					fill = Color(0.9, 0.75, 0.3) # free to move
@@ -312,12 +370,11 @@ func _draw() -> void:
 			draw_sun(cc + Vector2(20, -20), 7.0) # a little sun on the city sheltering her
 
 	for f in factions:
-		if not f.unit_alive:
-			continue
-		var selected := f == player and unit_selected
-		var ring := Color.WHITE if selected else Color(0.1, 0.1, 0.1)
-		draw_circle(HexMap.hex_center(f.unit_pos), HexMap.HEX_SIZE * 0.55, ring)
-		draw_circle(HexMap.hex_center(f.unit_pos), HexMap.HEX_SIZE * 0.45, f.unit_color)
+		for u in f.units:
+			var ring := Color.WHITE if u == selected else Color(0.1, 0.1, 0.1)
+			var col := f.unit_color if u.moves > 0 or f != player else f.unit_color.darkened(0.4) # dim = moved
+			draw_circle(HexMap.hex_center(u.pos), HexMap.HEX_SIZE * 0.55, ring)
+			draw_circle(HexMap.hex_center(u.pos), HexMap.HEX_SIZE * 0.45, col)
 
 	# Sköll: a big black circle with fire inside and the swallowed sun at its heart.
 	# After swallowing the Daughter he blazes: bigger, with a glow around him.
@@ -336,15 +393,15 @@ func _draw() -> void:
 			draw_circle(sc, r * 0.28, Color(1.0, 0.9, 0.3))
 
 	var font := ThemeDB.fallback_font
-	var info := "Turn %d    Food %d    Industry %d    Strength %d    Moves %d    Doom in %d" % [turn, player.food, player.industry, player.strength, player.unit_moves, DOOM_TURN - turn]
+	var info := "Turn %d    Food %d    Industry %d    Units %d    Strength %d    Doom in %d" % [turn, player.food, player.industry, player.units.size(), player.strength, DOOM_TURN - turn]
 	draw_string(font, Vector2(20, 35), info, HORIZONTAL_ALIGNMENT_LEFT, -1, 20)
-	var rival_info := "Rival:  Food %d    Industry %d" % [rival.food, rival.industry]
+	var rival_info := "Rival:  Food %d    Industry %d    Units %d" % [rival.food, rival.industry, rival.units.size()]
 	if rival.city_pos == NO_CELL:
 		rival_info = "Rival:  city destroyed"
 	draw_string(font, Vector2(20, 60), rival_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.9, 0.6, 0.6))
 	if skoll.active and player.city_pos != NO_CELL:
 		var skoll_info := "Sköll is %d hexes from your city    Your city's defence: %d" % [HexMap.hex_distance(skoll.pos, player.city_pos), city_defence(player)]
-		draw_string(font, Vector2(260, 60), skoll_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.6, 0.2))
+		draw_string(font, Vector2(330, 60), skoll_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.6, 0.2))
 	var daughter_info := ""
 	if daughter.is_swallowed():
 		daughter_info = "Sköll swallowed %s. He is the sun now (Strength %d)." % [SunDaughter.NAME, skoll.strength]
@@ -390,19 +447,20 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var cell := HexMap.cell_at(get_local_mouse_position())
-		if player.unit_alive and cell == player.unit_pos and player.unit_moves > 0:
-			unit_selected = not unit_selected
-		elif unit_selected and HexMap.is_neighbour(player.unit_pos, cell):
+		var clicked := unit_at(cell)
+		if clicked and clicked.faction == player:
+			# click your unit to select it (again to deselect); units that already moved can't be picked
+			selected = null if clicked == selected or clicked.moves <= 0 else clicked
+		elif selected and HexMap.is_neighbour(selected.pos, cell):
 			messages.clear()
-			var other := unit_at(cell)
 			if skoll.is_at(cell):
-				skoll.attacked_by_player()
-			elif other and other != player:
-				resolve_combat(player, other) # moving into an enemy = attack
-			else:
-				player.unit_pos = cell
-			player.unit_moves -= 1
-			unit_selected = false
+				skoll.attacked_by(selected)
+			elif clicked and clicked.faction != player:
+				resolve_combat(selected, clicked) # moving into an enemy = attack
+			elif not clicked:
+				selected.pos = cell
+			selected.moves -= 1
+			selected = null
 		else:
-			unit_selected = false
+			selected = null
 		queue_redraw()

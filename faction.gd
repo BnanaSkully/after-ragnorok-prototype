@@ -9,17 +9,26 @@ var name: String
 var territory_color: Color
 var unit_color: Color
 var city_pos: Vector2i
-var unit_pos: Vector2i
-var unit_moves := 1
-var unit_alive := true
-var strength := 3 # higher strength = better odds in combat
+var units: Array[Unit] = [] # this faction's army units on the map
+var strength := 3 # Strength of new units (higher = better odds in combat)
 var food := 0
 var industry := 0
 var favour := 0 # how much the Sun's Daughter trusts this faction (0 to 10)
 
-func _init(p_name: String, p_territory: Color, p_unit: Color, p_city: Vector2i, p_unit_pos: Vector2i) -> void:
+func _init(p_name: String, p_territory: Color, p_unit: Color, p_city: Vector2i) -> void:
 	name = p_name
 	territory_color = p_territory
 	unit_color = p_unit
 	city_pos = p_city
-	unit_pos = p_unit_pos
+
+func add_unit(cell: Vector2i) -> Unit:
+	var u := Unit.new(self, cell)
+	units.append(u)
+	return u
+
+func remove_unit(u: Unit) -> void:
+	units.erase(u)
+
+# The faction is out of the game once its city has fallen.
+func is_alive() -> bool:
+	return city_pos != HexMap.NO_CELL

@@ -16,10 +16,15 @@ Survivors of Ragnarök cross the void on Yggdrasil (the Crossing), then land on 
 ## The Sun's Daughter: design in progress
 
 Built so far: she chooses her protector at the Landing by Favour. Planned, in this order:
-1. Treating her well: her Favour with her protector changes each turn. HOW is not decided yet (ideas: a Food offering each turn, keeping her city safe). Don't build steps 2 and 3 until Nathan decides
+1. Treating her well = how well you run your kingdom: are your cities and armies fed (Food), and by turn 14 (when Sköll arrives) is your city's defence and army strength good enough. Needs the economy to have costs first (Step A below), then her judgement (Step B)
 2. If her Favour with her protector drops too low she leaves and goes rogue: she appears on the map and moves away from Sköll. If Sköll reaches her in the open he swallows her with no battle. A faction's unit that reaches her can persuade her to join (odds based on its Favour)
 3. Trading her from turn 10: her protector can offer her to another faction. Factions afraid of Sköll refuse. She is a liability as much as a prize, so her trade value can be NEGATIVE: a powerful faction may not want her, and the giver may have to pay extra for someone to take her. Trading her costs Favour with whoever gave her away
 - Trading only gets interesting with 3+ factions; with two, the rival's fear of Sköll is the only variable
+
+### Step A: economy with costs (standard 4X), in this order
+1. DONE: several units per faction, built with Industry from the city (one unit per hex, destroyed units are gone, no free respawn; the rival builds too)
+2. Food upkeep: every unit eats Food each turn; starving loses a unit
+3. Walls: spend Industry on permanent city defence
 
 ## Current scope: prototype only
 
@@ -33,11 +38,13 @@ Built so far: she chooses her protector at the Landing by Favour. Planned, in th
 - Keep changes small, and say exactly how to test each one (press F5, then click X)
 - He wants honest pushback if an idea will cause problems later
 - Commit after each working step with a clear message
+- Use standard 4X conventions for generic mechanics (upkeep, building units, production, walls, starvation) without asking him to design them. Only ask about what is unique to this game (the Daughter, Sköll, the phases, politics, lore)
 
 ## Code notes
 
 - main.gd: the flow of a game (Crossing, Landing, turns), the rival, combat odds, drawing and mouse clicks. Suggest splitting further when it gets too big (drawing and the Crossing screen are the next candidates)
-- faction.gd (class Faction): one side's city, unit, resources and the Daughter's Favour toward it
+- faction.gd (class Faction): one side's city, list of units, resources and the Daughter's Favour toward it
+- unit.gd (class Unit): one army unit (position, moves, Strength). Holds a weak link to its faction to avoid a memory leak
 - hex_map.gd (class HexMap, all static): hex maths: hex_center, hex_distance, is_neighbour, neighbours, cell_at, map size
 - skoll.gd (class Skoll): everything Sköll does: warnings, arrival, walking, attacking cities and units, being driven back, swallowing the Daughter. Holds a reference to main.gd ("game")
 - sun_daughter.gd (class SunDaughter): her name, bonuses, Favour rules and state (who holds her, swallowed or not)
@@ -49,7 +56,6 @@ Built so far: she chooses her protector at the Landing by Favour. Planned, in th
 ## Later (parked until the full loop is playable)
 
 - Combat: +1 strength when defending in your own territory, so it isn't a pure coin flip
-- Respawning a destroyed unit should cost Industry (gives Industry a use)
 - Politics between factions (truces, deals, betrayal) needs a design before it can be built
 - Give the two factions real names
 - The rival should choose its own landing spot instead of a fixed one
