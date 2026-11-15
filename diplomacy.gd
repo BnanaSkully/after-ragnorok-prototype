@@ -31,6 +31,8 @@ const TRUST_REFUSED_THEIR_OATH := -1
 const TRUST_PAID_THEIR_DEMAND := 1
 const TRUST_REFUSED_THEIR_DEMAND := -1
 const RIVAL_BROKEN_OATH_FAVOUR := -2 # the Sun's Daughter sees the rival's betrayal too
+const TRUST_TOOK_THE_DAUGHTER := 1 # you took her off their hands
+const TRUST_REFUSED_THE_DAUGHTER := -1
 
 # What the rival says when you demand something it doesn't have. Costs nothing.
 # %s is the resource (e.g. "Industry"). Rewrite or add lines freely.
@@ -193,6 +195,14 @@ func rival_make_offer() -> void:
 	var player: Faction = game.player
 	if not rival.is_alive() or randf() >= RIVAL_OFFER_CHANCE:
 		return
+	# Sheltering the Daughter but too afraid of Sköll to keep her: offer her to the
+	# player, paying them to take her.
+	var d: SunDaughter = game.daughter
+	if d.shelters_with(rival) and game.turn >= SunDaughter.TRADE_TURN:
+		var keep := game.daughter_value(rival)
+		if keep < 0:
+			pending = {"type": "daughter", "pay": mini(-keep, rival.industry)}
+			return
 	var gap := army_power(rival) - army_power(player)
 	var afraid: bool = game.turn >= Skoll.WARNING_TURN
 	if not pact_active() and not is_oathbreaker() and (afraid or gap < 0 or trust >= 2):
@@ -217,6 +227,8 @@ func pending_text() -> String:
 	if pending.get("type") == "demand":
 		var res: String = String(pending["resource"]).capitalize()
 		return "%s demands %d %s from you. Their army is stronger than yours.\n\nPay: you lose %d %s, Trust %+d.\nRefuse: Trust %+d." % [rival.name, DEMAND_AMOUNT, res, DEMAND_AMOUNT, res, TRUST_PAID_THEIR_DEMAND, TRUST_REFUSED_THEIR_DEMAND]
+	if pending.get("type") == "daughter":
+		return "The %s fear Sköll and want %s gone. They offer her to you, and will pay you %d Industry to take her.\n\nTake her: she shelters in your city (+%d Food, +%d Industry a turn, +%d defence, but Sköll hunts her). Trust %+d.\nRefuse: Trust %+d." % [rival.name, SunDaughter.NAME, pending["pay"], SunDaughter.FOOD, SunDaughter.INDUSTRY, SunDaughter.DEFENCE, TRUST_TOOK_THE_DAUGHTER, TRUST_REFUSED_THE_DAUGHTER]
 	return ""
 
 # The player's answer to the pending offer.
@@ -235,6 +247,17 @@ func answer(accept: bool) -> void:
 		else:
 			change_trust(TRUST_REFUSED_THEIR_OATH)
 			remember("Turn %d: you refused %s's %s. Trust %+d." % [game.turn, rival.name, pact_word(), TRUST_REFUSED_THEIR_OATH])
+	elif offer["type"] == "daughter":
+		if accept and game.daughter.shelters_with(rival):
+			var pay: int = mini(offer["pay"], rival.industry)
+			rival.industry -= pay
+			player.industry += pay
+			game.hand_over_daughter(rival, player)
+			change_trust(TRUST_TOOK_THE_DAUGHTER)
+			remember("Turn %d: you took %s from the %s, and they paid you %d Industry. Trust %+d." % [game.turn, SunDaughter.NAME, rival.name, pay, TRUST_TOOK_THE_DAUGHTER])
+		else:
+			change_trust(TRUST_REFUSED_THE_DAUGHTER)
+			remember("Turn %d: you refused to take %s from the %s. Trust %+d." % [game.turn, SunDaughter.NAME, rival.name, TRUST_REFUSED_THE_DAUGHTER])
 	elif offer["type"] == "demand":
 		var resource: String = offer["resource"]
 		if accept and player.get(resource) >= DEMAND_AMOUNT:

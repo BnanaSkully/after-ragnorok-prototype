@@ -45,6 +45,10 @@ var end_turn_button: Button
 var build_button: Button
 var walls_button: Button
 var faction_buttons := {} # AI faction -> {"pact": Button, "food": Button, "industry": Button}
+var trade_button: Button # opens the "trade the Sun's Daughter" panel
+var trade_panel: PanelContainer
+var trade_label: Label
+var trade_choices := {} # AI faction -> Button in the trade panel
 var play_again_button: Button # shown on the end screen
 var offer_panel: PanelContainer # an AI faction's Accept/Refuse pop-up
 var offer_label: Label
@@ -55,6 +59,7 @@ func _ready() -> void:
 	end_turn_button = add_button("End Turn", Vector2(820, 20), on_end_turn)
 	build_button = add_button("Build Unit (%d Industry)" % GameState.UNIT_COST, Vector2(920, 20), on_build_unit)
 	walls_button = add_button("", Vector2(820, 58), on_build_walls)
+	trade_button = add_button("Trade her", Vector2(1055, 58), on_open_trade)
 	for i in state.ais.size():
 		var f: Faction = state.ais[i]
 		var y := BLOCK_Y + i * BLOCK_H + 46
@@ -70,6 +75,7 @@ func _ready() -> void:
 	play_again_button.add_theme_font_size_override("font_size", 22)
 	play_again_button.visible = false
 	build_offer_ui()
+	build_trade_ui()
 	build_crossing_ui()
 	state.start_crossing()
 	refresh()
@@ -100,7 +106,7 @@ func refresh() -> void:
 	queue_redraw()
 
 func all_game_buttons() -> Array[Button]:
-	var list: Array[Button] = [end_turn_button, build_button, walls_button]
+	var list: Array[Button] = [end_turn_button, build_button, walls_button, trade_button]
 	for set in faction_buttons.values():
 		for b in set.values():
 			list.append(b)
@@ -116,6 +122,7 @@ func update_buttons() -> void:
 		walls_button.text = "Walls complete (+%d defence)" % (GameState.MAX_WALLS * GameState.WALL_DEFENCE)
 	else:
 		walls_button.text = "Build Walls %d/%d (%d Industry)" % [p.walls + 1, GameState.MAX_WALLS, GameState.WALL_COST]
+	trade_button.disabled = not playing or not state.can_trade_daughter()
 	for f in state.ais:
 		var d: Diplomacy = state.relation(f)
 		var set: Dictionary = faction_buttons[f]
@@ -271,7 +278,8 @@ func show_offer() -> void:
 	var r: Diplomacy = state.pending_relation()
 	offer_heading.text = "A MESSAGE FROM THE %s" % r.other.name.to_upper()
 	offer_label.text = r.pending_text()
-	offer_accept_button.text = "Pay" if r.pending.get("type") == "demand" else "Accept"
+	var kind: String = r.pending.get("type")
+	offer_accept_button.text = "Pay" if kind == "demand" else ("Take her" if kind == "daughter" else "Accept")
 	offer_panel.visible = true
 	update_buttons()
 
@@ -282,9 +290,80 @@ func answer_offer(accept: bool) -> void:
 		r.answer(accept)
 	refresh()
 
+# --- Trading the Sun's Daughter (panel) -------------------------------------------
+func build_trade_ui() -> void:
+	trade_panel = PanelContainer.new()
+	trade_panel.position = Vector2(170, 170)
+	trade_panel.custom_minimum_size = Vector2(540, 0)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.1, 0.09, 0.08)
+	style.border_color = Color(1.0, 0.85, 0.4)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(6)
+	style.set_content_margin_all(18)
+	trade_panel.add_theme_stylebox_override("panel", style)
+	add_child(trade_panel)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 10)
+	trade_panel.add_child(box)
+	var heading := Label.new()
+	heading.text = "OFFER %s TO ANOTHER FACTION" % SunDaughter.NAME.to_upper()
+	heading.add_theme_font_size_override("font_size", 16)
+	heading.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4))
+	box.add_child(heading)
+	trade_label = Label.new()
+	trade_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	trade_label.add_theme_font_size_override("font_size", 15)
+	box.add_child(trade_label)
+	for f in state.ais:
+		var b := Button.new()
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.add_theme_font_size_override("font_size", 16)
+		b.pressed.connect(on_trade.bind(f))
+		box.add_child(b)
+		trade_choices[f] = b
+	var cancel := Button.new()
+	cancel.text = "Keep her"
+	cancel.add_theme_font_size_override("font_size", 16)
+	cancel.pressed.connect(close_trade)
+	box.add_child(cancel)
+	trade_panel.visible = false
+
+func on_open_trade() -> void:
+	if not state.can_trade_daughter():
+		return
+	trade_label.text = "Her worth depends on her Favour toward them, their fear of Sköll and how strong they already are. If she's worth too little, you must pay them to take her. Being traded costs her Favour toward you (%+d). Uses your diplomatic action." % SunDaughter.TRADED_FAVOUR
+	for f in state.ais:
+		var b: Button = trade_choices[f]
+		var q := state.trade_quote(f)
+		if not f.is_alive():
+			b.text = "%s: fallen" % f.name
+		elif q["refuses"]:
+			b.text = "%s: refuses, too afraid of Sköll" % f.name
+		elif q["you_pay"] > 0:
+			b.text = "%s: you pay them %d Industry to take her" % [f.name, q["you_pay"]]
+			if not q["possible"]:
+				b.text += " (you can't afford it)"
+		elif q["they_pay"] == 0:
+			b.text = "%s: they take her, but pay nothing" % f.name
+		else:
+			b.text = "%s: they pay you %d Industry" % [f.name, q["they_pay"]]
+		b.disabled = not q["possible"]
+	trade_panel.visible = true
+	for b in all_game_buttons():
+		b.disabled = true
+
+func on_trade(f: Faction) -> void:
+	state.player_trade_daughter(f)
+	close_trade()
+
+func close_trade() -> void:
+	trade_panel.visible = false
+	refresh()
+
 # --- Mouse clicks: turn screen positions into hexes, then ask the state ---------
 func _unhandled_input(event: InputEvent) -> void:
-	if state.game_over or state.phase == GameState.Phase.CROSSING or state.has_pending_offer():
+	if state.game_over or state.phase == GameState.Phase.CROSSING or state.has_pending_offer() or trade_panel.visible:
 		return
 	if state.phase == GameState.Phase.LANDING:
 		if event is InputEventMouseMotion:

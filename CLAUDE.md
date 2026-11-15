@@ -16,11 +16,10 @@ Survivors of Ragnarök cross the void on Yggdrasil (the Crossing), then land on 
 
 ## The Sun's Daughter: design in progress
 
-Built so far: she chooses her protector at the Landing by Favour, judges her protector (step 1) and can go rogue (step 2). Planned, in this order:
+Built so far: she chooses her protector at the Landing by Favour, judges her protector (step 1), can go rogue (step 2) and can be traded (step 3):
 1. DONE (Step B): treating her well = how well you run your kingdom. Each turn her protector starves (a unit deserts): her Favour -2; every 3 turns in a row fed: +1. On turn 14 (Sköll arrives) she checks city defence 10+ and army Strength 6+: both +2, one 0, neither -3. From turn 10 she warns the player what she wants, and the line under the top bar shows progress. Only her protector is judged. Numbers at the top of sun_daughter.gd
 2. DONE: going rogue. When her Favour toward her protector is 2 or less she walks out onto a hex next to the city (the player is warned at 4 or less) and the protector loses her bonuses. In the open she moves 1 hex a turn away from Sköll. If Sköll is within 4 hexes he hunts her instead of a city and sprints 2 hexes a turn; reaching her, he swallows her with no battle. Moving a unit onto her tries to persuade her: chance = that faction's Favour x 10%; success, she shelters in its city. The rival's units go after her too. Numbers: LEAVE_FAVOUR etc. in sun_daughter.gd, SMELL_RANGE and SPRINT in skoll.gd
-3. Trading her from turn 10: her protector can offer her to another faction. Factions afraid of Sköll refuse. She is a liability as much as a prize, so her trade value can be NEGATIVE: a powerful faction may not want her, and the giver may have to pay extra for someone to take her. Trading her costs Favour with whoever gave her away
-- Trading only gets interesting with 3+ factions; with two, the rival's fear of Sköll is the only variable
+3. DONE: trading her, from turn 10, by whoever shelters her (uses the player's diplomatic action). Her value to a faction is a price in Industry (-10 to 10): 6, +/-1 per point of her Favour toward them above/below 5, -3 once the howling starts or -6 once Sköll is loose, -3 more if he's hunting their city, -1 per 3 points their army is stronger than the giver's. Positive: they pay the giver (up to what they have). Negative: the giver pays them. Below -8: they refuse. Being traded costs her Favour toward the giver (-2). An AI sheltering her whose own value for her is negative may offer her to the player, paying them to take her (Accept/Take her pop-up). "Trade her" button opens a panel with each faction's price. Numbers: TRADE_* and FEAR_* in sun_daughter.gd
 
 ### Step A: economy with costs (standard 4X), in this order
 1. DONE: several units per faction, built with Industry from the city (one unit per hex, destroyed units are gone, no free respawn; the rival builds too)
@@ -80,7 +79,7 @@ Keep game rules separate from drawing. The game state and rules (map data, terra
 ## Later (parked until the full loop is playable)
 
 - Combat: +1 strength when defending in your own territory, so it isn't a pure coin flip
-- Deeper politics beyond the basic diplomacy in scope (betrayal schemes, trading the Daughter, three-way deals)
+- Deeper politics beyond the basic diplomacy in scope (betrayal schemes, three-way deals, AIs trading the Daughter between themselves)
 - Give the four factions real names (placeholders now: Norse, Japanese, Celtic, Greek)
 - AI factions should choose their own landing spots instead of fixed ones
 - Diplomacy between AI factions (they currently only deal with the player)

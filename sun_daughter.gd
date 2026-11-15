@@ -31,6 +31,19 @@ const LEAVE_FAVOUR := 2 # at this Favour or below she leaves her protector
 const WARN_FAVOUR := 4 # at this Favour or below the player is warned
 const PERSUADE_PER_FAVOUR := 0.1 # chance to persuade her = Favour x 10%
 
+# Trading her (from TRADE_TURN, by whoever shelters her). Her "value" to a
+# faction is a price in Industry: positive, they pay the giver; negative, the
+# giver must pay them to take her; below TRADE_REFUSE_BELOW they refuse outright.
+const TRADE_TURN := 10
+const TRADE_BASE_VALUE := 6 # her bonuses are worth having...
+const FEAR_HOWLING := 3 # ...less once Sköll's howling starts,
+const FEAR_LOOSE := 6 # ...even less once he's loose (this replaces FEAR_HOWLING),
+const FEAR_HUNTED := 3 # ...and less again if he's hunting their city.
+const DISDAIN_PER := 3 # -1 for every 3 points their army is stronger than the giver's
+const TRADE_MAX_PRICE := 10
+const TRADE_REFUSE_BELOW := -8
+const TRADED_FAVOUR := -2 # being traded costs Favour toward whoever gave her away
+
 enum State { SHELTERED, ROGUE, SWALLOWED }
 
 var state := State.SHELTERED

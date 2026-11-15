@@ -359,6 +359,60 @@ func ai_build(f: Faction) -> void:
 	if f.industry >= UNIT_COST and food_change(f) - UNIT_FOOD_UPKEEP >= 0:
 		build_unit(f)
 
+# --- Trading the Sun's Daughter ---------------------------------------------------
+# What she's worth to faction f, as a price in Industry (-10 to 10): positive,
+# they'd pay the giver that much; negative, the giver must pay them to take her.
+func daughter_value(f: Faction) -> int:
+	var value := SunDaughter.TRADE_BASE_VALUE + (f.favour - 5)
+	if skoll.active:
+		value -= SunDaughter.FEAR_LOOSE
+		if skoll.target == f:
+			value -= SunDaughter.FEAR_HUNTED
+	elif turn >= Skoll.WARNING_TURN:
+		value -= SunDaughter.FEAR_HOWLING
+	var giver: Faction = daughter.holder if daughter.holder != null else player
+	var stronger := army_power(f) - army_power(giver)
+	if stronger > 0:
+		value -= stronger / SunDaughter.DISDAIN_PER # a powerful faction needs her less
+	return clampi(value, -SunDaughter.TRADE_MAX_PRICE, SunDaughter.TRADE_MAX_PRICE)
+
+func can_trade_daughter() -> bool:
+	return can_play() and daughter.shelters_with(player) and turn >= SunDaughter.TRADE_TURN and not diplomacy_action_used
+
+# What would happen if the player offered her to f.
+func trade_quote(f: Faction) -> Dictionary:
+	var value := daughter_value(f)
+	var quote := {"value": value, "refuses": value < SunDaughter.TRADE_REFUSE_BELOW or not f.is_alive(), "they_pay": 0, "you_pay": 0}
+	if value >= 0:
+		quote["they_pay"] = mini(value, f.industry) # they can only pay what they have
+	else:
+		quote["you_pay"] = -value
+	quote["possible"] = not quote["refuses"] and player.industry >= quote["you_pay"]
+	return quote
+
+# The player offers her to f (uses the turn's diplomatic action). Returns true if done.
+func player_trade_daughter(f: Faction) -> bool:
+	if not can_trade_daughter():
+		return false
+	var q := trade_quote(f)
+	if not q["possible"]:
+		return false
+	diplomacy_action_used = true
+	messages.clear()
+	f.industry += q["you_pay"] - q["they_pay"]
+	player.industry += q["they_pay"] - q["you_pay"]
+	hand_over_daughter(player, f)
+	var deal := "you paid them %d Industry" % q["you_pay"]
+	if q["you_pay"] == 0:
+		deal = "they paid you %d Industry" % q["they_pay"] if q["they_pay"] > 0 else "for nothing"
+	remember("Turn %d: you handed %s to the %s (%s). Her Favour toward you %+d." % [turn, SunDaughter.NAME, f.name, deal, SunDaughter.TRADED_FAVOUR])
+	return true
+
+# She moves from giver's city to receiver's. Being traded costs Favour toward the giver.
+func hand_over_daughter(giver: Faction, receiver: Faction) -> void:
+	daughter.join(receiver)
+	giver.favour = clampi(giver.favour + SunDaughter.TRADED_FAVOUR, 0, SunDaughter.MAX_FAVOUR)
+
 # --- Diplomacy helpers -----------------------------------------------------------
 # The player's relationship with this AI faction.
 func relation(f: Faction) -> Diplomacy:
