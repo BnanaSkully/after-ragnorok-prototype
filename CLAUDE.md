@@ -30,6 +30,7 @@ Built so far: she chooses her protector at the Landing by Favour, judges her pro
 
 - Four factions: the player (Norse) and three AI factions with placeholder names, one per pantheon: Japanese, Celtic, Greek. Each has its own word for a sworn agreement (Norse oath, Japanese pact, Celtic bond, Greek treaty: placeholders, not lore). AI cities start at fixed spots spread around the map; the player lands at least 4 hexes from all of them
 - One 15 x 11 hex map, no art (shapes and colours only)
+- Fog of war (standard 4X): the player sees 3 hexes around their city and 2 around each unit (GameState.player_can_see, CITY_SIGHT, UNIT_SIGHT). Elsewhere the map is dimmed and other factions' units, Sköll, the rogue Daughter and the revealed rift are hidden. Cities and territory stay visible everywhere (seen from the ark at the Landing, when the whole map is visible). Fog only changes what is drawn, not the rules
 - Do not add more factions, pantheons, rogue factions or lore unless asked
 - Goal: a playable loop of Crossing, Landing, turns, cities, auto-resolve and the Doom
 - Basic diplomacy with the rival: pacts, demands, and a memory of whether promises were kept. This is the core hook and should be built before more combat or Sköll features.

@@ -422,6 +422,8 @@ func _draw() -> void:
 					fill = territory_colour(f)
 			if dark:
 				fill = fill.darkened(0.7)
+			if not s.player_can_see(c):
+				fill = fill.darkened(0.45) # fog of war: you can't see what's here now
 			if s.phase == GameState.Phase.LANDING:
 				if not s.can_land_at(c):
 					fill = fill.darkened(0.6) # too close to another faction's city
@@ -440,7 +442,7 @@ func _draw() -> void:
 			draw_polyline(pts, Color(0.1, 0.1, 0.1), 2.0)
 
 	# The rift Sköll last came through (a dark swirl). The others stay hidden.
-	if skoll.revealed_rift != NO_CELL:
+	if skoll.revealed_rift != NO_CELL and s.player_can_see(skoll.revealed_rift):
 		var rc := HexView2D.hex_center(skoll.revealed_rift)
 		draw_circle(rc, HexView2D.HEX_SIZE * 0.5, Color(0.12, 0.05, 0.18))
 		draw_arc(rc, HexView2D.HEX_SIZE * 0.5, 0, TAU, 24, Color(0.6, 0.3, 0.8), 2.0)
@@ -463,20 +465,22 @@ func _draw() -> void:
 
 	for f in s.factions:
 		for u in f.units:
+			if f != player and not s.player_can_see(u.pos):
+				continue # hidden by fog of war
 			var ring := Color.WHITE if u == selected else Color(0.1, 0.1, 0.1)
 			var col := unit_colour(f) if u.moves > 0 or f != player else unit_colour(f).darkened(0.4) # dim = moved
 			draw_circle(HexView2D.hex_center(u.pos), HexView2D.HEX_SIZE * 0.55, ring)
 			draw_circle(HexView2D.hex_center(u.pos), HexView2D.HEX_SIZE * 0.45, col)
 
 	# The Sun's Daughter alone in the open: a bright sun on her hex.
-	if daughter.is_rogue():
+	if daughter.is_rogue() and s.player_can_see(daughter.pos):
 		var dc := HexView2D.hex_center(daughter.pos)
 		draw_circle(dc, HexView2D.HEX_SIZE * 0.7, Color(1.0, 0.85, 0.3, 0.25))
 		draw_sun(dc, 11.0)
 
 	# Sköll: a big black circle with fire inside and the swallowed sun at its heart.
 	# After swallowing the Daughter he blazes: bigger, with a glow around him.
-	if skoll.active:
+	if skoll.active and s.player_can_see(skoll.pos):
 		var sc := HexView2D.hex_center(skoll.pos)
 		var r := HexView2D.HEX_SIZE
 		if daughter.is_swallowed():
@@ -494,7 +498,8 @@ func _draw() -> void:
 	var info := "Turn %d   City %d   Food %d/%d (%+d)   Industry %d (%+d)   Units %d   Army Strength %d   Doom in %d" % [s.turn, player.population, player.food, s.growth_cost(player), s.food_change(player), player.industry, s.industry_change(player), player.units.size(), s.army_power(player), GameState.DOOM_TURN - s.turn]
 	draw_string(font, Vector2(20, 35), info, HORIZONTAL_ALIGNMENT_LEFT, -1, 18)
 	if skoll.active and player.city_pos != NO_CELL:
-		var skoll_info := "Sköll hunts %s (%d hexes from yours)   Your defence: %d" % [skoll.target_text(), HexMap.hex_distance(skoll.pos, player.city_pos), s.city_defence(player)]
+		var where := "%d hexes from yours" % HexMap.hex_distance(skoll.pos, player.city_pos) if s.player_can_see(skoll.pos) else "out of sight"
+		var skoll_info := "Sköll hunts %s (%s)   Your defence: %d" % [skoll.target_text(), where, s.city_defence(player)]
 		draw_string(font, Vector2(20, 60), skoll_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.6, 0.2))
 	var daughter_info := ""
 	if daughter.is_swallowed():
@@ -507,7 +512,8 @@ func _draw() -> void:
 			note = "(for turn %d: defence %d/%d, army %d/%d)" % [Skoll.ARRIVAL_TURN, s.city_defence(player), SunDaughter.READY_DEFENCE, s.army_power(player), SunDaughter.READY_ARMY]
 		daughter_info = "%s %s %s    Her Favour toward you: %d" % ["You shelter" if daughter.holder == player else "The " + daughter.holder.name + " shelter", SunDaughter.NAME, note, player.favour]
 	if daughter.is_rogue():
-		daughter_info = "She is ALONE IN THE OPEN! Move a unit onto her to persuade her (your chance %d%%)." % roundi(daughter.persuade_chance(player) * 100)
+		var seen := "" if s.player_can_see(daughter.pos) else " You can't see where she is."
+		daughter_info = "She is ALONE IN THE OPEN! Move a unit onto her to persuade her (your chance %d%%).%s" % [roundi(daughter.persuade_chance(player) * 100), seen]
 	draw_string(font, Vector2(20, 82), daughter_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.9, 0.5))
 
 	# Diplomacy panel (right side): a block per AI faction, then what they remember.

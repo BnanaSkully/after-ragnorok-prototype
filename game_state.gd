@@ -25,6 +25,8 @@ const GROWTH_STEP := 5 # ...and each later growth costs this much more
 const WALL_COST := 10 # Industry per wall level
 const WALL_DEFENCE := 4 # city defence each wall level adds
 const MAX_WALLS := 2
+const CITY_SIGHT := 3 # fog of war: the player sees this far around their city...
+const UNIT_SIGHT := 2 # ...and this far around each of their units
 const NO_CELL := HexMap.NO_CELL
 const Crossing := preload("res://crossing_events.gd")
 
@@ -576,6 +578,21 @@ func city_defence(f: Faction) -> int:
 	if daughter.shelters_with(f):
 		defence += SunDaughter.DEFENCE
 	return defence
+
+# --- Fog of war -------------------------------------------------------------
+# Can the player see what's on this hex right now (units, Sköll, the Daughter
+# in the open)? During the Landing they see everything from the ark. After
+# that, only near their city and units. Cities and territory are always known
+# (seen from the ark), so the view still draws those everywhere.
+func player_can_see(cell: Vector2i) -> bool:
+	if phase != Phase.PLAYING:
+		return true
+	if player.is_alive() and HexMap.hex_distance(cell, player.city_pos) <= CITY_SIGHT:
+		return true
+	for u in player.units:
+		if HexMap.hex_distance(cell, u.pos) <= UNIT_SIGHT:
+			return true
+	return false
 
 # --- Who is where -----------------------------------------------------------
 # The unit standing on this hex (any faction), or null if there's none.
