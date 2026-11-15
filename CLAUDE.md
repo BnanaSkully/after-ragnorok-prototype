@@ -58,7 +58,7 @@ Built so far: she chooses her protector at the Landing by Favour. Planned, in th
 ## Later (parked until the full loop is playable)
 
 - Combat: +1 strength when defending in your own territory, so it isn't a pure coin flip
-- Politics between factions (truces, deals, betrayal) needs a design before it can be built
+- Deeper politics beyond the basic diplomacy in scope (betrayal schemes, trading the Daughter, three-way deals)
 - Give the two factions real names
 - The rival should choose its own landing spot instead of a fixed one
 - Crossing event text is placeholder: rewrite in the game's own voice
