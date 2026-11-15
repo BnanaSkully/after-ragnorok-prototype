@@ -53,6 +53,7 @@ Run a test:
 | deal_test.gd | trading: quotes, trades, gifts (Trust cap), paying for peace, AI trade offers; 300 games |
 | tribute_test.gd | taking cities: tributary, tribute paid, no wars between them, uprisings (AI and you), siege odds, Sköll freeing tributaries; 300 games |
 | border_test.gd | closed borders: who may enter, AIs stay out, crossing declares war, walking out after peace, open borders both ways and expiry, allies/overlords; 300 games: no unit inside closed borders after a turn |
+| skoll_spawn_test.gd | where Sköll comes out: distance to cities, one rift per city, who he hunts first (fairness) |
 | helpers.gd | not a test: shared helpers (answer every pop-up, list landing hexes) |
 
 Screenshot scripts need a virtual screen and an output folder in `S`:

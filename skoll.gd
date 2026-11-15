@@ -15,16 +15,15 @@ const ARRIVAL_TURN := 14 # he arrives on this turn
 const STRENGTH := 12 # his starting Strength
 const SWALLOWED_STRENGTH := 20 # his Strength after swallowing the Sun's Daughter
 
-# Rifts in the void: the hexes Sköll can come through. The map is split into
-# RIFT_SECTIONS_X x RIFT_SECTIONS_Y sections (3 x 2 = 6) and each section gets
-# one rift on a random hex. They're rolled on RIFT_TURN (after the Landing, so
-# they can keep away from every city) and stay HIDDEN. On arrival he comes
-# through one at random and only that rift is revealed. Each time he's driven
-# back the rifts are rolled again, so his next way in is always a surprise.
-const RIFT_SECTIONS_X := 3
-const RIFT_SECTIONS_Y := 2
+# Rifts in the void: the hexes Sköll can come through. Every standing city
+# gets one rift 4-7 hexes away that is nearer to it than to any other city
+# (place_rifts). They're rolled on RIFT_TURN (after the Landing, so they can
+# keep away from every city) and stay HIDDEN until found or used. He comes
+# through one at random and hunts the city nearest it: every city is equally
+# likely. Each time he's driven back the rifts are rolled again.
 const RIFT_TURN := 2 # the turn the rifts are first rolled
-const RIFT_MIN_CITY_DISTANCE := 3 # rifts stay at least this far from every city
+const RIFT_MIN_CITY_DISTANCE := 4 # rifts stay at least this far from every city (was 3: he came out one step from a city's walls)
+const RIFT_MAX_CITY_DISTANCE := 7 # ...and at most this far from the city they belong to
 const SIGHT_RANGE := 2 # fog of war: he only sees this far; a rogue Daughter further away is hidden from him
 const SPRINT := 2 # hexes a turn he runs when hunting her in the open (she runs 1)
 
@@ -39,6 +38,7 @@ var pos := HexMap.NO_CELL
 var strength := STRENGTH
 var target: Faction = null # the city he is hunting right now
 var rifts: Array[Vector2i] = [] # the current rifts (hidden from the player)
+var rift_city := {} # rift hex -> name of the faction whose city that rift opened toward
 var revealed_rift := HexMap.NO_CELL # the rift he last came through (the only one shown)
 
 func _init(p_game: GameState) -> void:
@@ -183,32 +183,48 @@ func drive_back() -> void:
 	if target:
 		game.add_message("Sköll slinks back into the void... and bursts out of another rift, hunting %s." % target_text())
 
-# One rift on a random hex in each section of the map, at least
-# RIFT_MIN_CITY_DISTANCE from every standing city.
+# One rift per standing city: a random hex RIFT_MIN_CITY_DISTANCE to
+# RIFT_MAX_CITY_DISTANCE from that city and at least RIFT_MIN_CITY_DISTANCE
+# from every other city. The rift BELONGS to that city: he comes out of a
+# random rift and hunts the city it belongs to, so every city is equally
+# likely to be first (fair by design; rifts by map section hit the player
+# 2:1, and "nearest city" left crowded AI cities without a rift).
 func place_rifts() -> void:
 	if not game.player.known_rifts.is_empty():
 		game.add_message("The ground shudders: the rifts you found have closed, and new ones have torn open somewhere in the dark.")
 	game.forget_rifts()
 	rifts.clear()
-	for sy in RIFT_SECTIONS_Y:
-		for sx in RIFT_SECTIONS_X:
-			var options: Array[Vector2i] = []
-			for row in range(sy * HexMap.ROWS / RIFT_SECTIONS_Y, (sy + 1) * HexMap.ROWS / RIFT_SECTIONS_Y):
-				for col in range(sx * HexMap.COLS / RIFT_SECTIONS_X, (sx + 1) * HexMap.COLS / RIFT_SECTIONS_X):
+	rift_city.clear()
+	for f in game.factions:
+		if not f.is_alive():
+			continue
+		var options: Array[Vector2i] = []
+		for reach in range(RIFT_MAX_CITY_DISTANCE, 99): # widen only if a crowded map leaves no room
+			for row in HexMap.ROWS:
+				for col in HexMap.COLS:
 					var c := Vector2i(col, row)
-					var far_enough := true
-					for f in game.factions:
-						if f.is_alive() and HexMap.hex_distance(c, f.city_pos) < RIFT_MIN_CITY_DISTANCE:
-							far_enough = false
-					for r in game.ruins:
-						if r["cell"] == c:
-							far_enough = false # keep rifts and ruins on different hexes
-					if not game.passable(c):
-						far_enough = false # not in a lake or on a mountain top
-					if far_enough:
+					if rift_spot_ok(c, f, reach):
 						options.append(c)
-			if not options.is_empty():
-				rifts.append(options.pick_random())
+			if not options.is_empty() or reach > HexMap.COLS + HexMap.ROWS:
+				break
+		if not options.is_empty():
+			var spot: Vector2i = options.pick_random()
+			rifts.append(spot)
+			rift_city[spot] = f.name
+
+# Can a rift for city f go on hex c? 4-"reach" hexes from f, at least 4 from
+# every other city, not on ruins or impassable land, not on another rift.
+func rift_spot_ok(c: Vector2i, f: Faction, reach: int) -> bool:
+	var d := HexMap.hex_distance(c, f.city_pos)
+	if d < RIFT_MIN_CITY_DISTANCE or d > reach or not game.passable(c) or c in rifts:
+		return false
+	for other in game.factions:
+		if other != f and other.is_alive() and HexMap.hex_distance(c, other.city_pos) < RIFT_MIN_CITY_DISTANCE:
+			return false
+	for r in game.ruins:
+		if r["cell"] == c:
+			return false
+	return true
 
 # Come out of a random free rift and hunt the city nearest to it.
 func come_through_rift() -> void:
@@ -218,10 +234,15 @@ func come_through_rift() -> void:
 			free.append(r)
 	pos = free.pick_random() if not free.is_empty() else random_edge_cell()
 	revealed_rift = pos
-	pick_target()
+	var owner: Faction = game.faction_named(rift_city.get(pos, ""))
+	if owner != null and owner.is_alive():
+		target = owner # he hunts the city this rift opened toward
+	else:
+		pick_target()
 
-# He doesn't know which city hides the Daughter: he hunts the city nearest the
-# rift he came through (a tie is decided at random).
+# (Used when his rift belongs to no standing city, or his target fell.) He
+# doesn't know which city hides the Daughter: he hunts the nearest city (ties
+# at random).
 func pick_target() -> void:
 	var best: Array[Faction] = []
 	var best_d := 999
@@ -241,8 +262,8 @@ func target_text() -> String:
 		return "nobody"
 	return "your city" if target == game.player else "%s's city" % target.name
 
-# Fallback if every rift is blocked: a free hex on the edge of the map, at
-# least 3 hexes from every city.
+# Fallback if every rift is blocked (or no section had room for one): a free
+# hex on the edge of the map, at least RIFT_MIN_CITY_DISTANCE from every city.
 func random_edge_cell() -> Vector2i:
 	var options: Array[Vector2i] = []
 	for row in HexMap.ROWS:
@@ -254,7 +275,7 @@ func random_edge_cell() -> Vector2i:
 				continue
 			var far_enough := true
 			for f in game.factions:
-				if f.city_pos != HexMap.NO_CELL and HexMap.hex_distance(c, f.city_pos) < 3:
+				if f.city_pos != HexMap.NO_CELL and HexMap.hex_distance(c, f.city_pos) < RIFT_MIN_CITY_DISTANCE:
 					far_enough = false
 			if far_enough:
 				options.append(c)
