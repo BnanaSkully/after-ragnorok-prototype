@@ -14,6 +14,7 @@ var food := 0
 var industry := 0
 var favour := 0 # how much the Sun's Daughter trusts this faction (0 to 10)
 var walls := 0 # city wall level (each level adds defence)
+var buildings := {} # city buildings it has (key from buildings.gd -> true)
 var population := 1 # city size: grows from surplus Food, each extra point makes +1 Food and +1 Industry
 var pact_word := "oath" # what this faction calls a sworn agreement (Norse factions swear oaths)
 var is_player := false

@@ -49,7 +49,9 @@ var end_turn_button: Button
 var build_button: Button
 var scout_button: Button
 var outpost_button: Button
-var walls_button: Button
+var walls_button: Button # "Build...": opens the city buildings panel (walls, granary...)
+var city_panel: PanelContainer
+var city_buttons: VBoxContainer
 var faction_buttons := {} # AI faction -> {"pact": Button, "deal": Button}
 var deal_panel: PanelContainer # every deal with one AI faction (demand, trade, gift, pay for peace)
 var deal_heading: Label
@@ -75,7 +77,7 @@ func _ready() -> void:
 	build_button = add_button("Army (%d)" % GameState.UNIT_COST, Vector2(PANEL_X + 90, 20), on_build_unit)
 	scout_button = add_button("Scout (%d)" % GameState.SCOUT_COST, Vector2(PANEL_X + 180, 20), on_build_scout)
 	outpost_button = add_button("", Vector2(PANEL_X, 58), on_outpost_button)
-	walls_button = add_button("", Vector2(PANEL_X + 110, 58), on_build_walls)
+	walls_button = add_button("Build...", Vector2(PANEL_X + 110, 58), on_open_city)
 	trade_button = add_button("Trade her", Vector2(PANEL_X + 240, 58), on_open_trade)
 	for b in [build_button, scout_button, outpost_button, walls_button, trade_button]:
 		b.add_theme_font_size_override("font_size", 14)
@@ -98,6 +100,7 @@ func _ready() -> void:
 	build_offer_ui()
 	build_choice_ui()
 	build_deal_ui()
+	build_city_ui()
 	build_trade_ui()
 	build_crossing_ui()
 	state.start_crossing()
@@ -148,11 +151,8 @@ func update_buttons() -> void:
 	scout_button.disabled = not playing or not state.can_build_scout(p)
 	outpost_button.disabled = not playing or (not placing_outpost and (p.industry < GameState.OUTPOST_COST or state.outpost_spots(p).is_empty()))
 	outpost_button.text = "Cancel" if placing_outpost else "Outpost (%d)" % GameState.OUTPOST_COST
-	walls_button.disabled = not playing or p.industry < GameState.WALL_COST or p.walls >= GameState.MAX_WALLS
-	if p.walls >= GameState.MAX_WALLS:
-		walls_button.text = "Walls done"
-	else:
-		walls_button.text = "Walls %d/%d (%d)" % [p.walls + 1, GameState.MAX_WALLS, GameState.WALL_COST]
+	walls_button.disabled = not playing
+	walls_button.tooltip_text = "City buildings: walls, granary, workshop, watchtower, forge. Each costs Industry once and gives a permanent bonus."
 	trade_button.disabled = not playing or not state.can_trade_daughter()
 	for f in state.ais:
 		var d: Diplomacy = state.relation(f)
@@ -203,10 +203,6 @@ func on_build_unit() -> void:
 	state.player_build_unit()
 	refresh()
 
-func on_build_walls() -> void:
-	state.player_build_walls()
-	refresh()
-
 func on_build_scout() -> void:
 	state.player_build_scout()
 	refresh()
@@ -228,6 +224,75 @@ func on_propose_pact(f: Faction) -> void:
 func on_demand(f: Faction, resource: String) -> void:
 	state.player_demand(f, resource)
 	close_deals()
+
+# --- City buildings (panel) -------------------------------------------------------------
+func build_city_ui() -> void:
+	city_panel = PanelContainer.new()
+	city_panel.position = Vector2(170, 150)
+	city_panel.custom_minimum_size = Vector2(540, 0)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.1, 0.09, 0.08)
+	style.border_color = Color(0.85, 0.75, 0.55)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(6)
+	style.set_content_margin_all(18)
+	city_panel.add_theme_stylebox_override("panel", style)
+	add_child(city_panel)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 8)
+	city_panel.add_child(box)
+	var heading := Label.new()
+	heading.text = "BUILD IN YOUR CITY   (each is bought once; costs are Industry)"
+	heading.add_theme_font_size_override("font_size", 16)
+	heading.add_theme_color_override("font_color", Color(0.85, 0.75, 0.55))
+	box.add_child(heading)
+	city_buttons = VBoxContainer.new()
+	city_buttons.add_theme_constant_override("separation", 6)
+	box.add_child(city_buttons)
+	city_panel.visible = false
+
+func add_city_option(text: String, enabled: bool, action: Callable) -> void:
+	var b := Button.new()
+	b.text = text
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.add_theme_font_size_override("font_size", 15)
+	b.disabled = not enabled
+	b.pressed.connect(action)
+	city_buttons.add_child(b)
+
+func on_open_city() -> void:
+	if not state.can_act():
+		return
+	for b in city_buttons.get_children():
+		city_buttons.remove_child(b)
+		b.queue_free()
+	var p := state.player
+	if p.walls >= GameState.MAX_WALLS:
+		add_city_option("Walls: complete (+%d defence)" % (GameState.MAX_WALLS * GameState.WALL_DEFENCE), false, func(): pass)
+	else:
+		add_city_option("Walls %d/%d (%d): +%d city defence" % [p.walls + 1, GameState.MAX_WALLS, GameState.WALL_COST, GameState.WALL_DEFENCE], p.industry >= GameState.WALL_COST, on_city_build.bind(func(): state.player_build_walls()))
+	for key in GameState.Buildings.LIST:
+		var info: Dictionary = GameState.Buildings.LIST[key]
+		if p.buildings.has(key):
+			add_city_option("%s: built (%s)" % [info["name"], info["text"]], false, func(): pass)
+		else:
+			var text := "%s (%d): %s" % [info["name"], info["cost"], info["text"]]
+			if p.industry < info["cost"]:
+				text += "  (you need %d Industry)" % info["cost"]
+			add_city_option(text, state.can_build_building(p, key), on_city_build.bind(func(): state.player_build_building(key)))
+	add_city_option("Never mind", true, close_city)
+	city_panel.size = Vector2.ZERO
+	city_panel.visible = true
+	for b in all_game_buttons():
+		b.disabled = true
+
+func on_city_build(action: Callable) -> void:
+	action.call()
+	close_city()
+
+func close_city() -> void:
+	city_panel.visible = false
+	refresh()
 
 # --- Deals with one AI faction (panel) ------------------------------------------------
 func build_deal_ui() -> void:
@@ -557,7 +622,7 @@ func close_trade() -> void:
 
 # --- Mouse clicks: turn screen positions into hexes, then ask the state ---------
 func _unhandled_input(event: InputEvent) -> void:
-	if state.game_over or state.phase == GameState.Phase.CROSSING or state.is_waiting() or trade_panel.visible or deal_panel.visible:
+	if state.game_over or state.phase == GameState.Phase.CROSSING or state.is_waiting() or trade_panel.visible or deal_panel.visible or city_panel.visible:
 		return
 	if event is InputEventMouseMotion:
 		var cell := HexView2D.cell_at(get_local_mouse_position())

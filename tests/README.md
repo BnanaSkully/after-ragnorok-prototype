@@ -55,6 +55,7 @@ Run a test:
 | border_test.gd | closed borders: who may enter, AIs stay out, crossing declares war, walking out after peace, open borders both ways and expiry, allies/overlords; 300 games: no unit inside closed borders after a turn |
 | skoll_spawn_test.gd | where Sköll comes out: distance to cities, one rift per city, who he hunts first (fairness) |
 | choices_test.gd | ruins and events: nothing useless offered (Favour at 10), every event option costs something, every event can always be answered |
+| buildings_test.gd | each city building's effect exactly; 300 games: buildings the AIs own and Industry left unspent on turn 15 |
 | helpers.gd | not a test: shared helpers (answer every pop-up, list landing hexes) |
 
 Screenshot scripts need a virtual screen and an output folder in `S`:
@@ -63,7 +64,7 @@ Screenshot scripts need a virtual screen and an output folder in `S`:
 S=/tmp/shots xvfb-run -a -s "-screen 0 1152x648x24" /tmp/godot --rendering-driver opengl3 --script tests/fog_screenshot.gd
 ```
 
-(fog_screenshot.gd, four_click_screenshot.gd, early_screenshot.gd, war_screenshot.gd, deal_screenshot.gd, tribute_screenshot.gd, border_screenshot.gd: real clicks in a window; images go to $S. early_screenshot.gd saves the Landing, turn 1, a scout move, choosing an outpost, a pop-up and turn 9.)
+(fog_screenshot.gd, four_click_screenshot.gd, early_screenshot.gd, war_screenshot.gd, deal_screenshot.gd, tribute_screenshot.gd, border_screenshot.gd, city_screenshot.gd: real clicks in a window; images go to $S. early_screenshot.gd saves the Landing, turn 1, a scout move, choosing an outpost, a pop-up and turn 9.)
 
 Gotchas:
 - The map's terrain is random. A test that puts units on fixed hexes must call `H.flatten(s)` before the Landing, or a hex may be water.

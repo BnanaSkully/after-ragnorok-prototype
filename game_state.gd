@@ -16,6 +16,7 @@ extends RefCounted
 #   turn_events.gd      small events every few turns after the Landing
 #   discoveries.gd      ruins hidden in the fog (placing them, their rewards)
 #   terrain.gd          the land: plains, forest, hills, mountains, water
+#   buildings.gd        city buildings (Granary, Workshop, Watchtower, Forge)
 
 const DOOM_TURN := 20 # survive until this turn and Phase 3 (chaos) begins
 const MIN_LANDING_DISTANCE := 4 # how many hexes away from every AI city you must land
@@ -57,6 +58,7 @@ const NO_CELL := HexMap.NO_CELL
 const Crossing := preload("res://crossing_events.gd")
 const TurnEvents := preload("res://turn_events.gd")
 const Discoveries := preload("res://discoveries.gd")
+const Buildings := preload("res://buildings.gd")
 
 # The stages of a game, in order:
 # CROSSING = journey events, LANDING = choosing where to found your city, PLAYING = the turns.
@@ -319,6 +321,8 @@ func food_change(f: Faction) -> int:
 	var made := CITY_FOOD + (f.population - 1) # each extra population works more fields
 	for o in f.outposts:
 		made += Terrain.OUTPOST_FOOD[terrain_at(o)] # an outpost's income depends on its land
+	if f.buildings.has("granary"):
+		made += Buildings.GRANARY_FOOD
 	if daughter.shelters_with(f):
 		made += SunDaughter.FOOD
 	var eaten := 0
@@ -330,6 +334,8 @@ func industry_change(f: Faction) -> int:
 	var made := CITY_INDUSTRY + (f.population - 1)
 	for o in f.outposts:
 		made += Terrain.OUTPOST_INDUSTRY[terrain_at(o)]
+	if f.buildings.has("workshop"):
+		made += Buildings.WORKSHOP_INDUSTRY
 	return made + (SunDaughter.INDUSTRY if daughter.shelters_with(f) else 0)
 
 # City growth (the usual 4X rule): when stored Food reaches the growth cost and
@@ -529,6 +535,12 @@ func ai_build(f: Faction) -> void:
 		return
 	if f.industry >= UNIT_COST and food_change(f) - UNIT_FOOD_UPKEEP >= 0:
 		build_unit(f)
+		return
+	# It can't feed more armies: spare Industry goes into a city building.
+	for key in Buildings.LIST:
+		if not f.buildings.has(key) and f.industry >= Buildings.cost(key):
+			build_building(f, key)
+			return
 
 # --- Trading the Sun's Daughter ---------------------------------------------------
 # What she's worth to faction f, as a price in Industry (-10 to 10): positive,
@@ -1116,6 +1128,31 @@ func maybe_turn_event() -> void:
 
 # --- Walls ------------------------------------------------------------------
 # A city improvement: each level costs WALL_COST Industry and adds WALL_DEFENCE.
+func city_sight(f: Faction) -> int:
+	return CITY_SIGHT + (Buildings.WATCHTOWER_SIGHT if f.buildings.has("watchtower") else 0)
+
+# --- City buildings (buildings.gd) -------------------------------------------
+func can_build_building(f: Faction, key: String) -> bool:
+	return f.is_alive() and not f.buildings.has(key) and f.industry >= Buildings.cost(key)
+
+func build_building(f: Faction, key: String) -> bool:
+	if not can_build_building(f, key):
+		return false
+	f.industry -= Buildings.cost(key)
+	f.buildings[key] = true
+	if key == "forge":
+		f.strength += Buildings.FORGE_STRENGTH # new army units copy their faction's Strength
+	return true
+
+func player_build_building(key: String) -> void:
+	if not can_act():
+		return
+	if build_building(player, key):
+		messages = ["You built a %s (%d Industry): %s." % [Buildings.LIST[key]["name"], Buildings.cost(key), Buildings.LIST[key]["text"]]]
+		update_sight()
+	else:
+		messages = ["Can't build the %s." % Buildings.LIST[key]["name"]]
+
 func build_walls(f: Faction) -> bool:
 	if not f.is_alive() or f.walls >= MAX_WALLS or f.industry < WALL_COST:
 		return false
@@ -1248,6 +1285,8 @@ func defender_strength(u: Unit) -> int:
 func city_defence(f: Faction) -> int:
 	var defence: int = f.walls * WALL_DEFENCE + Terrain.DEFENCE[terrain_at(f.city_pos)] # a city on hills is harder to take
 	defence += (f.population - 1) * POP_DEFENCE # bigger cities hold out better
+	if f.buildings.has("watchtower"):
+		defence += Buildings.WATCHTOWER_DEFENCE
 	var garrison := unit_at(f.city_pos)
 	if garrison and garrison.faction == f:
 		defence += garrison.strength
@@ -1263,7 +1302,7 @@ func city_defence(f: Faction) -> int:
 # them are only seen while in sight. The AI plays by the same fog for
 # exploring, ruins and outposts.
 func can_see(f: Faction, cell: Vector2i) -> bool:
-	if f.is_alive() and HexMap.hex_distance(cell, f.city_pos) <= CITY_SIGHT:
+	if f.is_alive() and HexMap.hex_distance(cell, f.city_pos) <= city_sight(f):
 		return true
 	for o in f.outposts:
 		if HexMap.hex_distance(cell, o) <= OUTPOST_SIGHT:
