@@ -46,6 +46,9 @@ const AI_SIEGE_ODDS := 0.4 # an AI army attacks an enemy city when its chance is
 const AI_MARCH_ARMIES := 2 # an AI at war sends spare armies at enemy cities once it has this many
 const GROWTH_BASE := 10 # Food stored to grow from population 1 to 2...
 const GROWTH_STEP := 5 # ...and each later growth costs this much more
+# Population (city size): every point above 1 adds +1 Food, +1 Industry and
+# +1 city defence a turn (bigger cities hold out better: the usual 4X rule).
+const POP_DEFENCE := 1
 const WALL_COST := 10 # Industry per wall level
 const WALL_DEFENCE := 4 # city defence each wall level adds
 const MAX_WALLS := 2
@@ -340,7 +343,7 @@ func grow(f: Faction) -> void:
 	f.food -= growth_cost(f)
 	f.population += 1
 	if f == player:
-		add_message("Your city grew to population %d: +1 Food and +1 Industry a turn." % f.population)
+		add_message("Your city grew to population %d: +1 Food, +1 Industry and +%d city defence." % [f.population, POP_DEFENCE])
 
 # Not enough Food: stores stay at 0 and one army unit deserts (the one farthest
 # from the city, so the garrison stays; scouts eat nothing so they stay).
@@ -1235,14 +1238,16 @@ func resolve_combat(attacker: Unit, defender: Unit) -> void:
 		attacker.faction.remove_unit(attacker)
 		add_message("%s attacked %s and lost (%s)." % [attacker.faction.name, defender.faction.name, odds_text(chance)])
 
-# A city's defence (the usual 4X rule): the Strength of its own unit standing
-# in it (the garrison), plus its walls, plus the Daughter's bonus if it shelters her.
 # A unit's Strength when attacked: forest and hills help the defender.
 func defender_strength(u: Unit) -> int:
 	return u.strength + Terrain.DEFENCE[terrain_at(u.pos)]
 
+# A city's defence (the usual 4X rule): the Strength of its own unit standing
+# in it (the garrison), plus its walls, its land, its population above 1, plus
+# the Daughter's bonus if it shelters her.
 func city_defence(f: Faction) -> int:
 	var defence: int = f.walls * WALL_DEFENCE + Terrain.DEFENCE[terrain_at(f.city_pos)] # a city on hills is harder to take
+	defence += (f.population - 1) * POP_DEFENCE # bigger cities hold out better
 	var garrison := unit_at(f.city_pos)
 	if garrison and garrison.faction == f:
 		defence += garrison.strength

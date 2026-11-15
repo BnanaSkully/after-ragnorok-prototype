@@ -758,7 +758,7 @@ func _draw() -> void:
 			draw_circle(sc, r * 0.28, Color(1.0, 0.9, 0.3))
 
 	var font := ThemeDB.fallback_font
-	var info := "Turn %d   City %d   Food %d/%d (%+d)   Industry %d (%+d)   Units %d   Outposts %d   Army %d   Doom in %d" % [s.turn, player.population, player.food, s.growth_cost(player), s.food_change(player), player.industry, s.industry_change(player) - s.tribute_amount(player), player.units.size(), player.outposts.size(), s.army_power(player), GameState.DOOM_TURN - s.turn]
+	var info := "Turn %d   Pop %d   Food %d/%d (%+d)   Industry %d (%+d)   Units %d   Outposts %d   Army %d   Doom in %d" % [s.turn, player.population, player.food, s.growth_cost(player), s.food_change(player), player.industry, s.industry_change(player) - s.tribute_amount(player), player.units.size(), player.outposts.size(), s.army_power(player), GameState.DOOM_TURN - s.turn]
 	draw_string(font, Vector2(20, 35), info, HORIZONTAL_ALIGNMENT_LEFT, -1, 18)
 	var line2: Array[String] = [] # second line: tribute you pay, and where Sköll is
 	if player.overlord != "":

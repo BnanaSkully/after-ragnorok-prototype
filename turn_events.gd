@@ -28,7 +28,7 @@ const EVENTS := [
 		"title": "REFUGEES",
 		"text": "Stragglers from the Crossing stumble out of the dark: a dozen families, starving.",
 		"options": [
-			{"label": "Take them in (Food -4, population +1)", "effects": {"food": -4, "population": 1}, "result": "The newcomers are fed and set to work."},
+			{"label": "Take them in (Food -4, population +1: +1 Food, +1 Industry, +1 defence a turn)", "effects": {"food": -4, "population": 1}, "result": "The newcomers are fed and set to work."},
 			{"label": "Turn them away (her Favour -1)", "effects": {"favour": -1}, "result": "They walk back into the dark. The Sun's Daughter watches them go."},
 		],
 	},
