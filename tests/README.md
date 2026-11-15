@@ -37,6 +37,9 @@ Run a test:
 | balance_state.gd | 1000 games: how often your city falls with/without her, first-attack fairness |
 | early_game_test.gd | 300 games with a player who explores and builds: impossible states (units, outposts, fog), decisions on turns 1-10, ruins, outposts taken, events |
 | war_test.gd | war and peace and defensive alliances: each rule on a set-up game, then 300 games (no fights at peace, wars, peace, allies) |
+| terrain_test.gd | 300 random maps (connected, cities on open land), move costs, defence, outpost income by land, paths round a lake |
+| deal_test.gd | trading: quotes, trades, gifts (Trust cap), paying for peace, AI trade offers; 300 games |
+| tribute_test.gd | taking cities: tributary, tribute paid, no wars between them, uprisings (AI and you), siege odds, Sköll freeing tributaries; 300 games |
 | helpers.gd | not a test: shared helpers (answer every pop-up, list landing hexes) |
 
 Screenshot scripts need a virtual screen and an output folder in `S`:
@@ -45,9 +48,10 @@ Screenshot scripts need a virtual screen and an output folder in `S`:
 S=/tmp/shots xvfb-run -a -s "-screen 0 1152x648x24" /tmp/godot --rendering-driver opengl3 --script tests/fog_screenshot.gd
 ```
 
-(fog_screenshot.gd, four_click_screenshot.gd, early_screenshot.gd, war_screenshot.gd: real clicks in a window; images go to $S. early_screenshot.gd saves the Landing, turn 1, a scout move, choosing an outpost, a pop-up and turn 9.)
+(fog_screenshot.gd, four_click_screenshot.gd, early_screenshot.gd, war_screenshot.gd, deal_screenshot.gd, tribute_screenshot.gd: real clicks in a window; images go to $S. early_screenshot.gd saves the Landing, turn 1, a scout move, choosing an outpost, a pop-up and turn 9.)
 
 Gotchas:
+- The map's terrain is random. A test that puts units on fixed hexes must call `H.flatten(s)` before the Landing, or a hex may be water.
 - Ruins and small events open a pop-up that blocks End Turn. A test that loops over end_turn must answer them first (`H.answer_choices(s)`), or it never ends.
 - If a test script hits a script error it stops before quit() and Godot hangs until the timeout. Always run with `timeout`.
 - Godot buffers output; if a run is killed you may see nothing. Write progress to a file to debug.

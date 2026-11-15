@@ -135,7 +135,7 @@ func _initialize() -> void:
 			for msg in s.messages:
 				for a in s.factions:
 					for b in s.factions:
-						if a != b and msg.begins_with("%s attacked %s" % [a.name, b.name]) and not s.at_war(a, b): bad["fight at peace"] = bad.get("fight at peace", 0) + 1
+						if a != b and msg.begins_with("%s attacked %s" % [a.name, b.name]) and not s.at_war(a, b) and not s.tribute_bound(a, b): bad["fight at peace"] = bad.get("fight at peace", 0) + 1
 				if " declared war on the " in msg and msg.begins_with("The "): st["ai-ai wars"] += 1
 				if "DECLARED WAR on you" in msg: st["wars on you"] += 1
 				if "honour their" in msg: st["allies honoured"] += 1
