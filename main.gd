@@ -632,6 +632,13 @@ func _draw() -> void:
 			pts.append(pts[0])
 			draw_polyline(pts, Color(0.1, 0.1, 0.1), 2.0)
 
+	# Rifts in the void: where Sköll can come through (a dark swirl).
+	for r in Skoll.RIFTS:
+		var rc := HexMap.hex_center(r)
+		draw_circle(rc, HexMap.HEX_SIZE * 0.5, Color(0.12, 0.05, 0.18))
+		draw_arc(rc, HexMap.HEX_SIZE * 0.5, 0, TAU, 24, Color(0.6, 0.3, 0.8), 2.0)
+		draw_arc(rc, HexMap.HEX_SIZE * 0.28, 0.5, TAU * 0.8, 16, Color(0.6, 0.3, 0.8), 2.0)
+
 	for f in factions:
 		if f.city_pos == NO_CELL:
 			continue
@@ -677,8 +684,8 @@ func _draw() -> void:
 		rival_info = "Rival:  city destroyed"
 	draw_string(font, Vector2(20, 60), rival_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.9, 0.6, 0.6))
 	if skoll.active and player.city_pos != NO_CELL:
-		var skoll_info := "Sköll is %d hexes from your city    Your city's defence: %d" % [HexMap.hex_distance(skoll.pos, player.city_pos), city_defence(player)]
-		draw_string(font, Vector2(330, 60), skoll_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.6, 0.2))
+		var skoll_info := "Sköll hunts %s (%d hexes from yours)   Your defence: %d" % [skoll.target_text(), HexMap.hex_distance(skoll.pos, player.city_pos), city_defence(player)]
+		draw_string(font, Vector2(345, 60), skoll_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.6, 0.2))
 	var daughter_info := ""
 	if daughter.is_swallowed():
 		daughter_info = "Sköll swallowed %s. He is the sun now (Strength %d)." % [SunDaughter.NAME, skoll.strength]
