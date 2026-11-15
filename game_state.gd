@@ -62,7 +62,8 @@ func start_crossing() -> void:
 	player.food = Crossing.START_FOOD
 	player.industry = Crossing.START_INDUSTRY
 	daughter.reset(player, rival)
-	skoll.place_rifts(rival.city_pos) # a new rift layout every game
+	skoll.rifts.clear() # rolled on Skoll.RIFT_TURN, after both cities exist
+	skoll.revealed_rift = NO_CELL
 	messages.clear()
 
 # Apply a choice's effects. Nothing can drop below 0 (Strength below 1).
@@ -86,7 +87,7 @@ func start_landing() -> void:
 	messages = ["Choose where to land: click a hex to found your city."]
 
 func can_land_at(cell: Vector2i) -> bool:
-	return HexMap.in_bounds(cell) and HexMap.hex_distance(cell, rival.city_pos) >= MIN_LANDING_DISTANCE and not skoll.is_rift(cell)
+	return HexMap.in_bounds(cell) and HexMap.hex_distance(cell, rival.city_pos) >= MIN_LANDING_DISTANCE
 
 # Returns true if the player landed there.
 func try_land(cell: Vector2i) -> bool:
@@ -114,6 +115,8 @@ func end_turn() -> void:
 	diplomacy.rival_consider_breaking() # before its units move, so a betrayal can strike at once
 	rival_take_turn()
 	turn += 1
+	if turn == Skoll.RIFT_TURN:
+		skoll.place_rifts() # hidden until Sköll comes through one
 	skoll.take_turn()
 	if game_over: # Sköll may have destroyed the player's city or found the Daughter
 		return

@@ -336,9 +336,9 @@ func _draw() -> void:
 			pts.append(pts[0])
 			draw_polyline(pts, Color(0.1, 0.1, 0.1), 2.0)
 
-	# Rifts in the void: where Sköll can come through (a dark swirl).
-	for r in skoll.rifts:
-		var rc := HexView2D.hex_center(r)
+	# The rift Sköll last came through (a dark swirl). The others stay hidden.
+	if skoll.revealed_rift != NO_CELL:
+		var rc := HexView2D.hex_center(skoll.revealed_rift)
 		draw_circle(rc, HexView2D.HEX_SIZE * 0.5, Color(0.12, 0.05, 0.18))
 		draw_arc(rc, HexView2D.HEX_SIZE * 0.5, 0, TAU, 24, Color(0.6, 0.3, 0.8), 2.0)
 		draw_arc(rc, HexView2D.HEX_SIZE * 0.28, 0.5, TAU * 0.8, 16, Color(0.6, 0.3, 0.8), 2.0)
