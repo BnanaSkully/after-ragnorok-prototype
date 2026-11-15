@@ -34,7 +34,11 @@ const OUTPOST_MIN_DISTANCE := 3 # ...and at least this far from every city and o
 const OUTPOST_SIGHT := 2 # fog of war: an outpost sees this far
 const MAX_OUTPOSTS := 3 # per faction
 const AI_MAX_OUTPOSTS := 2 # the AI stops at this many
-const SPARE_OUTPOSTS_TRUST := 2 # an AI won't take your outposts while its Trust toward you is this high (or during an agreement)
+# Wars between AI factions (their wars with the player are in diplomacy.gd)
+const AI_WAR_GAP := 4 # an AI may declare war on another AI whose army is this much weaker...
+const AI_WAR_CHANCE := 0.05 # ...with this chance each turn
+const AI_PEACE_AFTER := 4 # after this many turns of war, two AIs may make peace...
+const AI_PEACE_CHANCE := 0.2 # ...with this chance each turn (twice as likely once Sköll howls)
 const GROWTH_BASE := 10 # Food stored to grow from population 1 to 2...
 const GROWTH_STEP := 5 # ...and each later growth costs this much more
 const WALL_COST := 10 # Industry per wall level
@@ -82,6 +86,10 @@ var ruins: Array[Dictionary] = []
 var pending_choices: Array[Dictionary] = []
 var next_event_turn := 0 # when the next small event happens
 var event_deck: Array = [] # small events not yet seen this game, shuffled
+# Wars between AI factions: "Celtic|Greek" -> the turn it started. Every pair
+# starts at peace. (The player's wars are in each Diplomacy, GameState.relations.)
+var ai_war_since := {}
+var ai_truce_until := {} # "Celtic|Greek" -> no new war between them before this turn
 
 func _init() -> void:
 	skoll = Skoll.new(self)
@@ -171,7 +179,8 @@ func end_turn() -> void:
 		return # (answer the offer or choice first)
 	messages.clear()
 	for r in relations:
-		r.rival_consider_breaking() # before its units move, so a betrayal can strike at once
+		r.rival_consider_war() # before its units move, so a war (or betrayal) can strike at once
+	ai_wars_turn()
 	for f in ais:
 		ai_take_turn(f)
 	turn += 1
@@ -353,10 +362,8 @@ func ai_take_turn(f: Faction) -> void:
 		var target: Unit = null
 		for c in HexMap.neighbours(u.pos):
 			var other := unit_at(c)
-			if other == null or other.faction == f:
-				continue
-			if other.faction == player and relation(f).pact_active():
-				continue
+			if other == null or not at_war(f, other.faction):
+				continue # only enemies it is at war with
 			target = other
 			break
 		if target:
@@ -382,7 +389,7 @@ func ai_take_turn(f: Faction) -> void:
 		var grab := NO_CELL
 		for c in HexMap.neighbours(u.pos):
 			var owner := outpost_owner(c)
-			if owner != null and owner != f and not is_blocked(c) and not (owner == player and spares_your_outposts(f)):
+			if owner != null and at_war(f, owner) and not is_blocked(c):
 				grab = c
 				break
 		if grab != NO_CELL:
@@ -390,15 +397,11 @@ func ai_take_turn(f: Faction) -> void:
 			continue
 		var options: Array[Vector2i] = []
 		for c in HexMap.neighbours(u.pos):
-			if not is_blocked(c) and not (is_city(c) and c != f.city_pos):
+			var o := outpost_owner(c)
+			if not is_blocked(c) and not (is_city(c) and c != f.city_pos) and (o == null or o == f):
 				options.append(c)
 		if not options.is_empty():
 			enter_hex(u, options.pick_random())
-
-# An AI leaves the player's outposts alone during an agreement, or while it trusts them enough.
-func spares_your_outposts(f: Faction) -> bool:
-	var r := relation(f)
-	return r.pact_active() or r.trust >= SPARE_OUTPOSTS_TRUST
 
 # An AI scout: heads for the nearest ruins it has seen, otherwise for the
 # nearest hex it hasn't explored yet; it never attacks.
@@ -572,7 +575,10 @@ func player_propose_pact(f: Faction) -> void:
 	if not can_act():
 		return
 	messages.clear()
-	relation(f).propose_pact() # posts its own message
+	if relation(f).at_war:
+		relation(f).propose_peace() # posts its own message
+	else:
+		relation(f).propose_pact()
 
 func player_demand(f: Faction, resource: String) -> void:
 	if not can_act():
@@ -619,15 +625,17 @@ func player_build_outpost(cell: Vector2i) -> bool:
 	update_sight()
 	return true
 
-# True if acting on this hex would break an oath: attacking a unit, or taking
-# an outpost, of a faction you have an agreement with (the view asks for a
-# second click before it does).
-func would_break_pact(cell: Vector2i) -> bool:
+# The faction the player would DECLARE WAR on by acting on this hex: attacking
+# its unit, or walking into its outpost, while at peace with it (null if none).
+# The view asks for a second click before it does.
+func war_target(cell: Vector2i) -> Faction:
 	var other := unit_at(cell)
 	if other != null:
-		return other.faction != player and relation(other.faction).pact_active()
+		return other.faction if other.faction != player and not at_war(player, other.faction) else null
 	var owner := outpost_owner(cell)
-	return owner != null and owner != player and relation(owner).pact_active()
+	if owner != null and owner != player and not at_war(player, owner):
+		return owner
+	return null
 
 # One of the player's units acts on a neighbouring hex: attack Sköll, persuade
 # the Daughter, attack an enemy unit (breaking an oath if one is in force), or
@@ -646,16 +654,14 @@ func player_unit_act(u: Unit, cell: Vector2i) -> bool:
 		skoll.attacked_by(u)
 	elif daughter.is_rogue() and cell == daughter.pos:
 		try_persuade(u)
-	elif other:
-		var r := relation(other.faction)
-		if r.pact_active():
-			r.break_pact()
-		resolve_combat(u, other) # moving into an enemy = attack
 	else:
-		var owner := outpost_owner(cell)
-		if owner != null and owner != player and relation(owner).pact_active():
-			relation(owner).break_pact()
-		enter_hex(u, cell)
+		var enemy := war_target(cell)
+		if enemy != null:
+			relation(enemy).player_declare_war() # (breaks your oath if you were allies)
+		if other:
+			resolve_combat(u, other) # moving into an enemy = attack
+		else:
+			enter_hex(u, cell)
 	u.moves -= 1
 	update_sight()
 	return true
@@ -666,7 +672,7 @@ func enter_hex(u: Unit, cell: Vector2i) -> void:
 	u.pos = cell
 	var f := u.faction
 	var owner := outpost_owner(cell)
-	if owner != null and owner != f:
+	if owner != null and owner != f and at_war(f, owner): # (at peace you just pass through)
 		owner.outposts.erase(cell)
 		f.outposts.append(cell)
 		if f == player:
@@ -684,6 +690,77 @@ func enter_hex(u: Unit, cell: Vector2i) -> void:
 				Discoveries.ai_take_ruin(self, f)
 				if player_can_see(cell):
 					add_message("The %s searched the ruins you spotted and carried something off." % f.name)
+
+# --- War and peace ------------------------------------------------------------
+# Every pair of factions starts at peace. At peace their units can't attack
+# each other or take each other's outposts. Sköll is everyone's enemy anyway.
+func at_war(a: Faction, b: Faction) -> bool:
+	if a == null or b == null or a == b:
+		return false
+	if a == player:
+		return relation(b).at_war
+	if b == player:
+		return relation(a).at_war
+	return ai_war_since.has(pair_key(a, b))
+
+func pair_key(a: Faction, b: Faction) -> String:
+	return a.name + "|" + b.name if a.name < b.name else b.name + "|" + a.name
+
+# Wars between the AI factions: a much stronger AI may declare war on a weaker
+# one; after a few turns of war they may make peace (more often once Sköll howls).
+func ai_wars_turn() -> void:
+	for a in ais:
+		for b in ais:
+			if a == b or not a.is_alive() or not b.is_alive():
+				continue
+			var key := pair_key(a, b)
+			if ai_war_since.has(key):
+				if a.name < b.name and turn - ai_war_since[key] >= AI_PEACE_AFTER:
+					var chance := AI_PEACE_CHANCE * (2.0 if turn >= Skoll.WARNING_TURN else 1.0)
+					if randf() < chance:
+						ai_war_since.erase(key)
+						ai_truce_until[key] = turn + Diplomacy.TRUCE_TURNS
+						add_message("The %s and the %s made peace." % [a.name, b.name])
+			elif turn >= ai_truce_until.get(key, 0) and army_power(a) - army_power(b) >= AI_WAR_GAP and randf() < AI_WAR_CHANCE:
+				ai_declare_war(a, b)
+
+func ai_declare_war(a: Faction, b: Faction) -> void:
+	ai_war_since[pair_key(a, b)] = turn
+	add_message("The %s declared war on the %s." % [a.name, b.name])
+	# Your ally was attacked: your oath says you join the war. You decide (pop-up).
+	var r := relation(b)
+	if r.pact_active() and not at_war(player, a):
+		pending_choices.append({
+			"title": "YOUR ALLY IS ATTACKED",
+			"text": "The %s have declared war on the %s, your allies. Your %s says you join the war against the %s." % [a.name, b.name, b.pact_word, a.name],
+			"options": [
+				{"label": "Honour it: war on the %s (%s Trust %+d, %s %+d)" % [a.name, b.name, Diplomacy.TRUST_JOINED_ALLY, a.name, Diplomacy.TRUST_DEFENDED_WAR], "effects": {"join_war": a.name, "ally": b.name}},
+				{"label": "Stay out: break your %s (%s Trust %+d, her Favour %+d)" % [b.pact_word, b.name, Diplomacy.TRUST_BROKEN, Diplomacy.BROKEN_OATH_FAVOUR], "effects": {"abandon_ally": b.name}},
+			],
+		})
+
+# An AI declared war on the player: every other AI allied with the player
+# keeps its oath and declares war on the aggressor, unless the aggressor is far
+# stronger, in which case it breaks its word.
+func player_attacked(aggressor: Faction) -> void:
+	for r in relations:
+		var ally := r.other
+		if ally == aggressor or not ally.is_alive() or not r.pact_active() or at_war(ally, aggressor):
+			continue
+		if army_power(ally) - army_power(aggressor) <= Diplomacy.ALLY_ABANDON_GAP:
+			r.pact_turns_left = 0
+			r.rival_broken_oaths += 1
+			ally.favour = clampi(ally.favour + Diplomacy.RIVAL_BROKEN_OATH_FAVOUR, 0, SunDaughter.MAX_FAVOUR)
+			remember("Turn %d: the %s BROKE THEIR %s: too afraid of the %s to join your war." % [turn, ally.name, r.pact_word().to_upper(), aggressor.name])
+		else:
+			ai_war_since[pair_key(ally, aggressor)] = turn
+			remember("Turn %d: the %s honour their %s and declare war on the %s!" % [turn, ally.name, r.pact_word(), aggressor.name])
+
+func faction_named(n: String) -> Faction:
+	for f in factions:
+		if f.name == n:
+			return f
+	return null
 
 # --- Choices (ruins, small events) ---------------------------------------------
 func has_pending_choice() -> bool:
@@ -732,6 +809,17 @@ func apply_effects(effects: Dictionary) -> void:
 	player.industry = maxi(0, player.industry + effects.get("industry", 0))
 	player.population = maxi(1, player.population + effects.get("population", 0))
 	player.favour = clampi(player.favour + effects.get("favour", 0), 0, SunDaughter.MAX_FAVOUR)
+	if effects.has("join_war"): # answering your ally's call to arms
+		var enemy := faction_named(effects["join_war"])
+		var r_ally := relation(faction_named(effects["ally"]))
+		if enemy.is_alive() and not at_war(player, enemy):
+			relation(enemy).player_declare_war(true)
+		r_ally.change_trust(Diplomacy.TRUST_JOINED_ALLY)
+		remember("Turn %d: you kept your %s with the %s and went to war. Their Trust %+d." % [turn, r_ally.pact_word(), r_ally.other.name, Diplomacy.TRUST_JOINED_ALLY])
+	if effects.has("abandon_ally"):
+		var r_ally := relation(faction_named(effects["abandon_ally"]))
+		if r_ally.pact_active():
+			r_ally.break_pact()
 	if effects.get("reveal", false):
 		var hidden := ais.filter(func(f): return f.is_alive() and not player.explored.has(f.city_pos))
 		if hidden.is_empty():

@@ -2,15 +2,21 @@ class_name Diplomacy
 extends RefCounted
 
 # The diplomatic relationship between the player and ONE AI faction ("other"):
-# sworn agreements (an oath, pact, bond... each faction has its own word),
-# demands, Trust, and a memory of whether promises were kept. GameState keeps
+# war and peace, sworn agreements (an oath, pact, bond... each faction has its
+# own word), demands, Trust, and a memory of whether promises were kept.
+#
+# War and peace (standard 4X): every pair of factions starts at PEACE. At peace
+# their units can't attack each other or take each other's outposts. Attacking
+# declares WAR, which costs Trust. Peace is made by agreement and brings a short
+# truce. A sworn agreement (oath) is a DEFENSIVE ALLIANCE: if anyone declares
+# war on one ally, the other joins the war against the aggressor. GameState keeps
 # one of these per AI faction. The player gets one diplomatic action per turn
 # in total, across all factions (GameState.diplomacy_action_used).
 #
 # "game" is the GameState (game_state.gd): used to see the factions, the turn
 # and the Sun's Daughter, and to post messages.
 
-const PACT_LENGTH := 5 # turns an oath lasts
+const PACT_LENGTH := 10 # turns a defensive alliance (oath) lasts
 const TRUST_MIN := -10
 const TRUST_MAX := 10
 const TRUST_KEPT := 2 # trust gained when an oath runs its full length
@@ -20,6 +26,19 @@ const BROKEN_OATH_FAVOUR := -2 # the Sun's Daughter sees it too
 const DEMAND_AMOUNT := 5 # Food or Industry asked for in a demand
 const TRUST_DEMAND_PAID := -1 # they resent being squeezed even when they pay
 const TRUST_DEMAND_REFUSED := -2 # and resent it more when they refuse
+# War and peace
+const TRUST_DECLARED_WAR := -3 # you declared war on them
+const TRUST_WARMONGER := -1 # everyone else, when you declare war (not when you're defending an ally)
+const TRUST_DEFENDED_WAR := -2 # them, when you join a war on them to defend your ally
+const TRUST_JOINED_ALLY := 2 # your ally, when you join its war as you swore to
+const TRUCE_TURNS := 5 # after peace is made, they won't declare war again for this long
+const TRUST_PEACE_MADE := 1
+const RIVAL_WAR_GAP := 4 # it may declare war when its army is this much stronger (and it doesn't trust you)...
+const RIVAL_WAR_HATE := -5 # ...or when its Trust is this low, or it's starving
+const RIVAL_WAR_CHANCE := 0.1 # chance each turn when one of those is true
+const RIVAL_PEACE_TURNS := 5 # at war this long (or weaker, or afraid of Sköll), it may offer peace
+const RIVAL_PEACE_CHANCE := 0.25
+const ALLY_ABANDON_GAP := -4 # an AI ally breaks its word rather than join a war on someone this much stronger
 
 # The AI faction's own diplomacy
 const RIVAL_OFFER_CHANCE := 0.15 # chance each turn that it proposes or demands something (per faction; with 3 AIs about 1 turn in 3 has an offer)
@@ -53,7 +72,10 @@ var game: GameState:
 var _game: WeakRef
 var other: Faction # the AI faction this relationship is with
 var trust := 0 # how much that faction trusts the player (-10 to 10)
-var pact_turns_left := 0 # 0 = no agreement in force
+var pact_turns_left := 0 # 0 = no alliance in force
+var at_war := false
+var war_since := 0 # the turn the current war started
+var truce_until := 0 # after peace, they won't declare war before this turn
 var oathbreaker_until := 0 # the player counts as an oathbreaker with them before this turn
 var pending: Dictionary = {} # their offer waiting for the player's answer, e.g. {"type": "demand", "resource": "food"}
 var rival_broken_oaths := 0 # how many agreements they have broken
@@ -72,6 +94,9 @@ var action_used: bool:
 func pact_active() -> bool:
 	return pact_turns_left > 0
 
+func in_truce() -> bool:
+	return game.turn < truce_until
+
 func is_oathbreaker() -> bool:
 	return game.turn < oathbreaker_until
 
@@ -84,9 +109,9 @@ func a_pact() -> String:
 	var word := pact_word()
 	return ("an " if word[0] in "aeiou" else "a ") + word
 
-# The chance (0 to 1) that the rival accepts an oath right now.
+# The chance (0 to 1) that the rival accepts an oath (a defensive alliance) right now.
 func accept_chance() -> float:
-	if is_oathbreaker():
+	if is_oathbreaker() or at_war:
 		return 0.0
 	var chance := 0.5 + trust * 0.1
 	if game.turn >= Skoll.WARNING_TURN:
@@ -135,7 +160,73 @@ func demand(resource: String) -> bool:
 	return false
 
 func can_propose() -> bool:
-	return not action_used and not pact_active() and other.is_alive()
+	return not action_used and not pact_active() and not at_war and other.is_alive()
+
+func can_propose_peace() -> bool:
+	return not action_used and at_war and other.is_alive()
+
+# The chance (0 to 1) that the rival makes peace right now: Trust, who's winning,
+# and the fear of Sköll all count.
+func peace_chance() -> float:
+	var chance := 0.3 + trust * 0.1 + (army_power(game.player) - army_power(other)) * 0.05
+	if game.turn >= Skoll.WARNING_TURN:
+		chance += 0.2 # the howling makes enemies think again
+	return clampf(chance, 0.05, 0.95)
+
+# The player's diplomatic action: propose peace. Returns true if accepted.
+func propose_peace() -> bool:
+	if not can_propose_peace():
+		return false
+	action_used = true
+	var chance := peace_chance()
+	if randf() < chance:
+		make_peace()
+		remember("Turn %d: you made peace with %s (%d%% chance). Truce for %d turns, Trust %+d." % [game.turn, other.name, roundi(chance * 100), TRUCE_TURNS, TRUST_PEACE_MADE])
+		return true
+	remember("Turn %d: %s refused peace (%d%% chance). The war goes on." % [game.turn, other.name, roundi(chance * 100)])
+	return false
+
+func make_peace() -> void:
+	at_war = false
+	truce_until = game.turn + TRUCE_TURNS
+	change_trust(TRUST_PEACE_MADE)
+
+# The player declares war on this faction (by attacking it). Breaking an
+# alliance to do it is also breaking your oath. "defending" = joining a war on
+# them because they attacked your ally: no warmonger penalty.
+func player_declare_war(defending := false) -> void:
+	if at_war:
+		return
+	if pact_active():
+		break_pact()
+	elif defending:
+		change_trust(TRUST_DEFENDED_WAR)
+	else:
+		change_trust(TRUST_DECLARED_WAR)
+	at_war = true
+	war_since = game.turn
+	if defending:
+		remember("Turn %d: you declared war on %s to defend your ally. Trust %+d." % [game.turn, other.name, TRUST_DEFENDED_WAR])
+		return
+	for r in game.relations:
+		if r != self and r.other.is_alive():
+			r.change_trust(TRUST_WARMONGER)
+	remember("Turn %d: YOU DECLARED WAR on %s. Their Trust %+d, everyone else's %+d (warmonger)." % [game.turn, other.name, TRUST_DECLARED_WAR, TRUST_WARMONGER])
+
+# This AI declares war on the player (an ally doing so breaks its oath).
+# Then the player's other allies answer the call (GameState.player_attacked).
+func rival_declare_war(why: String) -> void:
+	var rival: Faction = other
+	at_war = true
+	war_since = game.turn
+	if pact_active():
+		pact_turns_left = 0
+		rival_broken_oaths += 1
+		rival.favour = clampi(rival.favour + RIVAL_BROKEN_OATH_FAVOUR, 0, SunDaughter.MAX_FAVOUR)
+		remember("Turn %d: %s BROKE THEIR %s and DECLARED WAR on you (%s)." % [game.turn, rival.name, pact_word().to_upper(), why])
+	else:
+		remember("Turn %d: %s DECLARED WAR on you (%s)." % [game.turn, rival.name, why])
+	game.player_attacked(rival)
 
 # The player's diplomatic action: propose an oath. Returns true if accepted.
 func propose_pact() -> bool:
@@ -154,7 +245,8 @@ func propose_pact() -> bool:
 	remember("Turn %d: %s refused your %s (%d%% chance)." % [game.turn, other.name, word, roundi(chance * 100)])
 	return false
 
-# The player attacks the rival while an oath is in force.
+# The player breaks an alliance: by attacking the ally, or by refusing to join
+# its war when it was attacked.
 func break_pact() -> void:
 	pact_turns_left = 0
 	change_trust(TRUST_BROKEN)
@@ -173,20 +265,33 @@ func new_turn() -> void:
 			remember("Turn %d: the %s with %s ran its course. Both kept their word. Trust %+d." % [game.turn, pact_word(), other.name, TRUST_KEPT])
 
 # --- The rival's own diplomacy ------------------------------------------------
-# Called at the start of the rival's turn, before its units move: it may break
-# an oath if it's much stronger or starving. Its units can then attack at once.
-func rival_consider_breaking() -> void:
-	if not pact_active():
+# Called at the start of the rival's turn, before its units move: it may
+# declare war on the player. An ally only betrays you when it's much stronger
+# or starving; anyone else also when it hates you (Trust -5 or less). Never
+# during a truce. Its units can attack at once.
+func rival_consider_war() -> void:
+	if at_war or in_truce() or not other.is_alive() or not game.player.is_alive():
 		return
 	var rival: Faction = other
 	var gap := army_power(rival) - army_power(game.player)
 	var starving: bool = rival.food <= 0 and game.food_change(rival) < 0
-	if (gap >= RIVAL_BREAK_GAP or starving) and randf() < RIVAL_BREAK_CHANCE:
-		pact_turns_left = 0
-		rival_broken_oaths += 1
-		rival.favour = clampi(rival.favour + RIVAL_BROKEN_OATH_FAVOUR, 0, SunDaughter.MAX_FAVOUR)
-		var why := "they were starving" if starving else "their army outgrew yours"
-		remember("Turn %d: %s BROKE THEIR %s with you (%s)." % [game.turn, rival.name, pact_word().to_upper(), why])
+	var why := ""
+	if pact_active():
+		if gap >= RIVAL_BREAK_GAP:
+			why = "their army outgrew yours"
+		elif starving:
+			why = "they were starving"
+		if why != "" and randf() < RIVAL_BREAK_CHANCE:
+			rival_declare_war(why)
+		return
+	if trust <= RIVAL_WAR_HATE:
+		why = "they despise you"
+	elif gap >= RIVAL_WAR_GAP and trust < 2:
+		why = "their army is far stronger"
+	elif starving:
+		why = "they are starving and want your stores"
+	if why != "" and randf() < RIVAL_WAR_CHANCE:
+		rival_declare_war(why)
 
 # Called at the start of the player's turn: the rival may propose an oath or
 # make a demand. Sets "pending"; main.gd shows the Accept/Refuse pop-up.
@@ -202,10 +307,15 @@ func rival_make_offer() -> void:
 	if game.ai_wants_rid_of_daughter(rival) and randf() < SCARED_OFFER_CHANCE:
 		pending = {"type": "daughter", "pay": mini(maxi(0, -game.daughter_value(rival)), rival.industry)}
 		return
-	if randf() >= RIVAL_OFFER_CHANCE:
-		return
 	var gap := army_power(rival) - army_power(player)
 	var afraid: bool = game.turn >= Skoll.WARNING_TURN
+	if at_war:
+		# Losing, tired of the war, or afraid of Sköll: it may ask for peace.
+		if (gap < 0 or afraid or game.turn - war_since >= RIVAL_PEACE_TURNS) and randf() < RIVAL_PEACE_CHANCE:
+			pending = {"type": "peace"}
+		return
+	if randf() >= RIVAL_OFFER_CHANCE:
+		return
 	if not pact_active() and not is_oathbreaker() and (afraid or gap < 0 or trust >= 2):
 		pending = {"type": "oath"}
 		return
@@ -224,7 +334,9 @@ func has_pending() -> bool:
 func pending_text() -> String:
 	var rival: Faction = other
 	if pending.get("type") == "oath":
-		return "%s proposes %s: %d turns in which neither side attacks.\n\nAccept: the %s begins, Trust %+d.\nRefuse: Trust %+d." % [rival.name, a_pact(), PACT_LENGTH, pact_word(), TRUST_ACCEPTED_THEIR_OATH, TRUST_REFUSED_THEIR_OATH]
+		return "%s proposes %s, a defensive alliance for %d turns: if anyone declares war on one of you, the other joins the war.\n\nAccept: the %s begins, Trust %+d.\nRefuse: Trust %+d." % [rival.name, a_pact(), PACT_LENGTH, pact_word(), TRUST_ACCEPTED_THEIR_OATH, TRUST_REFUSED_THEIR_OATH]
+	if pending.get("type") == "peace":
+		return "%s is tired of the war and offers peace.\n\nAccept: peace, and a truce for %d turns. Trust %+d.\nRefuse: the war goes on." % [rival.name, TRUCE_TURNS, TRUST_PEACE_MADE]
 	if pending.get("type") == "demand":
 		var res: String = String(pending["resource"]).capitalize()
 		return "%s demands %d %s from you. Their army is stronger than yours.\n\nPay: you lose %d %s, Trust %+d.\nRefuse: Trust %+d." % [rival.name, DEMAND_AMOUNT, res, DEMAND_AMOUNT, res, TRUST_PAID_THEIR_DEMAND, TRUST_REFUSED_THEIR_DEMAND]
@@ -249,6 +361,12 @@ func answer(accept: bool) -> void:
 		else:
 			change_trust(TRUST_REFUSED_THEIR_OATH)
 			remember("Turn %d: you refused %s's %s. Trust %+d." % [game.turn, rival.name, pact_word(), TRUST_REFUSED_THEIR_OATH])
+	elif offer["type"] == "peace":
+		if accept and at_war:
+			make_peace()
+			remember("Turn %d: you accepted %s's offer of peace. Truce for %d turns, Trust %+d." % [game.turn, rival.name, TRUCE_TURNS, TRUST_PEACE_MADE])
+		else:
+			remember("Turn %d: you refused %s's offer of peace. The war goes on." % [game.turn, rival.name])
 	elif offer["type"] == "daughter":
 		if accept and game.daughter.shelters_with(rival):
 			var pay: int = mini(offer["pay"], rival.industry)

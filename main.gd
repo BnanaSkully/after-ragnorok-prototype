@@ -152,15 +152,23 @@ func update_buttons() -> void:
 		var set: Dictionary = faction_buttons[f]
 		var pact: Button = set["pact"]
 		var word: String = f.pact_word.capitalize()
+		# One button for war and alliance: at war it asks for peace; at peace it
+		# proposes the oath (a defensive alliance).
 		if not f.is_alive():
 			pact.text = "Fallen"
-		elif d.pact_active():
-			pact.text = "%s: %d turns" % [word, d.pact_turns_left]
-		elif d.is_oathbreaker():
-			pact.text = "They refuse"
+			pact.disabled = true
+		elif d.at_war:
+			pact.text = "Peace %d%%" % roundi(d.peace_chance() * 100)
+			pact.disabled = not playing or not d.can_propose_peace()
 		else:
-			pact.text = "%s %d%%" % [word, roundi(d.accept_chance() * 100)]
-		pact.disabled = not playing or not d.can_propose() or d.is_oathbreaker()
+			if d.pact_active():
+				pact.text = "%s: %d turns" % [word, d.pact_turns_left]
+			elif d.is_oathbreaker():
+				pact.text = "They refuse"
+			else:
+				pact.text = "%s %d%%" % [word, roundi(d.accept_chance() * 100)]
+			pact.disabled = not playing or not d.can_propose() or d.is_oathbreaker()
+		pact.tooltip_text = "Ask for peace (uses your diplomatic action)." if d.at_war else "%s: a defensive alliance for %d turns. If anyone declares war on one of you, the other joins the war." % [word, Diplomacy.PACT_LENGTH]
 		for resource in ["food", "industry"]:
 			var button: Button = set[resource]
 			var chance: float = d.demand_chance(resource)
@@ -317,7 +325,7 @@ func show_offer() -> void:
 	offer_heading.text = "A MESSAGE FROM THE %s" % r.other.name.to_upper()
 	offer_label.text = r.pending_text()
 	var kind: String = r.pending.get("type")
-	offer_accept_button.text = "Pay" if kind == "demand" else ("Take her" if kind == "daughter" else "Accept")
+	offer_accept_button.text = {"demand": "Pay", "daughter": "Take her", "peace": "Make peace"}.get(kind, "Accept")
 	offer_panel.visible = true
 	update_buttons()
 
@@ -488,12 +496,16 @@ func _unhandled_input(event: InputEvent) -> void:
 			# click your unit to select it (again to deselect); units that already moved can't be picked
 			selected = null if clicked == selected or clicked.moves <= 0 else clicked
 		elif selected and HexMap.is_neighbour(selected.pos, cell):
-			if state.would_break_pact(cell) and break_warning_cell != cell:
-				# first click only warns; a second click on the same unit breaks the oath
+			var them: Faction = state.war_target(cell)
+			if them != null and break_warning_cell != cell:
+				# first click only warns; a second click on the same hex declares war
 				break_warning_cell = cell
-				var them: Faction = state.unit_at(cell).faction if state.unit_at(cell) else state.outpost_owner(cell)
-				var word: String = them.pact_word
-				state.messages = ["This breaks your %s (Trust %+d, %sbreaker for %d turns, she will see). Click again to go ahead." % [word, Diplomacy.TRUST_BROKEN, word, Diplomacy.OATHBREAKER_TURNS]]
+				var d: Diplomacy = state.relation(them)
+				if d.pact_active():
+					var word: String = them.pact_word
+					state.messages = ["The %s are your ALLIES. This breaks your %s and declares war:" % [them.name, word], "Trust %+d, %sbreaker for %d turns, and she will see. Click again to go ahead." % [Diplomacy.TRUST_BROKEN, word, Diplomacy.OATHBREAKER_TURNS]]
+				else:
+					state.messages = ["You are at peace with the %s. This DECLARES WAR:" % them.name, "their Trust %+d, everyone else's %+d (warmonger). Click again to go ahead." % [Diplomacy.TRUST_DECLARED_WAR, Diplomacy.TRUST_WARMONGER]]
 				queue_redraw()
 				return
 			break_warning_cell = NO_CELL
@@ -669,14 +681,33 @@ func _draw() -> void:
 		var y := BLOCK_Y + i * BLOCK_H
 		var status := "City %d  Units %d  Food %d  Ind %d" % [f.population, f.units.size(), f.food, f.industry] if f.is_alive() else "city destroyed"
 		draw_string(font, Vector2(PANEL_X, y + 12), "%s  %s" % [f.name.to_upper(), status], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, unit_colour(f).lightened(0.3))
+		# Line 2: war or peace with you (coloured), Trust, and the AI's own wars.
+		var stance := "AT WAR with you"
+		var stance_col := Color(1.0, 0.4, 0.3)
+		if not d.at_war:
+			stance_col = Color(0.6, 0.9, 0.6)
+			if d.pact_active():
+				stance = "ALLIES" # (the button shows how long the oath lasts)
+			elif d.in_truce():
+				stance = "truce to turn %d" % d.truce_until
+			else:
+				stance = "at peace"
+		if not f.is_alive():
+			stance = ""
+		draw_string(font, Vector2(PANEL_X, y + 32), stance, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, stance_col)
 		var line := "Trust %+d" % d.trust
-		if d.pact_active():
-			line += "   %s in force: %d turns" % [f.pact_word, d.pact_turns_left]
-		elif d.is_oathbreaker():
-			line += "   you broke your %s (until turn %d)" % [f.pact_word, d.oathbreaker_until]
+		if d.is_oathbreaker():
+			line += "  you broke your %s" % f.pact_word
 		if d.rival_broken_oaths > 0:
-			line += "   they broke %d" % d.rival_broken_oaths
-		draw_string(font, Vector2(PANEL_X, y + 32), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.85, 0.85, 0.85))
+			line += "  they broke %d" % d.rival_broken_oaths
+		var foes: Array[String] = []
+		for g in s.ais:
+			if s.at_war(f, g):
+				foes.append(g.name)
+		if not foes.is_empty():
+			line += "  war: " + ", ".join(foes)
+		var stance_w := font.get_string_size(stance + "  ", HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x if stance != "" else 0.0
+		draw_string(font, Vector2(PANEL_X + stance_w, y + 32), line, HORIZONTAL_ALIGNMENT_LEFT, 330 - stance_w, 13, Color(0.85, 0.85, 0.85))
 	var hy := BLOCK_Y + s.ais.size() * BLOCK_H + 8
 	draw_string(font, Vector2(PANEL_X, hy), "They remember:", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.7, 0.7, 0.7))
 	for i in s.diplomacy_log.size():
