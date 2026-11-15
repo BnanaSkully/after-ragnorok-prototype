@@ -79,6 +79,12 @@ CLAUDE.md holds the rules for working; this file holds the history.
 - Early game (300 games, a test player that explores and builds): 0 of 3000 early turns without a decision; endings 225 survived / 49 fell / 26 Daughter found (before the change, four_test: 229 / 50 / 21).
 - Before vs after the early-game change, same simple player that never expands: each AI's units on turn 10 2.7 -> 6.0, AI demands per game 0.5 -> 1.25, oath offers 4.9 -> 5.0.
 
+## Where we stopped (end of the borders session)
+
+- Nathan asked why the last round took long. Answer: mostly testing. The full suite takes 12-15 minutes and ran several times, border_test ran about 5 times, and three rounds went on false alarms from the tests themselves (checking mid-turn, a ruin pop-up stopping End Turn) rather than the game. Fixes offered: quick runs with fewer games while building, the full suite once at the end, parallel test runs (not set up yet)
+- Nathan asked what other mechanics are missing: the list is in CLAUDE.md "Missing 4X mechanics". Claude's honest pushback: the biggest gap is the end of the game (Phase 3 isn't built), and nothing since the early-game fix has been played by a human. Recommended order: Nathan plays, then Phase 3 step 1, then zone of control and healing. Nathan hasn't chosen yet
+- Open questions for Nathan (also in CLAUDE.md "Later"): should declaring war cost the Daughter's Favour; tribute by diplomacy without a war; a choice when finding a rift (sealing it changes Sköll)
+
 ## Ideas parked (see CLAUDE.md "Later")
 
-Faction names, the Daughter's name, Crossing text, small-event and ruin text, a choice when you find a rift (e.g. seal it: changes Sköll, ask first), AIs using fog of war to chase a rogue Daughter, AI landing choice, AI-to-AI diplomacy and trading, combat defence bonus, mini-games, full rifts (Doom-creatures, seasons, underground travel). Phase 3 is designed (CLAUDE.md), not built.
+Faction names, the Daughter's name, Crossing text, small-event and ruin text, a choice when you find a rift (e.g. seal it: changes Sköll, ask first), AIs using fog of war to chase a rogue Daughter, AI landing choice, AI-to-AI diplomacy and trading, combat defence bonus, paying an AI to join your war, mini-games, full rifts (Doom-creatures, seasons, underground travel). Phase 3 is designed (CLAUDE.md), not built.

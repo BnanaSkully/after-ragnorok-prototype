@@ -38,11 +38,11 @@ Goal: Sköll can't be killed, but he can be bound with a chain (like Fenrir and 
 - Fog of war with memory, for every faction (GameState.can_see, Faction.explored): each faction sees CITY_SIGHT (3) around its city, OUTPOST_SIGHT (2) around outposts, 2 around army units and 3 around scouts. Hexes once seen stay explored (land, cities, outposts, ruins stay known; units, Sköll and the Daughter only while in sight). Never-seen hexes are black. During the Landing the ark sees the shape of the land and where you may land, but not cities. The AIs explore and choose ruins/outposts by their own fog (they still always know where a rogue Daughter is: unchanged)
 - Scouts (unit.gd, Unit.Kind.SCOUT): 2 moves, Strength 1, sight 3, eat no Food, 3 Industry, at most 2 per faction. A scout keeps its selection while it has a move left. Starving never makes a scout desert. AI scouts head for the nearest ruins they've seen, then the nearest unexplored hex; they never attack
 - Discoveries (discoveries.gd): 8 ruins hidden at least 4 hexes from every city (out of sight at the start), placed at the Landing. The first unit to step on ruins searches them: the player chooses Food +6, Industry +4 or the Daughter's Favour +1 (pop-up); an AI takes Food if short of it, else Industry. Rifts (Sköll's, still rolled on turn 2) become visible to a faction when it sees them and stay shown until they're re-rolled (Faction.known_rifts). No choice on finding a rift yet (sealing rifts would change Sköll: ask Nathan first)
-- Outposts (GameState.outpost_spots, build_outpost): 6 Industry; on a hex you can see right now, within 5 of your city, at least 3 from every city and outpost, not on unsearched ruins. +1 Food and +1 Industry a turn, sight 2, claim their hex and the 6 around it as territory. Only a faction AT WAR with the owner can take an outpost: a unit stepping onto one nobody stands on takes it (at peace you just pass through; the player walking onto a peaceful faction's outpost declares war, with the two-click warning). Up to 3 founded per faction (captured ones can go over). The AI founds up to 2 before turn 10 and takes enemy outposts next to its units. A city that falls loses its outposts. Territory is a rule now (GameState.territory_owner); the view only colours it
+- Outposts (GameState.outpost_spots, build_outpost): 6 Industry; on a hex you can see right now, within 5 of your city, at least 3 from every city and outpost, not on unsearched ruins. Income depends on the land (see Terrain below: plains +2 Food, forest +1/+1, hills +2 Industry), sight 2, claim their hex and the 6 around it as territory. Only a faction AT WAR with the owner can take an outpost: a unit stepping onto one nobody stands on takes it (at peace you just pass through; the player walking onto a peaceful faction's outpost declares war, with the two-click warning). Up to 3 founded per faction (captured ones can go over). The AI founds up to 2 before turn 10 and takes enemy outposts next to its units. A city that falls loses its outposts. Territory is a rule now (GameState.territory_owner); the view only colours it
 - Small events (turn_events.gd): from turn 3-4, one every 2-3 turns (random), each at most once a game, player only. Every option costs something (Food, Industry, Favour, population, or a coin flip); costs you can't afford are greyed out, and every event has an option that's always possible. Placeholder text
 - Pop-ups: ruins and events go in GameState.pending_choices and are shown before any AI offer; the turn can't end until they're answered (GameState.is_waiting, can_act)
 - Combat fix: beating a city's garrison no longer moves the attacker into the city
-- Measured (tests/early_game_test.gd, 300 games, a test player that explores and builds): turns 1-10 with no decision 0 of 3000; pop-up on 33% of early turns; something affordable to build on 83%. Per game: 6.7 events, ruins searched 2.2 by you and 5.6 by the three AIs, you found 3.0 outposts, lost about 2 and took about 1.4. Endings 225 survived / 49 city fell / 26 Daughter found
+- Measured (tests/early_game_test.gd, 300 games, a test player that explores and builds): turns 1-10 with no decision 0 of 3000; pop-up on 33% of early turns; something affordable to build on 83%. Per game: 6.7 events, ruins searched 2.2 by you and 5.6 by the three AIs, you found 3.0 outposts, lost about 2 and took about 1.4 (before war and peace; since then outposts are only taken in a war: lost about 0.3-0.4 a game). Endings 225 survived / 49 city fell / 26 Daughter found
 - Side effect to watch: the AIs expand too, so on turn 10 each AI has about 6 units (was 2.7). Against a player who doesn't expand, AI demands go from 0.5 to 1.25 a game
 
 ## Terrain, trading and tributaries: built (Nathan: "terrain first, then trading, cities become tributaries")
@@ -117,6 +117,8 @@ Keep game rules separate from drawing. The game state and rules (map data, terra
 - For refactors: seeded before/after comparison must be identical
 - For balance changes: measure over hundreds of games and report the numbers
 - Always run Godot with `timeout`: a script error in a test stops it before quit() and it hangs
+- Keep rounds fast: the full suite (12 scripts, most play 300 games) takes 12-15 minutes. While building, run only the tests the change touches, with fewer games (e.g. 50); run the full suite once before pushing, in the background, and don't edit game scripts while it runs (each test loads them when it starts). Possible speed-ups not done yet: run test scripts in parallel, a quick-mode game count, profiling the AI's pathfinding
+- Before blaming the game for a failed check, make sure the test checks at the moment the rule promises (e.g. end of turn), has answered every pop-up, and didn't land on water
 - NOTES.md has the history, Nathan's decisions and the bugs we learnt from
 
 ## Code notes
@@ -137,6 +139,28 @@ Keep game rules separate from drawing. The game state and rules (map data, terra
 - Code phases in order: CROSSING, LANDING, PLAYING (PLAYING covers game Phase 2), in GameState.Phase; Phase 3 will add CHAOS
 - Sköll's numbers (ARRIVAL_TURN, STRENGTH, ...) are constants at the top of skoll.gd; the Daughter's (NAME, FOOD, DEFENCE, Favour ranges) at the top of sun_daughter.gd
 - Pointy-top hexes, offset rows, drawn with code in _draw()
+
+## What's next (agreed order, as of the session that added borders)
+
+Claude's recommendation, waiting on Nathan's choice:
+1. Nathan plays a few games. He hasn't played since the early-game fix; war and peace, alliances, terrain, trading, tributaries and borders were only tested by simulation. His last playtest found what simulations missed
+2. Phase 3, build step 1 (the Long Night starts, the clock runs, Sköll charges her city), so a game actually ends instead of stopping at "Phase 3 is not built yet"
+3. Zone of control and healing (cheapest of the defaults still missing)
+
+## Missing 4X mechanics (backlog)
+
+Defaults from "How Nathan works" not built yet (build without asking):
+- Zone of control: a unit must stop when it moves next to an enemy (now enemies can walk past an army to an outpost or city)
+- Healing when resting, which needs unit health: today every fight kills one side outright; the standard is damage, so a winner comes out hurt. Resting heals, faster in your own territory
+- Production queue: today things are bought instantly with stored Industry; standard is the city working on one item until it's finished
+Other standard 4X mechanics (ask Nathan before building, they change the game's shape):
+- Territory that grows with the city (borders pushing against each other: friction and reasons for war, now that borders are closed)
+- Resources on the map (iron, horses, fertile land): worth fighting over, and more for trading than Food and Industry
+- Espionage: a spy that sees inside a city, steals Industry or stirs trouble; caught = Trust falls. Fits a scheming, politics-first game
+- AI-to-AI diplomacy beyond war and peace (alliances, trades, ganging up on the leader)
+- A shared reputation: breaking your word with one AI makes every AI wary (today each AI judges you on its own)
+- Unit experience (winners get a little stronger): nice to have
+Deliberately left out of the prototype (big systems that don't serve "politics first" in 20 turns): tech tree, settlers and new cities (outposts do that job), happiness, culture, religion, more unit types, naval units
 
 ## Later (parked until the full loop is playable)
 
