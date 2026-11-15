@@ -54,6 +54,10 @@ Built so far: she chooses her protector at the Landing by Favour, judges her pro
 - Commit after each working step with a clear message
 - Default 4X mechanics, no need to ask: unit upkeep, production queues, city growth from food, fog of war, zone of control, healing when units rest, city walls and garrisons, starvation and desertion, movement costs by terrain. Pick the most common genre approach, mention it in the PR, and move on. Only ask about what is unique to this game: the Sun's Daughter, Sköll, the phases, politics, lore.
 
+## Architecture rule (apply to all code)
+
+Keep game rules separate from drawing. The game state and rules (map data, terrain, factions, units, food, combat, Favour, Sköll, the Doom) must not depend on how anything is drawn. Drawing code only reads the game state and shows it. Goal: the prototype stays 2D, but we can later replace the 2D drawing with a stylised low-poly 3D view without touching the game rules.
+
 ## Code notes
 
 - main.gd: the flow of a game (Crossing, Landing, turns), the rival, combat odds, drawing and mouse clicks. Suggest splitting further when it gets too big (drawing and the Crossing screen are the next candidates)
