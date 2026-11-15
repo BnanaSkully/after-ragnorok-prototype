@@ -22,3 +22,9 @@ static func landing_spots(s) -> Array:
 			if s.can_land_at(Vector2i(c, r)):
 				spots.append(Vector2i(c, r))
 	return spots
+
+# Makes the whole map plains: for tests that place units on fixed hexes and
+# check one rule exactly (random terrain would block or change them).
+static func flatten(s) -> void:
+	for c in s.terrain:
+		s.terrain[c] = Terrain.Type.PLAINS

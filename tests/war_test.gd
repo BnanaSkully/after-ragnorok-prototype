@@ -9,7 +9,7 @@ func new_game():
 	root.add_child(m)
 	var s = m.state
 	for step in 4: s.choose(s.Crossing.EVENTS[step]["choices"][0]["effects"])
-	s.start_landing()
+	H.flatten(s); s.start_landing()
 	s.try_land(Vector2i(6, 4))
 	return m
 

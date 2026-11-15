@@ -7,7 +7,7 @@ func _initialize() -> void:
 	for i in 3: await process_frame
 	var s = m.state
 	for step in 4: s.choose(s.Crossing.EVENTS[step]["choices"][0]["effects"])
-	s.start_landing()
+	H.flatten(s); s.start_landing()
 	print("during the Landing: far corner visible=%s (expect false: the ark sees the land, not what's on it)" % s.player_can_see(Vector2i(14, 10)))
 	s.try_land(Vector2i(6, 4))
 	var u = s.player.units[0]

@@ -1,4 +1,5 @@
 extends SceneTree
+const H := preload("res://tests/helpers.gd")
 # Real clicks: the war warning (first click on a unit you're at peace with),
 # the side panel's war/peace/ally lines, and the call-to-arms pop-up.
 # Saves war_warning.png and call_to_arms.png to $S.
@@ -21,7 +22,7 @@ func _initialize() -> void:
 	for i in 3: await process_frame
 	var s = m.state
 	for step in 4: s.choose(s.Crossing.EVENTS[step]["choices"][0]["effects"])
-	s.start_landing(); s.try_land(Vector2i(6, 4))
+	H.flatten(s); s.start_landing(); s.try_land(Vector2i(6, 4))
 	var jp = s.ais[0]; var celtic = s.ais[1]; var greek = s.ais[2]
 	s.relation(celtic).pact_turns_left = 10
 	s.relation(greek).rival_declare_war("their army is far stronger")

@@ -105,17 +105,24 @@ func _initialize() -> void:
 				if f.scout_count() > GameState.MAX_SCOUTS: bad["too many scouts"] = 1
 				for u in f.units:
 					if seen.has(u.pos) or not HexMap.in_bounds(u.pos) or s.skoll.is_at(u.pos): bad["unit position"] = bad.get("unit position", 0) + 1
+					if not s.passable(u.pos): bad["unit on mountain or water"] = bad.get("unit on mountain or water", 0) + 1
 					seen[u.pos] = true
 					if s.is_city(u.pos) and u.pos != f.city_pos: bad["unit in someone else's city"] = bad.get("unit in someone else's city", 0) + 1
 					if u.moves < 0 or u.moves > u.max_moves(): bad["moves out of range"] = 1
 				for o in f.outposts:
 					if s.is_city(o): bad["outpost on a city"] = 1
+					if not s.passable(o): bad["outpost on mountain or water"] = 1
 					if s.outpost_owner(o) != f: bad["outpost with two owners"] = 1
 				# everything a faction can see must be explored
 				for row in HexMap.ROWS:
 					for col in HexMap.COLS:
 						var c := Vector2i(col, row)
 						if s.can_see(f, c) and not f.explored.has(c): bad["seen but not explored"] = bad.get("seen but not explored", 0) + 1
+			for r in s.skoll.rifts:
+				if not s.passable(r): bad["rift on mountain or water"] = 1
+			for r in s.ruins:
+				if not s.passable(r["cell"]): bad["ruins on mountain or water"] = 1
+			if s.daughter.is_rogue() and not s.passable(s.daughter.pos): bad["daughter in a lake"] = 1
 			var all_outposts := []
 			for f in s.factions: all_outposts.append_array(f.outposts)
 			for i in all_outposts.size():

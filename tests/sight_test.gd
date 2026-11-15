@@ -1,11 +1,12 @@
 extends SceneTree
+const H := preload("res://tests/helpers.gd")
 func _initialize() -> void:
 	await process_frame
 	var m = load("res://main.tscn").instantiate()
 	root.add_child(m)
 	var s = m.state
 	for step in 4: s.choose(s.Crossing.EVENTS[step]["choices"][0]["effects"])
-	s.start_landing(); s.try_land(Vector2i(6, 4))
+	H.flatten(s); s.start_landing(); s.try_land(Vector2i(6, 4))
 	s.turn = 15
 	var sk = s.skoll
 	sk.active = true; sk.target = s.ais[0]
