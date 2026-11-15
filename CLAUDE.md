@@ -36,11 +36,14 @@ Built so far: she chooses her protector at the Landing by Favour. Planned, in th
 
 ## Code notes
 
-- Game logic is in main.gd; suggest splitting it further when it gets too big
-- Faction (one side's city, unit and resources) is in faction.gd, registered with class_name so any script can use it
-- The Crossing's events (text, choices, effects) are in crossing_events.gd, kept separate so they can be edited without touching game logic
+- main.gd: the flow of a game (Crossing, Landing, turns), the rival, combat odds, drawing and mouse clicks. Suggest splitting further when it gets too big (drawing and the Crossing screen are the next candidates)
+- faction.gd (class Faction): one side's city, unit, resources and the Daughter's Favour toward it
+- hex_map.gd (class HexMap, all static): hex maths: hex_center, hex_distance, is_neighbour, neighbours, cell_at, map size
+- skoll.gd (class Skoll): everything Sköll does: warnings, arrival, walking, attacking cities and units, being driven back, swallowing the Daughter. Holds a reference to main.gd ("game")
+- sun_daughter.gd (class SunDaughter): her name, bonuses, Favour rules and state (who holds her, swallowed or not)
+- crossing_events.gd: the Crossing's events (text, choices, effects), kept separate so they can be edited without touching game logic
 - Code phases in order: CROSSING, LANDING, PLAYING (PLAYING covers game Phase 2)
-- Sköll's and the Daughter's numbers (SKOLL_TURN, SKOLL_STRENGTH, DAUGHTER_FOOD, etc.) and her name (DAUGHTER_NAME) are constants at the top of main.gd
+- Sköll's numbers (ARRIVAL_TURN, STRENGTH, ...) are constants at the top of skoll.gd; the Daughter's (NAME, FOOD, DEFENCE, Favour ranges) at the top of sun_daughter.gd
 - Pointy-top hexes, offset rows, drawn with code in _draw()
 
 ## Later (parked until the full loop is playable)
@@ -53,4 +56,3 @@ Built so far: she chooses her protector at the Landing by Favour. Planned, in th
 - Crossing event text is placeholder: rewrite in the game's own voice
 - Give the Sun's Daughter a real name
 - Sköll's and the Daughter's numbers need tuning once played (in simulated games where the player stays home: taking her in, ~64% reach turn 20; letting her pass, ~54%)
-- main.gd is ~650 lines: split Sköll and the Daughter into their own file next
