@@ -61,6 +61,15 @@ Built so far: she chooses her protector at the Landing by Favour, judges her pro
 
 Keep game rules separate from drawing. The game state and rules (map data, terrain, factions, units, food, combat, Favour, Sköll, the Doom) must not depend on how anything is drawn. Drawing code only reads the game state and shows it. Goal: the prototype stays 2D, but we can later replace the 2D drawing with a stylised low-poly 3D view without touching the game rules.
 
+## How to test (see tests/README.md)
+
+- Download Godot 4.7 (not installed in cloud sessions), run `--headless --import` once, then `--check-only --script <file>` for every changed script
+- Test rules with headless scripts in tests/ (they use GameState directly); screenshots with xvfb-run; look at every screenshot for text running off screen or overlapping
+- For refactors: seeded before/after comparison must be identical
+- For balance changes: measure over hundreds of games and report the numbers
+- Always run Godot with `timeout`: a script error in a test stops it before quit() and it hangs
+- NOTES.md has the history, Nathan's decisions and the bugs we learnt from
+
 ## Code notes
 
 - game_state.gd (class GameState): the whole game state and its rules: phases, turns, economy, combat, the AI factions (ai_take_turn, ai_build), the Daughter going rogue, landing rules, and the player's actions (player_unit_act, player_build_unit, ...). No drawing, buttons or pixels. Holds the factions, Sköll, the Daughter and diplomacy
@@ -72,6 +81,7 @@ Keep game rules separate from drawing. The game state and rules (map data, terra
 - skoll.gd (class Skoll): everything Sköll does: warnings, rifts, arrival, walking, attacking cities and units, being driven back, hunting and swallowing the Daughter. Holds a weak link to the GameState ("game")
 - sun_daughter.gd (class SunDaughter): her name, bonuses, Favour rules and state (who holds her, rogue, swallowed)
 - diplomacy.gd (class Diplomacy): the player's relationship with ONE AI faction ("other"): agreements, demands, Trust, that faction's offers and betrayals; numbers are constants at its top. Holds a weak link to the GameState
+- tests/: headless test scripts (see tests/README.md); NOTES.md: development history and decisions
 - crossing_events.gd: the Crossing's events (text, choices, effects), kept separate so they can be edited without touching game logic
 - Code phases in order: CROSSING, LANDING, PLAYING (PLAYING covers game Phase 2), in GameState.Phase
 - Sköll's numbers (ARRIVAL_TURN, STRENGTH, ...) are constants at the top of skoll.gd; the Daughter's (NAME, FOOD, DEFENCE, Favour ranges) at the top of sun_daughter.gd
