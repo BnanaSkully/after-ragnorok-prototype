@@ -20,6 +20,17 @@ const DEMAND_AMOUNT := 5 # Food or Industry asked for in a demand
 const TRUST_DEMAND_PAID := -1 # they resent being squeezed even when they pay
 const TRUST_DEMAND_REFUSED := -2 # and resent it more when they refuse
 
+# The rival's own diplomacy
+const RIVAL_OFFER_CHANCE := 0.35 # chance each turn that it proposes or demands something
+const RIVAL_DEMAND_GAP := 3 # it makes demands when its army is this much stronger
+const RIVAL_BREAK_GAP := 4 # it may break an oath when its army is this much stronger...
+const RIVAL_BREAK_CHANCE := 0.25 # ...or when starving, with this chance each turn
+const TRUST_ACCEPTED_THEIR_OATH := 1
+const TRUST_REFUSED_THEIR_OATH := -1
+const TRUST_PAID_THEIR_DEMAND := 1
+const TRUST_REFUSED_THEIR_DEMAND := -1
+const RIVAL_BROKEN_OATH_FAVOUR := -2 # the Sun's Daughter sees the rival's betrayal too
+
 # What the rival says when you demand something it doesn't have. Costs nothing.
 # %s is the resource (e.g. "Industry"). Rewrite or add lines freely.
 const CANT_PAY_REPLIES := [
@@ -36,6 +47,8 @@ var pact_turns_left := 0 # 0 = no oath in force
 var oathbreaker_until := 0 # the player counts as an oathbreaker before this turn
 var action_used := false # the player's one diplomatic action this turn
 var history: Array[String] = [] # newest last
+var pending: Dictionary = {} # the rival's offer waiting for the player's answer, e.g. {"type": "demand", "resource": "food"}
+var rival_broken_oaths := 0 # how many oaths the rival has broken
 
 func _init(p_game) -> void:
 	game = p_game
@@ -146,6 +159,83 @@ func new_turn() -> void:
 		if pact_turns_left == 0:
 			change_trust(TRUST_KEPT)
 			remember("Turn %d: the %s with %s ran its course. Both kept their word. Trust %+d." % [game.turn, pact_word(), game.rival.name, TRUST_KEPT])
+
+# --- The rival's own diplomacy ------------------------------------------------
+# Called at the start of the rival's turn, before its units move: it may break
+# an oath if it's much stronger or starving. Its units can then attack at once.
+func rival_consider_breaking() -> void:
+	if not pact_active():
+		return
+	var rival: Faction = game.rival
+	var gap := army_power(rival) - army_power(game.player)
+	var starving: bool = rival.food <= 0 and game.food_change(rival) < 0
+	if (gap >= RIVAL_BREAK_GAP or starving) and randf() < RIVAL_BREAK_CHANCE:
+		pact_turns_left = 0
+		rival_broken_oaths += 1
+		rival.favour = clampi(rival.favour + RIVAL_BROKEN_OATH_FAVOUR, 0, SunDaughter.MAX_FAVOUR)
+		var why := "they were starving" if starving else "their army outgrew yours"
+		remember("Turn %d: %s BROKE THEIR %s with you (%s)." % [game.turn, rival.name, pact_word().to_upper(), why])
+
+# Called at the start of the player's turn: the rival may propose an oath or
+# make a demand. Sets "pending"; main.gd shows the Accept/Refuse pop-up.
+func rival_make_offer() -> void:
+	pending = {}
+	var rival: Faction = game.rival
+	var player: Faction = game.player
+	if not rival.is_alive() or randf() >= RIVAL_OFFER_CHANCE:
+		return
+	var gap := army_power(rival) - army_power(player)
+	var afraid: bool = game.turn >= Skoll.WARNING_TURN
+	if not pact_active() and not is_oathbreaker() and (afraid or gap < 0 or trust >= 2):
+		pending = {"type": "oath"}
+		return
+	if gap >= RIVAL_DEMAND_GAP:
+		var options: Array[String] = []
+		for resource in ["food", "industry"]:
+			if player.get(resource) >= DEMAND_AMOUNT:
+				options.append(resource)
+		if not options.is_empty():
+			pending = {"type": "demand", "resource": options.pick_random()}
+
+func has_pending() -> bool:
+	return not pending.is_empty()
+
+# The text of the pop-up for the pending offer.
+func pending_text() -> String:
+	var rival: Faction = game.rival
+	if pending.get("type") == "oath":
+		return "%s proposes %s: %d turns in which neither side attacks.\n\nAccept: the %s begins, Trust %+d.\nRefuse: Trust %+d." % [rival.name, a_pact(), PACT_LENGTH, pact_word(), TRUST_ACCEPTED_THEIR_OATH, TRUST_REFUSED_THEIR_OATH]
+	if pending.get("type") == "demand":
+		var res: String = String(pending["resource"]).capitalize()
+		return "%s demands %d %s from you. Their army is stronger than yours.\n\nPay: you lose %d %s, Trust %+d.\nRefuse: Trust %+d." % [rival.name, DEMAND_AMOUNT, res, DEMAND_AMOUNT, res, TRUST_PAID_THEIR_DEMAND, TRUST_REFUSED_THEIR_DEMAND]
+	return ""
+
+# The player's answer to the pending offer.
+func answer(accept: bool) -> void:
+	if pending.is_empty():
+		return
+	var rival: Faction = game.rival
+	var player: Faction = game.player
+	var offer := pending
+	pending = {}
+	if offer["type"] == "oath":
+		if accept:
+			pact_turns_left = PACT_LENGTH
+			change_trust(TRUST_ACCEPTED_THEIR_OATH)
+			remember("Turn %d: you accepted %s's %s for %d turns. Trust %+d." % [game.turn, rival.name, pact_word(), PACT_LENGTH, TRUST_ACCEPTED_THEIR_OATH])
+		else:
+			change_trust(TRUST_REFUSED_THEIR_OATH)
+			remember("Turn %d: you refused %s's %s. Trust %+d." % [game.turn, rival.name, pact_word(), TRUST_REFUSED_THEIR_OATH])
+	elif offer["type"] == "demand":
+		var resource: String = offer["resource"]
+		if accept and player.get(resource) >= DEMAND_AMOUNT:
+			player.set(resource, player.get(resource) - DEMAND_AMOUNT)
+			rival.set(resource, rival.get(resource) + DEMAND_AMOUNT)
+			change_trust(TRUST_PAID_THEIR_DEMAND)
+			remember("Turn %d: you paid %s's demand of %d %s. Trust %+d." % [game.turn, rival.name, DEMAND_AMOUNT, resource.capitalize(), TRUST_PAID_THEIR_DEMAND])
+		else:
+			change_trust(TRUST_REFUSED_THEIR_DEMAND)
+			remember("Turn %d: you refused %s's demand of %d %s. Trust %+d." % [game.turn, rival.name, DEMAND_AMOUNT, resource.capitalize(), TRUST_REFUSED_THEIR_DEMAND])
 
 func change_trust(amount: int) -> void:
 	trust = clampi(trust + amount, TRUST_MIN, TRUST_MAX)

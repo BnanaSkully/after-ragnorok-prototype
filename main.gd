@@ -52,6 +52,9 @@ var walls_button: Button
 var oath_button: Button
 var demand_food_button: Button
 var demand_industry_button: Button
+var offer_panel: PanelContainer # the rival's Accept/Refuse pop-up
+var offer_label: Label
+var offer_accept_button: Button
 var break_warning_cell := NO_CELL # first click on a rival unit during an oath only warns
 var messages: Array[String] = [] # shown at the bottom of the screen, e.g. combat results
 
@@ -87,6 +90,7 @@ func _ready() -> void:
 	demand_industry_button.position = Vector2(820, 172)
 	demand_industry_button.pressed.connect(player_demand.bind("industry"))
 	add_child(demand_industry_button)
+	build_offer_ui()
 	build_crossing_ui()
 	start_crossing()
 
@@ -207,9 +211,10 @@ func try_land(cell: Vector2i) -> void:
 
 # --- Turns ------------------------------------------------------------------
 func end_turn() -> void:
-	if game_over or phase != Phase.PLAYING:
-		return
+	if game_over or phase != Phase.PLAYING or diplomacy.has_pending():
+		return # (answer the rival's offer first)
 	messages.clear()
+	diplomacy.rival_consider_breaking() # before its units move, so a betrayal can strike at once
 	rival_take_turn()
 	turn += 1
 	skoll.take_turn()
@@ -231,6 +236,10 @@ func end_turn() -> void:
 	selected = null
 	break_warning_cell = NO_CELL
 	update_build_button()
+	if not game_over and turn < DOOM_TURN:
+		diplomacy.rival_make_offer()
+		if diplomacy.has_pending():
+			show_offer()
 	if turn >= DOOM_TURN:
 		end_game("You survived until the Doom",
 			"Sköll howls, and chaos pours out of the void.\nPHASE 3 BEGINS: chaos factions rise and rogues join Sköll.\n(Phase 3 is not built yet.)")
@@ -327,6 +336,59 @@ func player_demand(resource: String) -> void:
 		return
 	messages.clear()
 	diplomacy.demand(resource) # posts its own message
+	update_build_button()
+	queue_redraw()
+
+# --- The rival's offers (pop-up) -----------------------------------------------
+func build_offer_ui() -> void:
+	offer_panel = PanelContainer.new()
+	offer_panel.position = Vector2(170, 190)
+	offer_panel.custom_minimum_size = Vector2(520, 0)
+	var style := StyleBoxFlat.new() # solid dark box with a gold border, so the map doesn't show through
+	style.bg_color = Color(0.1, 0.09, 0.08)
+	style.border_color = Color(0.85, 0.7, 0.35)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(6)
+	style.set_content_margin_all(18)
+	offer_panel.add_theme_stylebox_override("panel", style)
+	add_child(offer_panel)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 14)
+	offer_panel.add_child(box)
+	var heading := Label.new()
+	heading.text = "A MESSAGE FROM %s" % rival.name.to_upper()
+	heading.add_theme_font_size_override("font_size", 16)
+	heading.add_theme_color_override("font_color", Color(0.85, 0.7, 0.35))
+	box.add_child(heading)
+	offer_label = Label.new()
+	offer_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	offer_label.add_theme_font_size_override("font_size", 18)
+	box.add_child(offer_label)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 20)
+	box.add_child(row)
+	for accept in [true, false]:
+		var b := Button.new()
+		b.text = "Accept" if accept else "Refuse"
+		b.add_theme_font_size_override("font_size", 18)
+		b.pressed.connect(answer_offer.bind(accept))
+		row.add_child(b)
+		if accept:
+			offer_accept_button = b
+	offer_panel.visible = false
+
+# While the pop-up is open the player must answer before doing anything else.
+func show_offer() -> void:
+	offer_label.text = diplomacy.pending_text()
+	offer_accept_button.text = "Pay" if diplomacy.pending.get("type") == "demand" else "Accept"
+	offer_panel.visible = true
+	for b in [end_turn_button, build_button, walls_button, oath_button, demand_food_button, demand_industry_button]:
+		b.disabled = true
+
+func answer_offer(accept: bool) -> void:
+	offer_panel.visible = false
+	diplomacy.answer(accept)
+	end_turn_button.disabled = game_over
 	update_build_button()
 	queue_redraw()
 
@@ -554,7 +616,8 @@ func _draw() -> void:
 	var dx := 820.0
 	var dy := 228.0
 	draw_string(font, Vector2(dx, dy), "DIPLOMACY with %s" % rival.name, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.9, 0.85, 0.7))
-	draw_string(font, Vector2(dx, dy + 22), "Their trust in you: %+d" % diplomacy.trust, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.85, 0.85))
+	var record := "    They broke %d %s%s" % [diplomacy.rival_broken_oaths, rival.pact_word, "" if diplomacy.rival_broken_oaths == 1 else "s"]
+	draw_string(font, Vector2(dx, dy + 22), "Their trust in you: %+d%s" % [diplomacy.trust, record], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.85, 0.85))
 	if diplomacy.pact_active():
 		draw_string(font, Vector2(dx, dy + 42), "%s in force: %d turns left" % [rival.pact_word.capitalize(), diplomacy.pact_turns_left], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.6, 0.9, 0.6))
 	elif diplomacy.is_oathbreaker():
@@ -588,7 +651,7 @@ func draw_sun(center: Vector2, radius: float) -> void:
 
 # --- Mouse clicks -----------------------------------------------------------
 func _unhandled_input(event: InputEvent) -> void:
-	if game_over or phase == Phase.CROSSING:
+	if game_over or phase == Phase.CROSSING or diplomacy.has_pending():
 		return
 	if phase == Phase.LANDING:
 		if event is InputEventMouseMotion:
