@@ -29,7 +29,13 @@ CLAUDE.md holds the rules for working; this file holds the history.
 - Breaking an oath costs the Daughter's Favour ("you can't be trusted").
 - Generic 4X mechanics: use the genre default without asking.
 - Rules separate from drawing so a low-poly 3D view can replace the 2D one later.
-- Phase 3 (chaos factions, rogues join Sköll) needs design before building.
+- Phase 3 design agreed (session of 2026-11-15, Nathan went with all of Claude's picks):
+  - Win by binding Sköll with a 3-link chain, each link from a different faction: survival-only would repeat Phase 2, and the chain makes politics the only way to win.
+  - Rogue factions are the existing AIs kneeling to Sköll when desperate or betrayed, so Phase 2 diplomacy pays off; no new factions.
+  - Chaos factions are warbands from rifts that drain territory: cheap to build, and the first step toward the parked Doom-creatures.
+  - The Long Night (10 turns) is the clock; losing also happens when the chain can no longer be finished (covers "everyone else went rogue").
+  - Survivor score on a win: population of standing non-rogue cities, +5 if the Daughter is free. Makes saving allies a real choice.
+  - If Sköll swallowed her: links are cheaper but he's Strength 20; binding him frees her.
 
 ## Things learnt (bugs found and fixed)
 
@@ -52,4 +58,4 @@ CLAUDE.md holds the rules for working; this file holds the history.
 
 ## Ideas parked (see CLAUDE.md "Later")
 
-Faction names, the Daughter's name, Crossing text, AI landing choice, AI-to-AI diplomacy and trading, combat defence bonus, mini-games, full rifts (Doom-creatures, seasons, underground travel), Phase 3 design.
+Faction names, the Daughter's name, Crossing text, AI landing choice, AI-to-AI diplomacy and trading, combat defence bonus, mini-games, full rifts (Doom-creatures, seasons, underground travel). Phase 3 is designed (CLAUDE.md), not built.

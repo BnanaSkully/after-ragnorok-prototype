@@ -12,7 +12,25 @@ Survivors of Ragnarök cross the void on Yggdrasil (the Crossing), then land on 
 - Sheltering her gives +2 Food and +2 Industry a turn and +3 city defence, but she is what Sköll hunts
 - Economy (standard 4X): a city starts at population 1 making 2 Food and 1 Industry a turn; each extra population adds +1 Food and +1 Industry. City growth: when stored Food reaches the growth cost (10, then 15, 20...) and Food isn't falling, the city grows and the Food is used up. Units cost 5 Industry and eat 1 Food a turn; walls cost 10 Industry per level. City defence = garrison unit's Strength + walls (+3 with the Daughter). Numbers: GROWTH_BASE, GROWTH_STEP etc. at the top of game_state.gd
 - Phase 2: settle and survive. Sköll, the wolf who swallowed the sun at Ragnarök, followed the survivors through the void. He arrives on turn 14 and can't be killed, only driven back. Each time he appears (arrival, or after being driven back) he comes through one of 6 rifts in the void, chosen at random, and hunts the city nearest that rift (he doesn't know where the Daughter is). The map is split into 6 sections (3 x 2) and every section gets one rift on a random hex, at least 3 from every city (Skoll.place_rifts). Rifts are rolled on turn 2 (after the Landing) and stay hidden; when he comes through one, only that rift is revealed. Every time he is driven back, the rifts are rolled again. Over 1000 games his first attack is even between the cities. Once he is loose, AI units fall back to defend their cities. In Phase 2 he doesn't know which city hides the Daughter; he finds out only after attacking it. If he loses that battle, Phase 3 starts early. If he wins it, he swallows her: he becomes the sun (Strength 20, a blazing look) and the map goes dark. Lose if your city falls; survive to turn 20 (the Doom) to reach Phase 3
-- Phase 3 (not built yet): Sköll spawns chaos factions and rogue factions join him. Her city is the first he attacks (he charges it straight away if he found her in Phase 2). Needs a design before it can be built: what the player does, how chaos factions behave, how Phase 3 is won or lost
+- Phase 3 (not built yet): the Long Night. Design agreed, see "Phase 3: agreed design" below
+
+## Phase 3: agreed design (not built yet)
+
+Goal: Sköll can't be killed, but he can be bound with a chain (like Fenrir and Gleipnir). One city can't forge it alone, so winning needs other factions: politics first. Numbers below are starting points; measure them with simulated games before trusting them.
+
+- Start: on turn 20 (the Doom), or early if Sköll attacks the Daughter's city and loses (he now knows where she is). Code phase CHAOS after PLAYING. He goes straight for her city (or hunts her by sight if she's rogue)
+- The Long Night: Phase 3 lasts 10 turns from its start (LONG_NIGHT_TURNS). If the chain isn't finished by then, the world freezes and everyone loses
+- The chain: 3 links, each forged by a DIFFERENT faction, 15 Industry each (10 if Sköll swallowed the Daughter, but he is Strength 20 then). The player forges their own link with a "Forge link" button (like walls). When the 3rd link is done Sköll is bound: the player wins. If he had swallowed her, binding him frees her and the sun returns
+- Chain oaths: the player asks an AI to forge a link (uses the turn's diplomatic action). Accept chance: 30% + 10% per Trust, +20% if Sköll is hunting its city, +10% if the Daughter's Favour toward the player is 7+ (she speaks for you), 0% if the player is its oathbreaker. Once sworn, the AI puts its spare Industry into its link each turn. Breaking a chain oath is the worst betrayal: Trust -5, its half-forged link is lost
+- Rogue factions = existing AIs kneeling to Sköll (no new factions). Each Phase 3 turn, an AI without a chain oath that is desperate (starving, or Sköll hunts it and its city defence is under 6, or its Trust toward the player is -5 or less) has a 25% chance to go rogue. Rogue: Sköll and warbands leave it alone, its units attack everyone else, no diplomacy, can't forge a link, permanent. A rogue AI sheltering the Daughter hands her to Sköll (he swallows her)
+- Chaos warbands (Sköll's chaos factions): every 3 turns 2 warbands (Strength 3, move 1) come out of a random rift (that rift is revealed). No city, no diplomacy. They walk to the nearest non-rogue territory (a city and its 6 neighbouring hexes) and sit there draining it: -1 Food and -1 Industry a turn to that city for each warband on its territory. They fight back when attacked (normal auto-resolve). A light version of the parked Doom-creatures
+- Lose: your city falls; the Long Night ends with the chain unfinished; or the chain can no longer be finished (fewer than 3 factions left that could still forge a link, counting finished links)
+- Win: Sköll is bound. The end screen shows the survivor score: the population of every standing city that didn't go rogue, +5 if the Daughter is alive and free, and lists who made it
+- Build steps, in order (each playable and tested):
+  1. Phase 3 starts (turn 20 or early), the Long Night clock, Sköll charges her city
+  2. The chain: forging your link, chain oaths, binding, the survivor score (first playable win)
+  3. AIs going rogue
+  4. Chaos warbands and draining (territory becomes a rule in GameState, not only drawing)
 
 ## The Sun's Daughter: design in progress
 
@@ -31,7 +49,7 @@ Built so far: she chooses her protector at the Landing by Favour, judges her pro
 - Four factions: the player (Norse) and three AI factions with placeholder names, one per pantheon: Japanese, Celtic, Greek. Each has its own word for a sworn agreement (Norse oath, Japanese pact, Celtic bond, Greek treaty: placeholders, not lore). AI cities start at fixed spots spread around the map; the player lands at least 4 hexes from all of them
 - One 15 x 11 hex map, no art (shapes and colours only)
 - Fog of war (standard 4X): the player sees 3 hexes around their city and 2 around each unit (GameState.player_can_see, CITY_SIGHT, UNIT_SIGHT). Elsewhere the map is dimmed and other factions' units, Sköll, the rogue Daughter and the revealed rift are hidden. Cities and territory stay visible everywhere (seen from the ark at the Landing, when the whole map is visible). Fog only changes what is drawn, not the rules
-- Do not add more factions, pantheons, rogue factions or lore unless asked
+- Do not add more factions, pantheons, rogue factions or lore unless asked (Phase 3's rogues are the existing AIs; its chaos warbands are not factions)
 - Goal: a playable loop of Crossing, Landing, turns, cities, auto-resolve and the Doom
 - Basic diplomacy with the rival: pacts, demands, and a memory of whether promises were kept. This is the core hook and should be built before more combat or Sköll features.
 - DONE: support for 3+ factions. Every AI faction runs the same AI (build, feed, walls from turn 10, guard its city, chase the Daughter, fight neighbours including other AIs). The player has a separate diplomatic relationship with each AI. Over 300 simulated games Sköll's first attack lands on the player about 26% of the time (fair share with 4 cities is 25%)
@@ -83,7 +101,7 @@ Keep game rules separate from drawing. The game state and rules (map data, terra
 - diplomacy.gd (class Diplomacy): the player's relationship with ONE AI faction ("other"): agreements, demands, Trust, that faction's offers and betrayals; numbers are constants at its top. Holds a weak link to the GameState
 - tests/: headless test scripts (see tests/README.md); NOTES.md: development history and decisions
 - crossing_events.gd: the Crossing's events (text, choices, effects), kept separate so they can be edited without touching game logic
-- Code phases in order: CROSSING, LANDING, PLAYING (PLAYING covers game Phase 2), in GameState.Phase
+- Code phases in order: CROSSING, LANDING, PLAYING (PLAYING covers game Phase 2), in GameState.Phase; Phase 3 will add CHAOS
 - Sköll's numbers (ARRIVAL_TURN, STRENGTH, ...) are constants at the top of skoll.gd; the Daughter's (NAME, FOOD, DEFENCE, Favour ranges) at the top of sun_daughter.gd
 - Pointy-top hexes, offset rows, drawn with code in _draw()
 
@@ -104,3 +122,4 @@ Keep game rules separate from drawing. The game state and rules (map data, terra
   - Armies can travel underground between discovered rifts, but only during the dangerous season, so using the shortcut means braving the creatures.
   - Sköll keeps using rifts as his way in.
   - Build only after the current prototype has been played end to end.
+  - Phase 3's chaos warbands (drain territory) are the light version of the Doom-creatures; grow them into this rather than building it twice.
