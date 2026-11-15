@@ -3,7 +3,12 @@
 # PLACEHOLDER TEXT - rewrite these freely, or add more events to the list.
 # Each event has some "text" and a list of "choices". Each choice has a
 # "label" (the button text) and "effects": numbers added to what the
-# player's people arrive with. Use "food", "industry" and "strength".
+# player's people arrive with. Use "food", "industry", "strength" and "favour".
+#
+# "favour" is how much the Sun's Daughter trusts you. She travels with the
+# survivors and watches how each people behaves; at the Landing she shelters
+# with whoever she trusts most. Protecting people raises it, abandoning them
+# lowers it.
 
 const START_FOOD := 4
 const START_INDUSTRY := 2
@@ -12,8 +17,8 @@ const EVENTS := [
 	{
 		"text": "A branch of the World Tree cracks beneath your people. There is time to save only one thing.",
 		"choices": [
-			{"label": "Save the food stores", "effects": {"food": 3, "strength": -1}},
-			{"label": "Save the warriors", "effects": {"strength": 1, "food": -3}},
+			{"label": "Save the food stores", "effects": {"food": 3, "strength": -1, "favour": -1}},
+			{"label": "Save the warriors", "effects": {"strength": 1, "food": -3, "favour": 1}},
 		],
 	},
 	{
@@ -26,17 +31,15 @@ const EVENTS := [
 	{
 		"text": "Something in the void is following you. It is getting closer.",
 		"choices": [
-			{"label": "Stand and fight", "effects": {"strength": 1, "food": -2}},
-			{"label": "Drop the heavy gear and run", "effects": {"industry": -2}},
+			{"label": "Stand and fight so the others can escape", "effects": {"strength": 1, "food": -2, "favour": 1}},
+			{"label": "Drop the heavy gear and run", "effects": {"industry": -2, "favour": -1}},
 		],
 	},
-	# The Sun's Daughter. "daughter": 1 means she joins the player; if the player
-	# lets her pass, the rival's people take her in instead.
 	{
-		"text": "A girl made of light stumbles through the branches: the Sun's Daughter, born just before the wolf swallowed her mother. She begs to come with you. Whatever hunts her will hunt whoever shelters her.",
+		"text": "A girl made of light walks among the survivors: the Sun's Daughter, born just before the wolf swallowed her mother. She is weighing which people to trust. Whatever hunts her will hunt whoever she shelters with.",
 		"choices": [
-			{"label": "Take her in", "effects": {"daughter": 1, "food": -2}},
-			{"label": "Let her pass (the other survivors will take her in)", "effects": {}},
+			{"label": "Share your food with her", "effects": {"food": -2, "favour": 2}},
+			{"label": "Leave her be", "effects": {}},
 		],
 	},
 ]

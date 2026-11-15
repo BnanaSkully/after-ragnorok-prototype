@@ -11,9 +11,14 @@ const SKOLL_STRENGTH := 12 # his starting Strength
 const SKOLL_SWALLOWED_STRENGTH := 20 # his Strength after swallowing the Sun's Daughter
 const INDUSTRY_PER_DEFENCE := 5 # every 5 stored Industry adds 1 to a city's defence
 
-# The Sun's Daughter: a refugee met during the Crossing. If the player takes her in
-# she shelters in the player's city; if not, the rival's people take her in.
+# The Sun's Daughter: a refugee who travels with the survivors on the Crossing and
+# watches how each people behaves. At the Landing she chooses to shelter with the
+# faction she trusts most (highest Favour).
 const DAUGHTER_NAME := "the Sun's Daughter" # change her name here
+const PLAYER_START_FAVOUR := 3
+const RIVAL_FAVOUR_MIN := 3 # the rival's Favour is hidden and random in this range
+const RIVAL_FAVOUR_MAX := 6
+const MAX_FAVOUR := 10
 const DAUGHTER_FOOD := 2 # extra Food per turn for whoever shelters her
 const DAUGHTER_INDUSTRY := 2 # extra Industry per turn
 const DAUGHTER_DEFENCE := 3 # extra defence for the city sheltering her
@@ -52,7 +57,7 @@ var skoll_pos := NO_CELL
 var skoll_strength := SKOLL_STRENGTH
 
 var daughter_state := Daughter.SHELTERED
-var daughter_holder: Faction = null # who shelters her (decided during the Crossing)
+var daughter_holder: Faction = null # who shelters her (she chooses at the Landing)
 
 func _ready() -> void:
 	end_turn_button = Button.new()
@@ -90,6 +95,8 @@ func start_crossing() -> void:
 	player.industry = Crossing.START_INDUSTRY
 	daughter_state = Daughter.SHELTERED
 	daughter_holder = null
+	player.favour = PLAYER_START_FAVOUR
+	rival.favour = randi_range(RIVAL_FAVOUR_MIN, RIVAL_FAVOUR_MAX) # hidden from the player
 	end_turn_button.visible = false
 	crossing_panel.visible = true
 	messages.clear()
@@ -99,8 +106,7 @@ func show_crossing_step() -> void:
 	for b in crossing_buttons.get_children():
 		b.queue_free()
 	var tally := "Your people carry:  Food %d    Industry %d    Strength %d" % [player.food, player.industry, player.strength]
-	if daughter_holder == player:
-		tally += "\nWith you:  %s" % DAUGHTER_NAME
+	tally += "\n%s's Favour toward you: %d    (the rival's is unknown)" % [DAUGHTER_NAME.capitalize(), player.favour]
 	if crossing_step < Crossing.EVENTS.size():
 		var event: Dictionary = Crossing.EVENTS[crossing_step]
 		crossing_label.text = "THE CROSSING  (%d of %d)\n\n%s\n\n%s" % [crossing_step + 1, Crossing.EVENTS.size(), event["text"], tally]
@@ -109,7 +115,7 @@ func show_crossing_step() -> void:
 			var label: String = choice["label"] if effects_text == "" else "%s   (%s)" % [choice["label"], effects_text]
 			add_crossing_button(label, choose.bind(choice["effects"]))
 	else:
-		crossing_label.text = "THE CROSSING\n\nThe branches of Yggdrasil give way. Land lies below.\n\n%s" % tally
+		crossing_label.text = "THE CROSSING\n\nThe branches of Yggdrasil give way. Land lies below.\nWhen you land, %s will choose whose city to shelter in.\n\n%s" % [DAUGHTER_NAME, tally]
 		add_crossing_button("Begin the Landing", start_landing)
 	queue_redraw()
 
@@ -125,10 +131,7 @@ func add_crossing_button(text: String, action: Callable) -> void:
 func describe_effects(effects: Dictionary) -> String:
 	var parts: Array[String] = []
 	for key in effects:
-		if key == "daughter":
-			parts.append("she joins you")
-		else:
-			parts.append("%s %+d" % [String(key).capitalize(), effects[key]])
+		parts.append("%s %+d" % [String(key).capitalize(), effects[key]])
 	return ", ".join(parts)
 
 # Apply a choice's effects. Nothing can drop below 0 (Strength below 1).
@@ -136,8 +139,7 @@ func choose(effects: Dictionary) -> void:
 	player.food = maxi(0, player.food + effects.get("food", 0))
 	player.industry = maxi(0, player.industry + effects.get("industry", 0))
 	player.strength = maxi(1, player.strength + effects.get("strength", 0))
-	if effects.get("daughter", 0) > 0:
-		daughter_holder = player
+	player.favour = clampi(player.favour + effects.get("favour", 0), 0, MAX_FAVOUR)
 	crossing_step += 1
 	show_crossing_step()
 
@@ -145,8 +147,7 @@ func choose(effects: Dictionary) -> void:
 # The player has no city or unit yet and must pick a hex to settle.
 func start_landing() -> void:
 	phase = Phase.LANDING
-	if daughter_holder == null:
-		daughter_holder = rival # the player let her pass; the rival's people took her in
+	daughter_holder = daughter_chooses()
 	crossing_panel.visible = false
 	end_turn_button.visible = true
 	player.city_pos = NO_CELL
@@ -155,6 +156,12 @@ func start_landing() -> void:
 	end_turn_button.disabled = true
 	messages = ["Choose where to land: click a hex to found your city."]
 	queue_redraw()
+
+# She shelters with whoever she trusts most. A tie is decided at random.
+func daughter_chooses() -> Faction:
+	if player.favour == rival.favour:
+		return [player, rival].pick_random()
+	return player if player.favour > rival.favour else rival
 
 func can_land_at(cell: Vector2i) -> bool:
 	return in_bounds(cell) and hex_distance(cell, rival.city_pos) >= MIN_LANDING_DISTANCE
@@ -169,10 +176,11 @@ func try_land(cell: Vector2i) -> void:
 	hover_cell = NO_CELL
 	end_turn_button.disabled = false
 	messages = ["Your people have landed. Click your unit to move it."]
+	var scores := "(her Favour: you %d, %s %d)" % [player.favour, rival.name, rival.favour]
 	if daughter_holder == player:
-		add_message("%s shelters in your city: +%d Food, +%d Industry a turn and +%d city defence." % [DAUGHTER_NAME.capitalize(), DAUGHTER_FOOD, DAUGHTER_INDUSTRY, DAUGHTER_DEFENCE])
+		add_message("%s chose you %s: +%d Food, +%d Industry a turn, +%d city defence." % [DAUGHTER_NAME.capitalize(), scores, DAUGHTER_FOOD, DAUGHTER_INDUSTRY, DAUGHTER_DEFENCE])
 	else:
-		add_message("%s shelters in %s's city." % [DAUGHTER_NAME.capitalize(), daughter_holder.name])
+		add_message("%s chose to shelter with %s %s." % [DAUGHTER_NAME.capitalize(), daughter_holder.name, scores])
 	queue_redraw()
 
 func end_turn() -> void:
@@ -537,7 +545,7 @@ func _draw() -> void:
 	var daughter_info := ""
 	match daughter_state:
 		Daughter.SHELTERED when daughter_holder != null:
-			daughter_info = "%s %s (Sköll doesn't know which city)" % ["You shelter" if daughter_holder == player else daughter_holder.name + " shelters", DAUGHTER_NAME]
+			daughter_info = "%s %s (Sköll doesn't know which city)    Her Favour: you %d, %s %d" % ["You shelter" if daughter_holder == player else daughter_holder.name + " shelters", DAUGHTER_NAME, player.favour, rival.name, rival.favour]
 		Daughter.SWALLOWED:
 			daughter_info = "Sköll swallowed %s. He is the sun now (Strength %d)." % [DAUGHTER_NAME, skoll_strength]
 	draw_string(font, Vector2(20, 82), daughter_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.9, 0.5))
