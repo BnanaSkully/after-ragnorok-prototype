@@ -32,6 +32,7 @@ Built so far: she chooses her protector at the Landing by Favour. Planned, in th
 - Two Norse factions, one small hex map, no art (shapes and colours only)
 - Do not add factions, pantheons, rogue factions or lore unless asked
 - Goal: a playable loop of Crossing, Landing, turns, cities, auto-resolve and the Doom
+- Basic diplomacy with the rival: pacts, demands, and a memory of whether promises were kept. This is the core hook and should be built before more combat or Sköll features.
 
 ## How Nathan works
 
@@ -39,8 +40,7 @@ Built so far: she chooses her protector at the Landing by Favour. Planned, in th
 - Keep changes small, and say exactly how to test each one (press F5, then click X)
 - He wants honest pushback if an idea will cause problems later
 - Commit after each working step with a clear message
-- Default 4X mechanics, no need to ask: unit upkeep, production queues, city growth from food, fog of war, zone of control, healing when units rest, city walls and garrisons, starvation and desertion, movement costs by terrain. Pick the most common genre approach, mention it in the PR, and move on
-- Only ask him about what is unique to this game (the Daughter, Sköll, the phases, politics, lore)
+- Default 4X mechanics, no need to ask: unit upkeep, production queues, city growth from food, fog of war, zone of control, healing when units rest, city walls and garrisons, starvation and desertion, movement costs by terrain. Pick the most common genre approach, mention it in the PR, and move on. Only ask about what is unique to this game: the Sun's Daughter, Sköll, the phases, politics, lore.
 
 ## Code notes
 
@@ -64,3 +64,4 @@ Built so far: she chooses her protector at the Landing by Favour. Planned, in th
 - Crossing event text is placeholder: rewrite in the game's own voice
 - Give the Sun's Daughter a real name
 - Sköll's and the Daughter's numbers need tuning once played (in simulated games: building walls ~66% reach turn 20, building nothing ~54%)
+- Mini-games: rare, high-stakes moments tied to politics only (e.g. a bluffing exchange during negotiation, a short tactical choice when Sköll hits a city). Never routine or repeatable. Main fix for dead turns is that every turn asks the player a real decision.
