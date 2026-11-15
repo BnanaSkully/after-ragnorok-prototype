@@ -40,6 +40,7 @@ Run a test:
 | terrain_test.gd | 300 random maps (connected, cities on open land), move costs, defence, outpost income by land, paths round a lake |
 | deal_test.gd | trading: quotes, trades, gifts (Trust cap), paying for peace, AI trade offers; 300 games |
 | tribute_test.gd | taking cities: tributary, tribute paid, no wars between them, uprisings (AI and you), siege odds, Sköll freeing tributaries; 300 games |
+| border_test.gd | closed borders: who may enter, AIs stay out, crossing declares war, walking out after peace, open borders both ways and expiry, allies/overlords; 300 games: no unit inside closed borders after a turn |
 | helpers.gd | not a test: shared helpers (answer every pop-up, list landing hexes) |
 
 Screenshot scripts need a virtual screen and an output folder in `S`:
@@ -48,7 +49,7 @@ Screenshot scripts need a virtual screen and an output folder in `S`:
 S=/tmp/shots xvfb-run -a -s "-screen 0 1152x648x24" /tmp/godot --rendering-driver opengl3 --script tests/fog_screenshot.gd
 ```
 
-(fog_screenshot.gd, four_click_screenshot.gd, early_screenshot.gd, war_screenshot.gd, deal_screenshot.gd, tribute_screenshot.gd: real clicks in a window; images go to $S. early_screenshot.gd saves the Landing, turn 1, a scout move, choosing an outpost, a pop-up and turn 9.)
+(fog_screenshot.gd, four_click_screenshot.gd, early_screenshot.gd, war_screenshot.gd, deal_screenshot.gd, tribute_screenshot.gd, border_screenshot.gd: real clicks in a window; images go to $S. early_screenshot.gd saves the Landing, turn 1, a scout move, choosing an outpost, a pop-up and turn 9.)
 
 Gotchas:
 - The map's terrain is random. A test that puts units on fixed hexes must call `H.flatten(s)` before the Landing, or a hex may be water.
