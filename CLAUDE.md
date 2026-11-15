@@ -10,7 +10,7 @@ Survivors of Ragnarök cross the void on Yggdrasil (the Crossing), then land on 
 
 - Phase 1: the Crossing (journey events) and the Landing (found your city). The Sun's Daughter (the new sun, unnamed in the myths) travels with the survivors and watches how each people behaves. She has a Favour score (0-10) toward each faction: Crossing choices that protect people raise it, abandoning them lowers it. The rival's Favour is hidden and random (3-6). At the Landing she chooses to shelter with whoever she trusts most (ties random). The player doesn't choose her; she chooses
 - Sheltering her gives +2 Food and +2 Industry a turn and +3 city defence, but she is what Sköll hunts
-- Economy (standard 4X): a city starts at population 1 making 2 Food and 1 Industry a turn; each extra population adds +1 Food and +1 Industry. City growth: when stored Food reaches the growth cost (10, then 15, 20...) and Food isn't falling, the city grows and the Food is used up. Units cost 5 Industry and eat 1 Food a turn; walls cost 10 Industry per level. City defence = garrison unit's Strength + walls (+3 with the Daughter). Numbers: GROWTH_BASE, GROWTH_STEP etc. at the top of main.gd
+- Economy (standard 4X): a city starts at population 1 making 2 Food and 1 Industry a turn; each extra population adds +1 Food and +1 Industry. City growth: when stored Food reaches the growth cost (10, then 15, 20...) and Food isn't falling, the city grows and the Food is used up. Units cost 5 Industry and eat 1 Food a turn; walls cost 10 Industry per level. City defence = garrison unit's Strength + walls (+3 with the Daughter). Numbers: GROWTH_BASE, GROWTH_STEP etc. at the top of game_state.gd
 - Phase 2: settle and survive. Sköll, the wolf who swallowed the sun at Ragnarök, followed the survivors through the void. He arrives on turn 14 and can't be killed, only driven back. Each time he appears (arrival, or after being driven back) he comes through one of 6 rifts in the void, chosen at random, and hunts the city nearest that rift (he doesn't know where the Daughter is). Each new game the map is split into 6 sections (3 x 2) and every section gets one rift on a random hex, at least 3 from the rival's city (Skoll.place_rifts). The rifts show from the Landing; you can't found your city on one. Over 1200 games his first attack is even between the cities Once he is loose, the rival's units fall back to defend their city. In Phase 2 he doesn't know which city hides the Daughter; he finds out only after attacking it. If he loses that battle, Phase 3 starts early. If he wins it, he swallows her: he becomes the sun (Strength 20, a blazing look) and the map goes dark. Lose if your city falls; survive to turn 20 (the Doom) to reach Phase 3
 - Phase 3 (not built yet): Sköll spawns chaos factions and rogue factions join him. Her city is the first he attacks (he charges it straight away if he found her in Phase 2). Needs a design before it can be built: what the player does, how chaos factions behave, how Phase 3 is won or lost
 
@@ -24,8 +24,8 @@ Built so far: she chooses her protector at the Landing by Favour, judges her pro
 
 ### Step A: economy with costs (standard 4X), in this order
 1. DONE: several units per faction, built with Industry from the city (one unit per hex, destroyed units are gone, no free respawn; the rival builds too)
-2. DONE: food upkeep: a city makes 2 Food a turn (+2 with the Daughter), every unit eats 1. Running out keeps Food at 0 and the unit farthest from the city deserts. The rival only builds units it can feed. Numbers are constants at the top of main.gd (CITY_FOOD, UNIT_FOOD_UPKEEP, UNIT_COST)
-3. DONE: walls: a city improvement, 10 Industry per level, +4 defence each, up to 2 levels. The rival builds walls from turn 10. City defence is now the standard garrison + walls (+3 with the Daughter); stored Industry no longer counts. Numbers: WALL_COST, WALL_DEFENCE, MAX_WALLS in main.gd
+2. DONE: food upkeep: a city makes 2 Food a turn (+2 with the Daughter), every unit eats 1. Running out keeps Food at 0 and the unit farthest from the city deserts. The rival only builds units it can feed. Numbers are constants at the top of game_state.gd (CITY_FOOD, UNIT_FOOD_UPKEEP, UNIT_COST)
+3. DONE: walls: a city improvement, 10 Industry per level, +4 defence each, up to 2 levels. The rival builds walls from turn 10. City defence is now the standard garrison + walls (+3 with the Daughter); stored Industry no longer counts. Numbers: WALL_COST, WALL_DEFENCE, MAX_WALLS in game_state.gd
 
 ## Current scope: prototype only
 
@@ -60,15 +60,17 @@ Keep game rules separate from drawing. The game state and rules (map data, terra
 
 ## Code notes
 
-- main.gd: the flow of a game (Crossing, Landing, turns), the rival, combat odds, drawing and mouse clicks. Suggest splitting further when it gets too big (drawing and the Crossing screen are the next candidates)
-- faction.gd (class Faction): one side's city, list of units, resources and the Daughter's Favour toward it
+- game_state.gd (class GameState): the whole game state and its rules: phases, turns, economy, combat, the rival's AI, the Daughter going rogue, landing rules, and the player's actions (player_unit_act, player_build_unit, ...). No drawing, buttons or pixels. Holds the factions, Sköll, the Daughter and diplomacy
+- main.gd: the 2D view. Draws the state (_draw), builds buttons and pop-ups (refresh keeps them in step), turns clicks into calls on the state. Owns only screen things: selection, hover, the "click again to break your oath" warning, faction colours. A 3D view would replace this file
+- hex_map.gd (class HexMap, static): the hex grid as the rules see it: map size, hex_distance, is_neighbour, neighbours. Hex coordinates only
+- hex_view_2d.gd (class HexView2D, static): where hexes are on the 2D screen: hex size in pixels, hex_center, hex_points, cell_at (hex under the mouse). Only main.gd uses it
+- faction.gd (class Faction): one side's city, list of units, resources, walls, population and the Daughter's Favour toward it
 - unit.gd (class Unit): one army unit (position, moves, Strength). Holds a weak link to its faction to avoid a memory leak
-- hex_map.gd (class HexMap, all static): hex maths: hex_center, hex_distance, is_neighbour, neighbours, cell_at, map size
-- skoll.gd (class Skoll): everything Sköll does: warnings, arrival, walking, attacking cities and units, being driven back, swallowing the Daughter. Holds a reference to main.gd ("game")
-- sun_daughter.gd (class SunDaughter): her name, bonuses, Favour rules and state (who holds her, swallowed or not)
-- diplomacy.gd (class Diplomacy): oaths, Trust, the oathbreaker penalty and the history of promises; numbers are constants at its top
+- skoll.gd (class Skoll): everything Sköll does: warnings, rifts, arrival, walking, attacking cities and units, being driven back, hunting and swallowing the Daughter. Holds a weak link to the GameState ("game")
+- sun_daughter.gd (class SunDaughter): her name, bonuses, Favour rules and state (who holds her, rogue, swallowed)
+- diplomacy.gd (class Diplomacy): oaths, demands, Trust, the rival's offers and betrayals, the history of promises; numbers are constants at its top. Holds a weak link to the GameState
 - crossing_events.gd: the Crossing's events (text, choices, effects), kept separate so they can be edited without touching game logic
-- Code phases in order: CROSSING, LANDING, PLAYING (PLAYING covers game Phase 2)
+- Code phases in order: CROSSING, LANDING, PLAYING (PLAYING covers game Phase 2), in GameState.Phase
 - Sköll's numbers (ARRIVAL_TURN, STRENGTH, ...) are constants at the top of skoll.gd; the Daughter's (NAME, FOOD, DEFENCE, Favour ranges) at the top of sun_daughter.gd
 - Pointy-top hexes, offset rows, drawn with code in _draw()
 

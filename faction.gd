@@ -6,8 +6,6 @@ extends RefCounted
 # "class_name Faction" above lets any other script use Faction by name.
 
 var name: String
-var territory_color: Color
-var unit_color: Color
 var city_pos: Vector2i
 var units: Array[Unit] = [] # this faction's army units on the map
 var strength := 3 # Strength of new units (higher = better odds in combat)
@@ -18,10 +16,9 @@ var walls := 0 # city wall level (each level adds defence)
 var population := 1 # city size: grows from surplus Food, each extra point makes +1 Food and +1 Industry
 var pact_word := "oath" # what this faction calls a sworn agreement (Norse factions swear oaths)
 
-func _init(p_name: String, p_territory: Color, p_unit: Color, p_city: Vector2i) -> void:
+# (How a faction looks on screen, its colours, is up to the view: see main.gd.)
+func _init(p_name: String, p_city: Vector2i) -> void:
 	name = p_name
-	territory_color = p_territory
-	unit_color = p_unit
 	city_pos = p_city
 
 func add_unit(cell: Vector2i) -> Unit:

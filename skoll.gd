@@ -7,7 +7,7 @@ extends RefCounted
 # nearest that rift, walks one hex a turn toward it and attacks it.
 # He can't be killed, only driven back to the edge of the map.
 #
-# "game" is main.gd: Sköll uses it to see the factions, post messages and end
+# "game" is the GameState (game_state.gd): Sköll uses it to see the factions, post messages and end
 # the game.
 
 const WARNING_TURN := 10 # howling warnings start on this turn
@@ -26,15 +26,20 @@ const RIFT_MIN_CITY_DISTANCE := 3 # rifts stay at least this far from the rival'
 const SMELL_RANGE := 4 # if the Daughter is rogue this close, he hunts her instead
 const SPRINT := 2 # hexes a turn he runs when hunting her in the open (she runs 1)
 
-var game # main.gd
+# The GameState (game_state.gd). A "weak" link: the game keeps this object alive,
+# but this object doesn't keep the game alive, so Godot can free both later.
+var game: GameState:
+	get:
+		return _game.get_ref()
+var _game: WeakRef
 var active := false # false until he arrives
 var pos := HexMap.NO_CELL
 var strength := STRENGTH
 var target: Faction = null # the city he is hunting right now
 var rifts: Array[Vector2i] = [] # this game's rifts (see place_rifts)
 
-func _init(p_game) -> void:
-	game = p_game
+func _init(p_game: GameState) -> void:
+	_game = weakref(p_game)
 
 func is_at(cell: Vector2i) -> bool:
 	return active and cell == pos

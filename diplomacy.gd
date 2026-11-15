@@ -5,7 +5,7 @@ extends RefCounted
 # memory of whether promises were kept. The player gets one diplomatic action
 # per turn.
 #
-# "game" is main.gd: diplomacy uses it to see the factions, the turn and the
+# "game" is the GameState (game_state.gd): diplomacy uses it to see the factions, the turn and the
 # Sun's Daughter, and to post messages.
 
 const PACT_LENGTH := 5 # turns an oath lasts
@@ -41,7 +41,12 @@ const CANT_PAY_REPLIES := [
 	"\"Our cupboards are bare and your manners are worse. Leave.\"",
 ]
 
-var game # main.gd
+# The GameState (game_state.gd). A "weak" link: the game keeps this object alive,
+# but this object doesn't keep the game alive, so Godot can free both later.
+var game: GameState:
+	get:
+		return _game.get_ref()
+var _game: WeakRef
 var trust := 0 # how much the rival trusts the player (-10 to 10)
 var pact_turns_left := 0 # 0 = no oath in force
 var oathbreaker_until := 0 # the player counts as an oathbreaker before this turn
@@ -50,8 +55,8 @@ var history: Array[String] = [] # newest last
 var pending: Dictionary = {} # the rival's offer waiting for the player's answer, e.g. {"type": "demand", "resource": "food"}
 var rival_broken_oaths := 0 # how many oaths the rival has broken
 
-func _init(p_game) -> void:
-	game = p_game
+func _init(p_game: GameState) -> void:
+	_game = weakref(p_game)
 
 func pact_active() -> bool:
 	return pact_turns_left > 0

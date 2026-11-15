@@ -1,53 +1,39 @@
 extends Node2D
 
-# The game's main script: runs the flow of a game (Crossing -> Landing -> turns),
-# the rival, combat, drawing and mouse clicks.
-# Other pieces live in their own files:
-#   faction.gd          one side's city, units and resources
-#   unit.gd             one army unit on the map
-#   hex_map.gd          hex maths (positions, distances, neighbours)
-#   skoll.gd            Sköll, the wolf boss
-#   sun_daughter.gd     the Sun's Daughter
-#   diplomacy.gd        oaths with the rival, trust and the memory of promises
-#   crossing_events.gd  the Crossing's events (text and choices)
+# The 2D view of the game. It owns no rules: everything about the game lives
+# in "state" (game_state.gd). This script only
+#   - draws the state on screen (_draw),
+#   - builds the buttons and pop-ups and keeps their text up to date,
+#   - turns mouse clicks and button presses into calls on the state.
+# Screen positions of hexes come from hex_view_2d.gd. To make a 3D view later,
+# write a new view like this one; game_state.gd and the rule files stay as they are.
 
-const DOOM_TURN := 20 # survive until this turn and Phase 3 (chaos) begins
-const MIN_LANDING_DISTANCE := 4 # how many hexes away from the rival's city you must land
-const UNIT_COST := 5 # Industry to build a new unit
-const CITY_FOOD := 2 # Food a city produces each turn
-const CITY_INDUSTRY := 1 # Industry a city produces each turn
-const UNIT_FOOD_UPKEEP := 1 # Food each unit eats each turn
-const GROWTH_BASE := 10 # Food stored to grow from population 1 to 2...
-const GROWTH_STEP := 5 # ...and each later growth costs this much more
-const WALL_COST := 10 # Industry per wall level
-const WALL_DEFENCE := 4 # city defence each wall level adds
-const MAX_WALLS := 2
-const NO_CELL := HexMap.NO_CELL
 const Crossing := preload("res://crossing_events.gd")
+const NO_CELL := HexMap.NO_CELL
 
-# The stages of a game, in order:
-# CROSSING = journey events, LANDING = choosing where to found your city, PLAYING = the turns.
-enum Phase { CROSSING, LANDING, PLAYING }
+var state := GameState.new()
 
-# The player has no city or units until they land (see try_land below).
-var player := Faction.new("Player", Color(0.3, 0.4, 0.6), Color(0.2, 0.4, 0.9), NO_CELL)
-var rival := Faction.new("Rival", Color(0.6, 0.3, 0.3), Color(0.85, 0.2, 0.2), Vector2i(9, 7))
-var factions: Array[Faction] = [player, rival]
-var daughter := SunDaughter.new()
-var skoll: Skoll
-var diplomacy: Diplomacy
+# How each faction looks: [territory colour, unit colour]
+const FACTION_COLOURS := {
+	"Player": [Color(0.3, 0.4, 0.6), Color(0.2, 0.4, 0.9)],
+	"Rival": [Color(0.6, 0.3, 0.3), Color(0.85, 0.2, 0.2)],
+}
 
-var phase := Phase.CROSSING
-var crossing_step := 0 # which Crossing event we're on
+func territory_colour(f: Faction) -> Color:
+	return FACTION_COLOURS[f.name][0]
+
+func unit_colour(f: Faction) -> Color:
+	return FACTION_COLOURS[f.name][1]
+
+# What the player is doing on screen (not part of the game rules)
+var hover_cell := NO_CELL # the hex under the mouse while landing
+var selected: Unit = null # the player's unit chosen to move (null = none)
+var break_warning_cell := NO_CELL # first click on a rival unit during an oath only warns
+
+# Buttons and panels
 var crossing_panel: VBoxContainer
 var crossing_label: Label
 var crossing_buttons: VBoxContainer
-var hover_cell := NO_CELL # the hex under the mouse while landing
-var selected: Unit = null # the player's unit chosen to move (null = none)
-var turn := 1
-var game_over := false
-var end_title := "" # big text on the end screen
-var end_detail := "" # smaller text under it (can have several lines)
 var end_turn_button: Button
 var build_button: Button
 var walls_button: Button
@@ -58,52 +44,114 @@ var play_again_button: Button # shown on the end screen
 var offer_panel: PanelContainer # the rival's Accept/Refuse pop-up
 var offer_label: Label
 var offer_accept_button: Button
-var break_warning_cell := NO_CELL # first click on a rival unit during an oath only warns
-var messages: Array[String] = [] # shown at the bottom of the screen, e.g. combat results
-
-func _init() -> void:
-	skoll = Skoll.new(self)
-	diplomacy = Diplomacy.new(self)
-	rival.add_unit(Vector2i(8, 6))
 
 func _ready() -> void:
-	end_turn_button = Button.new()
-	end_turn_button.text = "End Turn"
-	end_turn_button.position = Vector2(820, 20)
-	end_turn_button.pressed.connect(end_turn)
-	add_child(end_turn_button)
-	build_button = Button.new()
-	build_button.text = "Build Unit (%d Industry)" % UNIT_COST
-	build_button.position = Vector2(920, 20)
-	build_button.pressed.connect(player_build_unit)
-	add_child(build_button)
-	walls_button = Button.new()
-	walls_button.position = Vector2(820, 58)
-	walls_button.pressed.connect(player_build_walls)
-	add_child(walls_button)
-	oath_button = Button.new()
-	oath_button.position = Vector2(820, 96)
-	oath_button.pressed.connect(player_propose_pact)
-	add_child(oath_button)
-	demand_food_button = Button.new()
-	demand_food_button.position = Vector2(820, 134)
-	demand_food_button.pressed.connect(player_demand.bind("food"))
-	add_child(demand_food_button)
-	demand_industry_button = Button.new()
-	demand_industry_button.position = Vector2(820, 172)
-	demand_industry_button.pressed.connect(player_demand.bind("industry"))
-	add_child(demand_industry_button)
-	play_again_button = Button.new()
-	play_again_button.text = "Play Again"
+	end_turn_button = add_button("End Turn", Vector2(820, 20), on_end_turn)
+	build_button = add_button("Build Unit (%d Industry)" % GameState.UNIT_COST, Vector2(920, 20), on_build_unit)
+	walls_button = add_button("", Vector2(820, 58), on_build_walls)
+	oath_button = add_button("", Vector2(820, 96), on_propose_pact)
+	demand_food_button = add_button("", Vector2(820, 134), on_demand.bind("food"))
+	demand_industry_button = add_button("", Vector2(820, 172), on_demand.bind("industry"))
+	play_again_button = add_button("Play Again", Vector2.ZERO, restart)
 	play_again_button.add_theme_font_size_override("font_size", 22)
-	play_again_button.pressed.connect(restart)
 	play_again_button.visible = false
-	add_child(play_again_button)
 	build_offer_ui()
 	build_crossing_ui()
-	start_crossing()
+	state.start_crossing()
+	refresh()
 
-# --- The Crossing -----------------------------------------------------------
+func add_button(text: String, pos: Vector2, action: Callable) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.position = pos
+	b.pressed.connect(action)
+	add_child(b)
+	return b
+
+# --- Keeping the screen in step with the state --------------------------------
+# Called after anything changes: updates panels and buttons, shows the rival's
+# pop-up or the end screen if needed, and redraws the map.
+func refresh() -> void:
+	var crossing := state.phase == GameState.Phase.CROSSING
+	crossing_panel.visible = crossing
+	for b in [end_turn_button, build_button, walls_button, oath_button, demand_food_button, demand_industry_button]:
+		b.visible = not crossing
+	if crossing:
+		show_crossing_step()
+	update_buttons()
+	if state.diplomacy.has_pending() and not offer_panel.visible:
+		show_offer()
+	if state.game_over:
+		show_end_screen()
+	queue_redraw()
+
+func update_buttons() -> void:
+	var playing := state.can_play() and not state.diplomacy.has_pending()
+	var p := state.player
+	end_turn_button.disabled = not playing
+	build_button.disabled = not playing or p.industry < GameState.UNIT_COST
+	walls_button.disabled = not playing or p.industry < GameState.WALL_COST or p.walls >= GameState.MAX_WALLS
+	if p.walls >= GameState.MAX_WALLS:
+		walls_button.text = "Walls complete (+%d defence)" % (GameState.MAX_WALLS * GameState.WALL_DEFENCE)
+	else:
+		walls_button.text = "Build Walls %d/%d (%d Industry)" % [p.walls + 1, GameState.MAX_WALLS, GameState.WALL_COST]
+	var d := state.diplomacy
+	var word: String = state.rival.pact_word
+	if d.pact_active():
+		oath_button.text = "%s in force: %d turns left" % [word.capitalize(), d.pact_turns_left]
+	elif d.is_oathbreaker():
+		oath_button.text = "%s refuses: you broke your %s" % [state.rival.name, word]
+	elif d.action_used:
+		oath_button.text = "Diplomacy used this turn"
+	else:
+		oath_button.text = "Swear %s (%d%% they accept)" % [d.a_pact(), roundi(d.accept_chance() * 100)]
+	oath_button.disabled = not playing or not d.can_propose() or d.is_oathbreaker()
+	for pair in [[demand_food_button, "food"], [demand_industry_button, "industry"]]:
+		var button: Button = pair[0]
+		var resource: String = pair[1]
+		var chance := d.demand_chance(resource)
+		if chance <= 0.0:
+			button.text = "Demand %d %s (they don't have it)" % [Diplomacy.DEMAND_AMOUNT, resource.capitalize()]
+		else:
+			button.text = "Demand %d %s (%d%% they pay)" % [Diplomacy.DEMAND_AMOUNT, resource.capitalize(), roundi(chance * 100)]
+		button.disabled = not playing or not d.can_demand()
+
+func show_end_screen() -> void:
+	# The Play Again button sits under the end-screen text (see _draw).
+	var screen := get_viewport_rect().size
+	var lines := state.end_detail.split("\n").size()
+	play_again_button.visible = true
+	play_again_button.position = Vector2(screen.x / 2 - 70, screen.y / 2 + 40 + lines * 30)
+	selected = null
+
+# Start a fresh game by reloading the scene from scratch.
+func restart() -> void:
+	get_tree().reload_current_scene()
+
+# --- Button handlers: ask the state to act, then refresh ----------------------
+func on_end_turn() -> void:
+	state.end_turn()
+	selected = null
+	break_warning_cell = NO_CELL
+	refresh()
+
+func on_build_unit() -> void:
+	state.player_build_unit()
+	refresh()
+
+func on_build_walls() -> void:
+	state.player_build_walls()
+	refresh()
+
+func on_propose_pact() -> void:
+	state.player_propose_pact()
+	refresh()
+
+func on_demand(resource: String) -> void:
+	state.player_demand(resource)
+	refresh()
+
+# --- The Crossing screen ------------------------------------------------------
 # A panel with the event text and one button per choice. Built once, then
 # its text and buttons are swapped for each event.
 func build_crossing_ui() -> void:
@@ -120,41 +168,22 @@ func build_crossing_ui() -> void:
 	crossing_buttons.add_theme_constant_override("separation", 10)
 	crossing_panel.add_child(crossing_buttons)
 
-func start_crossing() -> void:
-	phase = Phase.CROSSING
-	crossing_step = 0
-	player.city_pos = NO_CELL
-	player.units.clear()
-	player.food = Crossing.START_FOOD
-	player.industry = Crossing.START_INDUSTRY
-	daughter.reset(player, rival)
-	skoll.place_rifts(rival.city_pos) # a new rift layout every game
-	end_turn_button.visible = false
-	build_button.visible = false
-	walls_button.visible = false
-	oath_button.visible = false
-	demand_food_button.visible = false
-	demand_industry_button.visible = false
-	crossing_panel.visible = true
-	messages.clear()
-	show_crossing_step()
-
 func show_crossing_step() -> void:
 	for b in crossing_buttons.get_children():
 		b.queue_free()
-	var tally := "Your people carry:  Food %d    Industry %d    Strength %d" % [player.food, player.industry, player.strength]
-	tally += "\n%s's Favour toward you: %d    (the rival's is unknown)" % [SunDaughter.NAME.capitalize(), player.favour]
-	if crossing_step < Crossing.EVENTS.size():
-		var event: Dictionary = Crossing.EVENTS[crossing_step]
-		crossing_label.text = "THE CROSSING  (%d of %d)\n\n%s\n\n%s" % [crossing_step + 1, Crossing.EVENTS.size(), event["text"], tally]
+	var p := state.player
+	var tally := "Your people carry:  Food %d    Industry %d    Strength %d" % [p.food, p.industry, p.strength]
+	tally += "\n%s's Favour toward you: %d    (the rival's is unknown)" % [SunDaughter.NAME.capitalize(), p.favour]
+	if not state.crossing_finished():
+		var event: Dictionary = Crossing.EVENTS[state.crossing_step]
+		crossing_label.text = "THE CROSSING  (%d of %d)\n\n%s\n\n%s" % [state.crossing_step + 1, Crossing.EVENTS.size(), event["text"], tally]
 		for choice in event["choices"]:
 			var effects_text := describe_effects(choice["effects"])
 			var label: String = choice["label"] if effects_text == "" else "%s   (%s)" % [choice["label"], effects_text]
-			add_crossing_button(label, choose.bind(choice["effects"]))
+			add_crossing_button(label, on_choose.bind(choice["effects"]))
 	else:
 		crossing_label.text = "THE CROSSING\n\nThe branches of Yggdrasil give way. Land lies below.\nWhen you land, %s will choose whose city to shelter in.\n\n%s" % [SunDaughter.NAME, tally]
-		add_crossing_button("Begin the Landing", start_landing)
-	queue_redraw()
+		add_crossing_button("Begin the Landing", on_begin_landing)
 
 func add_crossing_button(text: String, action: Callable) -> void:
 	var b := Button.new()
@@ -171,306 +200,13 @@ func describe_effects(effects: Dictionary) -> String:
 		parts.append("%s %+d" % [String(key).capitalize(), effects[key]])
 	return ", ".join(parts)
 
-# Apply a choice's effects. Nothing can drop below 0 (Strength below 1).
-func choose(effects: Dictionary) -> void:
-	player.food = maxi(0, player.food + effects.get("food", 0))
-	player.industry = maxi(0, player.industry + effects.get("industry", 0))
-	player.strength = maxi(1, player.strength + effects.get("strength", 0))
-	player.favour = clampi(player.favour + effects.get("favour", 0), 0, SunDaughter.MAX_FAVOUR)
-	crossing_step += 1
-	show_crossing_step()
+func on_choose(effects: Dictionary) -> void:
+	state.choose(effects)
+	refresh()
 
-# --- The Landing ------------------------------------------------------------
-# The player has no city or unit yet and must pick a hex to settle.
-func start_landing() -> void:
-	phase = Phase.LANDING
-	daughter.choose_protector(player, rival)
-	crossing_panel.visible = false
-	end_turn_button.visible = true
-	build_button.visible = true
-	walls_button.visible = true
-	oath_button.visible = true
-	demand_food_button.visible = true
-	demand_industry_button.visible = true
-	player.city_pos = NO_CELL
-	player.units.clear()
-	end_turn_button.disabled = true
-	update_build_button() # build buttons stay disabled until you've landed
-	messages = ["Choose where to land: click a hex to found your city."]
-	queue_redraw()
-
-func can_land_at(cell: Vector2i) -> bool:
-	return HexMap.in_bounds(cell) and HexMap.hex_distance(cell, rival.city_pos) >= MIN_LANDING_DISTANCE and not skoll.is_rift(cell)
-
-func try_land(cell: Vector2i) -> void:
-	if phase != Phase.LANDING or not can_land_at(cell):
-		return
-	player.city_pos = cell
-	player.add_unit(cell) # your first unit starts standing on the new city
-	phase = Phase.PLAYING
-	hover_cell = NO_CELL
-	end_turn_button.disabled = false
-	update_build_button()
-	messages = ["Your people have landed. Click a unit to move it, or build more."]
-	var scores := "(her Favour: you %d, %s %d)" % [player.favour, rival.name, rival.favour]
-	if daughter.holder == player:
-		add_message("%s chose you %s: +%d Food, +%d Industry a turn, +%d city defence." % [SunDaughter.NAME.capitalize(), scores, SunDaughter.FOOD, SunDaughter.INDUSTRY, SunDaughter.DEFENCE])
-	else:
-		add_message("%s chose to shelter with %s %s." % [SunDaughter.NAME.capitalize(), daughter.holder.name, scores])
-	queue_redraw()
-
-# --- Turns ------------------------------------------------------------------
-func end_turn() -> void:
-	if game_over or phase != Phase.PLAYING or diplomacy.has_pending():
-		return # (answer the rival's offer first)
-	messages.clear()
-	diplomacy.rival_consider_breaking() # before its units move, so a betrayal can strike at once
-	rival_take_turn()
-	turn += 1
-	skoll.take_turn()
-	if game_over: # Sköll may have destroyed the player's city or found the Daughter
-		return
-	daughter_flee()
-	for f in factions:
-		if f.city_pos == NO_CELL:
-			continue # this faction's city has fallen; it's out of the game
-		f.food += food_change(f)
-		f.industry += CITY_INDUSTRY + (f.population - 1)
-		if daughter.shelters_with(f):
-			f.industry += SunDaughter.INDUSTRY
-		var starved := f.food < 0
-		if starved:
-			starve(f)
-		else:
-			grow(f)
-		if daughter.shelters_with(f):
-			var verdict := daughter.judge_feeding(starved)
-			if verdict != "":
-				add_message(verdict)
-		for u in f.units:
-			u.moves = 1
-	judge_readiness()
-	check_daughter_leaving()
-	rival_build()
-	diplomacy.new_turn()
-	selected = null
-	break_warning_cell = NO_CELL
-	update_build_button()
-	if not game_over and turn < DOOM_TURN:
-		diplomacy.rival_make_offer()
-		if diplomacy.has_pending():
-			show_offer()
-	if turn >= DOOM_TURN:
-		end_game("You survived until the Doom",
-			"Sköll howls, and chaos pours out of the void.\nPHASE 3 BEGINS: chaos factions rise and rogues join Sköll.\n(Phase 3 is not built yet.)")
-	queue_redraw()
-
-# --- The Sun's Daughter going rogue --------------------------------------------
-# If her Favour toward her protector falls too low, she walks out of the city.
-func check_daughter_leaving() -> void:
-	var holder := daughter.holder
-	if daughter.state != SunDaughter.State.SHELTERED or holder == null or not holder.is_alive():
-		return
-	if holder.favour > SunDaughter.LEAVE_FAVOUR:
-		return
-	var spot := NO_CELL
-	var best := -1
-	for c in HexMap.neighbours(holder.city_pos):
-		if is_blocked(c) or is_city(c):
-			continue
-		var away := HexMap.hex_distance(c, skoll.pos) if skoll.active else 0
-		if away > best:
-			best = away
-			spot = c
-	if spot == NO_CELL:
-		return # nowhere to step out; she stays for now
-	daughter.go_rogue(spot)
-	var whose := "your" if holder == player else holder.name + "'s"
-	add_message("%s has lost faith and walked out of %s city! She is alone in the open." % [SunDaughter.NAME.capitalize(), whose])
-
-# In the open she moves one hex away from Sköll each turn.
-func daughter_flee() -> void:
-	if not daughter.is_rogue() or not skoll.active:
-		return
-	var best := NO_CELL
-	var best_d := HexMap.hex_distance(daughter.pos, skoll.pos)
-	for c in HexMap.neighbours(daughter.pos):
-		if is_blocked(c) or is_city(c):
-			continue
-		var d := HexMap.hex_distance(c, skoll.pos)
-		if d > best_d:
-			best_d = d
-			best = c
-	if best != NO_CELL:
-		daughter.pos = best
-
-# A unit moving into her hex tries to persuade her: chance = its faction's Favour x 10%.
-func try_persuade(u: Unit) -> void:
-	var f := u.faction
-	var chance := daughter.persuade_chance(f)
-	var who := "You" if f == player else f.name
-	if randf() < chance:
-		daughter.join(f)
-		var where := "your city" if f == player else "%s's city" % f.name
-		add_message("%s persuaded %s (%s). She shelters in %s." % [who, SunDaughter.NAME, odds_text(chance), where])
-	else:
-		add_message("%s tried to persuade %s, but she refused (%s)." % [who, SunDaughter.NAME, odds_text(chance)])
-
-# The Sun's Daughter warns at the howling and judges her protector when Sköll arrives.
-func judge_readiness() -> void:
-	var holder := daughter.holder
-	if holder == null or not holder.is_alive():
-		return
-	if turn == Skoll.WARNING_TURN and holder == player:
-		add_message("%s is afraid. When Sköll comes (turn %d) she wants city defence %d+ and army Strength %d+." % [SunDaughter.NAME.capitalize(), Skoll.ARRIVAL_TURN, SunDaughter.READY_DEFENCE, SunDaughter.READY_ARMY])
-	if turn == Skoll.ARRIVAL_TURN:
-		add_message(daughter.judge_readiness(city_defence(holder), diplomacy.army_power(holder)))
-
-# --- Food -------------------------------------------------------------------
-# Food made by the city (and the Daughter's bonus) minus what the army eats.
-func food_change(f: Faction) -> int:
-	var made := CITY_FOOD + (f.population - 1) # each extra population works more fields
-	if daughter.shelters_with(f):
-		made += SunDaughter.FOOD
-	return made - f.units.size() * UNIT_FOOD_UPKEEP
-
-func industry_change(f: Faction) -> int:
-	return CITY_INDUSTRY + (f.population - 1) + (SunDaughter.INDUSTRY if daughter.shelters_with(f) else 0)
-
-# City growth (the usual 4X rule): when stored Food reaches the growth cost and
-# the city isn't losing Food, the city grows by 1 and the cost is used up.
-func growth_cost(f: Faction) -> int:
-	return GROWTH_BASE + (f.population - 1) * GROWTH_STEP
-
-func grow(f: Faction) -> void:
-	if f.food < growth_cost(f) or food_change(f) < 0:
-		return
-	f.food -= growth_cost(f)
-	f.population += 1
-	if f == player:
-		add_message("Your city grew to population %d: +1 Food and +1 Industry a turn." % f.population)
-
-# Not enough Food: stores stay at 0 and one unit deserts (the one farthest
-# from the city, so the garrison stays).
-func starve(f: Faction) -> void:
-	f.food = 0
-	if f.units.is_empty():
-		return
-	var farthest: Unit = f.units[0]
-	for u in f.units:
-		if HexMap.hex_distance(u.pos, f.city_pos) > HexMap.hex_distance(farthest.pos, f.city_pos):
-			farthest = u
-	f.remove_unit(farthest)
-	if f == player:
-		add_message("Your people are starving: a unit deserted. (Each unit eats %d Food a turn.)" % UNIT_FOOD_UPKEEP)
-	else:
-		add_message("%s is starving: one of its units deserted." % f.name)
-
-# Start a fresh game by reloading the scene from scratch.
-func restart() -> void:
-	get_tree().reload_current_scene()
-
-func end_game(title: String, detail: String) -> void:
-	game_over = true
-	# The Play Again button sits under the end-screen text (see _draw).
-	var screen := get_viewport_rect().size
-	var lines := detail.split("\n").size()
-	play_again_button.visible = true
-	play_again_button.position = Vector2(screen.x / 2 - 70, screen.y / 2 + 40 + lines * 30)
-	end_turn_button.disabled = true
-	build_button.disabled = true
-	walls_button.disabled = true
-	oath_button.disabled = true
-	demand_food_button.disabled = true
-	demand_industry_button.disabled = true
-	selected = null
-	end_title = title
-	end_detail = detail
-	queue_redraw()
-
-func add_message(text: String) -> void:
-	messages.append(text)
-
-# Placeholder rival behaviour, for each of its units: attack a player unit
-# next door; otherwise stay home if it's guarding the city and there are other
-# units; otherwise step to a random free neighbouring hex.
-func rival_take_turn() -> void:
-	for u in rival.units.duplicate(): # copy: units can die during the loop
-		if not u in rival.units:
-			continue
-		var target: Unit = null
-		for c in HexMap.neighbours(u.pos):
-			var other := unit_at(c)
-			if other and other.faction == player and not diplomacy.pact_active():
-				target = other
-				break
-		if target:
-			resolve_combat(u, target)
-			continue
-		if u.pos == rival.city_pos and rival.units.size() > 1:
-			continue # this one guards the city
-		if daughter.is_rogue():
-			if HexMap.is_neighbour(u.pos, daughter.pos):
-				try_persuade(u)
-				continue
-			var toward := step_toward(u.pos, daughter.pos)
-			if toward != NO_CELL:
-				u.pos = toward
-				continue
-		if skoll.active and HexMap.hex_distance(u.pos, rival.city_pos) > 1:
-			# Sköll is loose: fall back toward the city to help defend it
-			var home := step_toward(u.pos, rival.city_pos)
-			if home != NO_CELL:
-				u.pos = home
-				continue
-		var options: Array[Vector2i] = []
-		for c in HexMap.neighbours(u.pos):
-			if not is_blocked(c):
-				options.append(c)
-		if not options.is_empty():
-			u.pos = options.pick_random()
-
-# The free neighbouring hex that gets closest to goal (NO_CELL if none is closer).
-func step_toward(from: Vector2i, goal: Vector2i) -> Vector2i:
-	var best := NO_CELL
-	var best_d := HexMap.hex_distance(from, goal)
-	for c in HexMap.neighbours(from):
-		if is_blocked(c) or (is_city(c) and c != goal):
-			continue
-		var d := HexMap.hex_distance(c, goal)
-		if d < best_d:
-			best_d = d
-			best = c
-	return best
-
-# The rival builds a new unit whenever it can afford one.
-# Once the howling starts it builds walls first; otherwise a unit,
-# but only if it can still feed its army afterwards.
-func rival_build() -> void:
-	if not rival.is_alive():
-		return
-	if turn >= Skoll.WARNING_TURN and rival.walls < MAX_WALLS:
-		build_walls(rival)
-		return # saving up for walls
-	if rival.industry >= UNIT_COST and food_change(rival) - UNIT_FOOD_UPKEEP >= 0:
-		build_unit(rival)
-
-# --- Diplomacy --------------------------------------------------------------
-func player_propose_pact() -> void:
-	if game_over or phase != Phase.PLAYING:
-		return
-	messages.clear()
-	diplomacy.propose_pact() # posts its own message
-	update_build_button()
-	queue_redraw()
-
-func player_demand(resource: String) -> void:
-	if game_over or phase != Phase.PLAYING:
-		return
-	messages.clear()
-	diplomacy.demand(resource) # posts its own message
-	update_build_button()
-	queue_redraw()
+func on_begin_landing() -> void:
+	state.start_landing()
+	refresh()
 
 # --- The rival's offers (pop-up) -----------------------------------------------
 func build_offer_ui() -> void:
@@ -489,7 +225,7 @@ func build_offer_ui() -> void:
 	box.add_theme_constant_override("separation", 14)
 	offer_panel.add_child(box)
 	var heading := Label.new()
-	heading.text = "A MESSAGE FROM %s" % rival.name.to_upper()
+	heading.text = "A MESSAGE FROM %s" % state.rival.name.to_upper()
 	heading.add_theme_font_size_override("font_size", 16)
 	heading.add_theme_color_override("font_color", Color(0.85, 0.7, 0.35))
 	box.add_child(heading)
@@ -512,157 +248,61 @@ func build_offer_ui() -> void:
 
 # While the pop-up is open the player must answer before doing anything else.
 func show_offer() -> void:
-	offer_label.text = diplomacy.pending_text()
-	offer_accept_button.text = "Pay" if diplomacy.pending.get("type") == "demand" else "Accept"
+	offer_label.text = state.diplomacy.pending_text()
+	offer_accept_button.text = "Pay" if state.diplomacy.pending.get("type") == "demand" else "Accept"
 	offer_panel.visible = true
-	for b in [end_turn_button, build_button, walls_button, oath_button, demand_food_button, demand_industry_button]:
-		b.disabled = true
+	update_buttons()
 
 func answer_offer(accept: bool) -> void:
 	offer_panel.visible = false
-	diplomacy.answer(accept)
-	end_turn_button.disabled = game_over
-	update_build_button()
-	queue_redraw()
+	state.diplomacy.answer(accept)
+	refresh()
 
-func update_oath_button() -> void:
-	var word: String = rival.pact_word
-	if diplomacy.pact_active():
-		oath_button.text = "%s in force: %d turns left" % [word.capitalize(), diplomacy.pact_turns_left]
-	elif diplomacy.is_oathbreaker():
-		oath_button.text = "%s refuses: you broke your %s" % [rival.name, word]
-	elif diplomacy.action_used:
-		oath_button.text = "Diplomacy used this turn"
-	else:
-		oath_button.text = "Swear %s (%d%% they accept)" % [diplomacy.a_pact(), roundi(diplomacy.accept_chance() * 100)]
-	oath_button.disabled = game_over or phase != Phase.PLAYING or not diplomacy.can_propose() or diplomacy.is_oathbreaker()
-	for pair in [[demand_food_button, "food"], [demand_industry_button, "industry"]]:
-		var button: Button = pair[0]
-		var resource: String = pair[1]
-		var chance := diplomacy.demand_chance(resource)
-		if chance <= 0.0:
-			button.text = "Demand %d %s (they don't have it)" % [Diplomacy.DEMAND_AMOUNT, resource.capitalize()]
+# --- Mouse clicks: turn screen positions into hexes, then ask the state ---------
+func _unhandled_input(event: InputEvent) -> void:
+	if state.game_over or state.phase == GameState.Phase.CROSSING or state.diplomacy.has_pending():
+		return
+	if state.phase == GameState.Phase.LANDING:
+		if event is InputEventMouseMotion:
+			var cell := HexView2D.cell_at(get_local_mouse_position())
+			if cell != hover_cell:
+				hover_cell = cell
+				queue_redraw()
+		elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			if state.try_land(HexView2D.cell_at(get_local_mouse_position())):
+				hover_cell = NO_CELL
+			refresh()
+		return
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		var cell := HexView2D.cell_at(get_local_mouse_position())
+		var clicked := state.unit_at(cell)
+		if clicked and clicked.faction == state.player:
+			# click your unit to select it (again to deselect); units that already moved can't be picked
+			selected = null if clicked == selected or clicked.moves <= 0 else clicked
+		elif selected and HexMap.is_neighbour(selected.pos, cell):
+			if state.would_break_pact(cell) and break_warning_cell != cell:
+				# first click only warns; a second click on the same unit breaks the oath
+				break_warning_cell = cell
+				var word: String = state.rival.pact_word
+				state.messages = ["This breaks your %s (Trust %+d, %sbreaker for %d turns, she will see). Click again to attack." % [word, Diplomacy.TRUST_BROKEN, word, Diplomacy.OATHBREAKER_TURNS]]
+				queue_redraw()
+				return
+			break_warning_cell = NO_CELL
+			state.player_unit_act(selected, cell)
+			selected = null
 		else:
-			button.text = "Demand %d %s (%d%% they pay)" % [Diplomacy.DEMAND_AMOUNT, resource.capitalize(), roundi(chance * 100)]
-		button.disabled = game_over or phase != Phase.PLAYING or not diplomacy.can_demand()
+			selected = null
+		refresh()
 
-# --- Walls ------------------------------------------------------------------
-# A city improvement: each level costs WALL_COST Industry and adds WALL_DEFENCE.
-func build_walls(f: Faction) -> bool:
-	if not f.is_alive() or f.walls >= MAX_WALLS or f.industry < WALL_COST:
-		return false
-	f.industry -= WALL_COST
-	f.walls += 1
-	return true
-
-func player_build_walls() -> void:
-	if game_over or phase != Phase.PLAYING:
-		return
-	if build_walls(player):
-		messages = ["You built walls (level %d): your city's defence +%d." % [player.walls, WALL_DEFENCE]]
-	else:
-		messages = ["Can't build walls: you need %d Industry (and walls go up to level %d)." % [WALL_COST, MAX_WALLS]]
-	update_build_button()
-	queue_redraw()
-
-# --- Building units -----------------------------------------------------------
-# A new unit appears on the city, or on a free hex next to it if the city is occupied.
-# Returns false if there's no room or not enough Industry.
-func build_unit(f: Faction) -> bool:
-	if not f.is_alive() or f.industry < UNIT_COST:
-		return false
-	var spot := NO_CELL
-	if not is_blocked(f.city_pos):
-		spot = f.city_pos
-	else:
-		for c in HexMap.neighbours(f.city_pos):
-			if not is_blocked(c) and not is_city(c):
-				spot = c
-				break
-	if spot == NO_CELL:
-		return false
-	f.industry -= UNIT_COST
-	f.add_unit(spot)
-	return true
-
-func player_build_unit() -> void:
-	if game_over or phase != Phase.PLAYING:
-		return
-	if build_unit(player):
-		messages = ["You built a new unit (%d Industry). It can move next turn." % UNIT_COST]
-		if food_change(player) < 0:
-			add_message("Warning: your army now eats more Food than you make (%+d a turn). If your stores run out, a unit will desert." % food_change(player))
-		player.units[-1].moves = 0 # a freshly built unit waits a turn, as is usual
-	else:
-		messages = ["Can't build: you need %d Industry and a free hex at your city." % UNIT_COST]
-	update_build_button()
-	queue_redraw()
-
-func update_build_button() -> void:
-	build_button.disabled = game_over or phase != Phase.PLAYING or player.industry < UNIT_COST
-	walls_button.disabled = game_over or phase != Phase.PLAYING or player.industry < WALL_COST or player.walls >= MAX_WALLS
-	update_oath_button()
-	if player.walls >= MAX_WALLS:
-		walls_button.text = "Walls complete (+%d defence)" % (MAX_WALLS * WALL_DEFENCE)
-	else:
-		walls_button.text = "Build Walls %d/%d (%d Industry)" % [player.walls + 1, MAX_WALLS, WALL_COST]
-
-# --- Combat -----------------------------------------------------------------
-# Every fight uses the same rule: the attacker wins with chance
-# attack / (attack + defence). A defence of 0 means the attacker always wins.
-func win_chance(attack: int, defence: int) -> float:
-	if defence <= 0:
-		return 1.0
-	return float(attack) / (attack + defence)
-
-func odds_text(chance: float) -> String:
-	return "%d%% chance" % roundi(chance * 100)
-
-# Unit against unit. The loser is destroyed; a winning attacker moves into the hex.
-func resolve_combat(attacker: Unit, defender: Unit) -> void:
-	var chance := win_chance(attacker.strength, defender.strength)
-	if randf() < chance:
-		defender.faction.remove_unit(defender)
-		attacker.pos = defender.pos
-		add_message("%s attacked %s and won (%s)." % [attacker.faction.name, defender.faction.name, odds_text(chance)])
-	else:
-		attacker.faction.remove_unit(attacker)
-		add_message("%s attacked %s and lost (%s)." % [attacker.faction.name, defender.faction.name, odds_text(chance)])
-
-# A city's defence (the usual 4X rule): the Strength of its own unit standing
-# in it (the garrison), plus its walls, plus the Daughter's bonus if it shelters her.
-func city_defence(f: Faction) -> int:
-	var defence := f.walls * WALL_DEFENCE
-	var garrison := unit_at(f.city_pos)
-	if garrison and garrison.faction == f:
-		defence += garrison.strength
-	if daughter.shelters_with(f):
-		defence += SunDaughter.DEFENCE
-	return defence
-
-# --- Who is where -----------------------------------------------------------
-# The unit standing on this hex (any faction), or null if there's none.
-func unit_at(cell: Vector2i) -> Unit:
-	for f in factions:
-		for u in f.units:
-			if u.pos == cell:
-				return u
-	return null
-
-# True if a unit or Sköll is standing on this hex.
-func is_blocked(cell: Vector2i) -> bool:
-	return unit_at(cell) != null or skoll.is_at(cell) or (daughter.is_rogue() and cell == daughter.pos)
-
-func is_city(cell: Vector2i) -> bool:
-	for f in factions:
-		if f.city_pos == cell:
-			return true
-	return false
-
-# --- Drawing ----------------------------------------------------------------
+# --- Drawing: only reads the state ----------------------------------------------
 func _draw() -> void:
-	if phase == Phase.CROSSING:
+	var s := state
+	if s.phase == GameState.Phase.CROSSING:
 		return # the Crossing panel is shown instead of the map
+	var player := s.player
+	var rival := s.rival
+	var daughter := s.daughter
+	var skoll := s.skoll
 	var dark := daughter.is_swallowed() # Sköll swallowed the new sun
 	if dark:
 		draw_rect(get_viewport_rect(), Color(0.03, 0.03, 0.05))
@@ -672,20 +312,20 @@ func _draw() -> void:
 	for row in HexMap.ROWS:
 		for col in HexMap.COLS:
 			var c := Vector2i(col, row)
-			var pts := HexMap.hex_points(HexMap.hex_center(c))
+			var pts := HexView2D.hex_points(HexView2D.hex_center(c))
 			var fill := Color(0.25, 0.45, 0.3)
-			for f in factions:
+			for f in s.factions:
 				if f.city_pos != NO_CELL and (c == f.city_pos or HexMap.is_neighbour(f.city_pos, c)):
-					fill = f.territory_color
+					fill = territory_colour(f)
 			if dark:
 				fill = fill.darkened(0.7)
-			if phase == Phase.LANDING:
-				if not can_land_at(c):
+			if s.phase == GameState.Phase.LANDING:
+				if not s.can_land_at(c):
 					fill = fill.darkened(0.6) # too close to the rival
 				elif c == hover_cell:
 					fill = Color(0.9, 0.75, 0.3)
 			if selected and HexMap.is_neighbour(selected.pos, c):
-				var other := unit_at(c)
+				var other := s.unit_at(c)
 				if daughter.is_rogue() and c == daughter.pos:
 					fill = Color(1.0, 0.95, 0.55) # persuade her
 				elif skoll.is_at(c) or (other and other.faction != player):
@@ -698,43 +338,43 @@ func _draw() -> void:
 
 	# Rifts in the void: where Sköll can come through (a dark swirl).
 	for r in skoll.rifts:
-		var rc := HexMap.hex_center(r)
-		draw_circle(rc, HexMap.HEX_SIZE * 0.5, Color(0.12, 0.05, 0.18))
-		draw_arc(rc, HexMap.HEX_SIZE * 0.5, 0, TAU, 24, Color(0.6, 0.3, 0.8), 2.0)
-		draw_arc(rc, HexMap.HEX_SIZE * 0.28, 0.5, TAU * 0.8, 16, Color(0.6, 0.3, 0.8), 2.0)
+		var rc := HexView2D.hex_center(r)
+		draw_circle(rc, HexView2D.HEX_SIZE * 0.5, Color(0.12, 0.05, 0.18))
+		draw_arc(rc, HexView2D.HEX_SIZE * 0.5, 0, TAU, 24, Color(0.6, 0.3, 0.8), 2.0)
+		draw_arc(rc, HexView2D.HEX_SIZE * 0.28, 0.5, TAU * 0.8, 16, Color(0.6, 0.3, 0.8), 2.0)
 
-	for f in factions:
+	for f in s.factions:
 		if f.city_pos == NO_CELL:
 			continue
-		var cc := HexMap.hex_center(f.city_pos)
+		var cc := HexView2D.hex_center(f.city_pos)
 		if f.walls > 0: # a grey ring around the city, thicker for higher walls
 			draw_rect(Rect2(cc - Vector2(25, 25), Vector2(50, 50)), Color(0.55, 0.55, 0.6), false, 3.0 * f.walls)
 		draw_rect(Rect2(cc - Vector2(20, 20), Vector2(40, 40)), Color(0.95, 0.95, 0.85))
-		draw_rect(Rect2(cc - Vector2(20, 20), Vector2(40, 40)), f.unit_color, false, 3.0)
+		draw_rect(Rect2(cc - Vector2(20, 20), Vector2(40, 40)), unit_colour(f), false, 3.0)
 		# city size: a small badge on the bottom-left corner, so a unit in the city doesn't hide it
 		draw_circle(cc + Vector2(-20, 20), 9.0, Color(0.15, 0.15, 0.15))
 		draw_string(ThemeDB.fallback_font, cc + Vector2(-29, 25), str(f.population), HORIZONTAL_ALIGNMENT_CENTER, 18, 14, Color.WHITE)
 		if daughter.shelters_with(f):
 			draw_sun(cc + Vector2(20, -20), 7.0) # a little sun on the city sheltering her
 
-	for f in factions:
+	for f in s.factions:
 		for u in f.units:
 			var ring := Color.WHITE if u == selected else Color(0.1, 0.1, 0.1)
-			var col := f.unit_color if u.moves > 0 or f != player else f.unit_color.darkened(0.4) # dim = moved
-			draw_circle(HexMap.hex_center(u.pos), HexMap.HEX_SIZE * 0.55, ring)
-			draw_circle(HexMap.hex_center(u.pos), HexMap.HEX_SIZE * 0.45, col)
+			var col := unit_colour(f) if u.moves > 0 or f != player else unit_colour(f).darkened(0.4) # dim = moved
+			draw_circle(HexView2D.hex_center(u.pos), HexView2D.HEX_SIZE * 0.55, ring)
+			draw_circle(HexView2D.hex_center(u.pos), HexView2D.HEX_SIZE * 0.45, col)
 
 	# The Sun's Daughter alone in the open: a bright sun on her hex.
 	if daughter.is_rogue():
-		var dc := HexMap.hex_center(daughter.pos)
-		draw_circle(dc, HexMap.HEX_SIZE * 0.7, Color(1.0, 0.85, 0.3, 0.25))
+		var dc := HexView2D.hex_center(daughter.pos)
+		draw_circle(dc, HexView2D.HEX_SIZE * 0.7, Color(1.0, 0.85, 0.3, 0.25))
 		draw_sun(dc, 11.0)
 
 	# Sköll: a big black circle with fire inside and the swallowed sun at its heart.
 	# After swallowing the Daughter he blazes: bigger, with a glow around him.
 	if skoll.active:
-		var sc := HexMap.hex_center(skoll.pos)
-		var r := HexMap.HEX_SIZE
+		var sc := HexView2D.hex_center(skoll.pos)
+		var r := HexView2D.HEX_SIZE
 		if daughter.is_swallowed():
 			draw_circle(sc, r * 1.4, Color(1.0, 0.5, 0.1, 0.18))
 			draw_circle(sc, r * 1.1, Color(1.0, 0.6, 0.1, 0.3))
@@ -747,14 +387,14 @@ func _draw() -> void:
 			draw_circle(sc, r * 0.28, Color(1.0, 0.9, 0.3))
 
 	var font := ThemeDB.fallback_font
-	var info := "Turn %d   City %d   Food %d/%d (%+d)   Industry %d (%+d)   Units %d   Army Strength %d   Doom in %d" % [turn, player.population, player.food, growth_cost(player), food_change(player), player.industry, industry_change(player), player.units.size(), diplomacy.army_power(player), DOOM_TURN - turn]
+	var info := "Turn %d   City %d   Food %d/%d (%+d)   Industry %d (%+d)   Units %d   Army Strength %d   Doom in %d" % [s.turn, player.population, player.food, s.growth_cost(player), s.food_change(player), player.industry, s.industry_change(player), player.units.size(), s.diplomacy.army_power(player), GameState.DOOM_TURN - s.turn]
 	draw_string(font, Vector2(20, 35), info, HORIZONTAL_ALIGNMENT_LEFT, -1, 18)
 	var rival_info := "Rival:  City %d   Food %d   Industry %d   Units %d" % [rival.population, rival.food, rival.industry, rival.units.size()]
 	if rival.city_pos == NO_CELL:
 		rival_info = "Rival:  city destroyed"
 	draw_string(font, Vector2(20, 60), rival_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.9, 0.6, 0.6))
 	if skoll.active and player.city_pos != NO_CELL:
-		var skoll_info := "Sköll hunts %s (%d hexes from yours)   Your defence: %d" % [skoll.target_text(), HexMap.hex_distance(skoll.pos, player.city_pos), city_defence(player)]
+		var skoll_info := "Sköll hunts %s (%d hexes from yours)   Your defence: %d" % [skoll.target_text(), HexMap.hex_distance(skoll.pos, player.city_pos), s.city_defence(player)]
 		draw_string(font, Vector2(345, 60), skoll_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.6, 0.2))
 	var daughter_info := ""
 	if daughter.is_swallowed():
@@ -763,40 +403,41 @@ func _draw() -> void:
 		var note := "(Sköll doesn't know which city)"
 		if daughter.holder == player and player.favour <= SunDaughter.WARN_FAVOUR:
 			note = "(UNHAPPY: at Favour %d she leaves)" % SunDaughter.LEAVE_FAVOUR
-		elif daughter.holder == player and turn < Skoll.ARRIVAL_TURN:
-			note = "(for turn %d: defence %d/%d, army %d/%d)" % [Skoll.ARRIVAL_TURN, city_defence(player), SunDaughter.READY_DEFENCE, diplomacy.army_power(player), SunDaughter.READY_ARMY]
+		elif daughter.holder == player and s.turn < Skoll.ARRIVAL_TURN:
+			note = "(for turn %d: defence %d/%d, army %d/%d)" % [Skoll.ARRIVAL_TURN, s.city_defence(player), SunDaughter.READY_DEFENCE, s.diplomacy.army_power(player), SunDaughter.READY_ARMY]
 		daughter_info = "%s %s %s    Her Favour: you %d, %s %d" % ["You shelter" if daughter.holder == player else daughter.holder.name + " shelters", SunDaughter.NAME, note, player.favour, rival.name, rival.favour]
 	if daughter.is_rogue():
 		daughter_info = "She is ALONE IN THE OPEN! Move a unit onto her to persuade her: you %d%%, %s %d%%" % [roundi(daughter.persuade_chance(player) * 100), rival.name, roundi(daughter.persuade_chance(rival) * 100)]
 	draw_string(font, Vector2(20, 82), daughter_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.9, 0.5))
 
 	# Diplomacy panel (right side): trust, the oath, and the memory of promises.
+	var d := s.diplomacy
 	var dx := 820.0
 	var dy := 228.0
 	draw_string(font, Vector2(dx, dy), "DIPLOMACY with %s" % rival.name, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.9, 0.85, 0.7))
-	var record := "    They broke %d %s%s" % [diplomacy.rival_broken_oaths, rival.pact_word, "" if diplomacy.rival_broken_oaths == 1 else "s"]
-	draw_string(font, Vector2(dx, dy + 22), "Their trust in you: %+d%s" % [diplomacy.trust, record], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.85, 0.85))
-	if diplomacy.pact_active():
-		draw_string(font, Vector2(dx, dy + 42), "%s in force: %d turns left" % [rival.pact_word.capitalize(), diplomacy.pact_turns_left], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.6, 0.9, 0.6))
-	elif diplomacy.is_oathbreaker():
-		draw_string(font, Vector2(dx, dy + 42), "You are an %sbreaker until turn %d" % [rival.pact_word, diplomacy.oathbreaker_until], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.5, 0.4))
+	var record := "    They broke %d %s%s" % [d.rival_broken_oaths, rival.pact_word, "" if d.rival_broken_oaths == 1 else "s"]
+	draw_string(font, Vector2(dx, dy + 22), "Their trust in you: %+d%s" % [d.trust, record], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.85, 0.85))
+	if d.pact_active():
+		draw_string(font, Vector2(dx, dy + 42), "%s in force: %d turns left" % [rival.pact_word.capitalize(), d.pact_turns_left], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.6, 0.9, 0.6))
+	elif d.is_oathbreaker():
+		draw_string(font, Vector2(dx, dy + 42), "You are an %sbreaker until turn %d" % [rival.pact_word, d.oathbreaker_until], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.5, 0.4))
 	draw_string(font, Vector2(dx, dy + 70), "They remember:", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.7, 0.7))
-	for i in diplomacy.history.size():
-		draw_multiline_string(font, Vector2(dx, dy + 92 + i * 44), diplomacy.history[i], HORIZONTAL_ALIGNMENT_LEFT, 320, 13, 2, Color(0.8, 0.8, 0.75))
+	for i in d.history.size():
+		draw_multiline_string(font, Vector2(dx, dy + 92 + i * 44), d.history[i], HORIZONTAL_ALIGNMENT_LEFT, 320, 13, 2, Color(0.8, 0.8, 0.75))
 
 	# Messages, newest at the bottom.
 	var screen := get_viewport_rect().size
-	for i in messages.size():
-		var y := screen.y - 18 - (messages.size() - 1 - i) * 22
-		draw_string(font, Vector2(20, y), messages[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.85, 0.4))
+	for i in s.messages.size():
+		var y := screen.y - 18 - (s.messages.size() - 1 - i) * 22
+		draw_string(font, Vector2(20, y), s.messages[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.85, 0.4))
 
-	if game_over:
+	if s.game_over:
 		draw_rect(Rect2(Vector2.ZERO, screen), Color(0, 0, 0, 0.8))
-		draw_string(font, Vector2(0, screen.y / 2 - 60), end_title, HORIZONTAL_ALIGNMENT_CENTER, screen.x, 40, Color(0.95, 0.45, 0.15))
-		var lines := end_detail.split("\n")
+		draw_string(font, Vector2(0, screen.y / 2 - 60), s.end_title, HORIZONTAL_ALIGNMENT_CENTER, screen.x, 40, Color(0.95, 0.45, 0.15))
+		var lines := s.end_detail.split("\n")
 		for i in lines.size():
 			draw_string(font, Vector2(0, screen.y / 2 - 10 + i * 30), lines[i], HORIZONTAL_ALIGNMENT_CENTER, screen.x, 20)
-		var totals := "Turn %d    Food %d    Industry %d    Units %d    Army Strength %d" % [turn, player.food, player.industry, player.units.size(), diplomacy.army_power(player)]
+		var totals := "Turn %d    Food %d    Industry %d    Units %d    Army Strength %d" % [s.turn, player.food, player.industry, player.units.size(), d.army_power(player)]
 		draw_string(font, Vector2(0, screen.y / 2 + 10 + lines.size() * 30), totals, HORIZONTAL_ALIGNMENT_CENTER, screen.x, 18, Color(0.7, 0.7, 0.7))
 
 # A small sun: a gold circle with rays.
@@ -806,47 +447,3 @@ func draw_sun(center: Vector2, radius: float) -> void:
 		draw_line(center + dir * radius * 1.2, center + dir * radius * 1.9, Color(1.0, 0.85, 0.3), 2.0)
 	draw_circle(center, radius, Color(1.0, 0.9, 0.4))
 	draw_circle(center, radius * 0.6, Color(1.0, 1.0, 0.85))
-
-# --- Mouse clicks -----------------------------------------------------------
-func _unhandled_input(event: InputEvent) -> void:
-	if game_over or phase == Phase.CROSSING or diplomacy.has_pending():
-		return
-	if phase == Phase.LANDING:
-		if event is InputEventMouseMotion:
-			var cell := HexMap.cell_at(get_local_mouse_position())
-			if cell != hover_cell:
-				hover_cell = cell
-				queue_redraw()
-		elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-			try_land(HexMap.cell_at(get_local_mouse_position()))
-		return
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		var cell := HexMap.cell_at(get_local_mouse_position())
-		var clicked := unit_at(cell)
-		if clicked and clicked.faction == player:
-			# click your unit to select it (again to deselect); units that already moved can't be picked
-			selected = null if clicked == selected or clicked.moves <= 0 else clicked
-		elif selected and HexMap.is_neighbour(selected.pos, cell):
-			messages.clear()
-			if skoll.is_at(cell):
-				skoll.attacked_by(selected)
-			elif daughter.is_rogue() and cell == daughter.pos:
-				try_persuade(selected)
-			elif clicked and clicked.faction != player:
-				if diplomacy.pact_active() and break_warning_cell != cell:
-					# first click only warns; a second click on the same unit breaks the oath
-					break_warning_cell = cell
-					messages = ["This breaks your %s (Trust %+d, %sbreaker for %d turns, she will see). Click again to attack." % [rival.pact_word, Diplomacy.TRUST_BROKEN, rival.pact_word, Diplomacy.OATHBREAKER_TURNS]]
-					queue_redraw()
-					return
-				if diplomacy.pact_active():
-					diplomacy.break_pact()
-				break_warning_cell = NO_CELL
-				resolve_combat(selected, clicked) # moving into an enemy = attack
-			elif not clicked:
-				selected.pos = cell
-			selected.moves -= 1
-			selected = null
-		else:
-			selected = null
-		queue_redraw()
