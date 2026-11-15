@@ -104,7 +104,8 @@ func _initialize() -> void:
 	var st := {"wars on you": 0, "your wars": 0, "ai-ai wars": 0, "peace made": 0, "allies honoured": 0, "allies broke": 0, "calls to arms": 0, "ai betrayals": 0}
 	var bad := {}
 	var ends := {}
-	for g in 300:
+	var n_games: int = H.games(300)
+	for g in n_games:
 		m = load("res://main.tscn").instantiate()
 		root.add_child(m)
 		s = m.state
@@ -156,7 +157,7 @@ func _initialize() -> void:
 			if s.turn > 40: bad["game never ended"] = 1; break
 		ends[s.end_title] = ends.get(s.end_title, 0) + 1
 		m.queue_free()
-	print("300 games, per game: %s" % ", ".join(st.keys().map(func(k): return "%s %.2f" % [k, st[k] / 300.0])))
+	print("300 games, per game: %s" % ", ".join(st.keys().map(func(k): return "%s %.2f" % [k, st[k] / float(n_games)])))
 	print("Endings: %s" % ends)
 	print("Impossible states: %s" % (bad if bad.size() > 0 else "none"))
 	quit()

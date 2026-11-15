@@ -5,7 +5,8 @@ func _initialize() -> void:
 	seed(4242)
 	for holder_name in ["player", "rival"]:
 		var st := {"survived": 0, "fell": 0, "found early": 0, "first: player": 0, "first: rival": 0}
-		for g in 500:
+		var n_games: int = H.games(500)
+		for g in n_games:
 			var m = load("res://main.tscn").instantiate()
 			root.add_child(m)
 			var s = m.state

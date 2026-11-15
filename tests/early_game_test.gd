@@ -27,7 +27,8 @@ func _initialize() -> void:
 	var kinds := {"pop-up": 0, "build": 0, "scout": 0}
 	var stats := {"events": 0, "ruins: you": 0, "ruins: ai": 0, "outposts: you": 0, "outposts: ai": 0, "your outposts taken": 0, "you took one": 0, "rifts found before turn 14": 0, "turn-1 builds possible": 0, "ai betrayals": 0, "ai vs ai fights": 0}
 	var explored_by_10 := 0
-	for g in 300:
+	var n_games: int = H.games(300)
+	for g in n_games:
 		var m = load("res://main.tscn").instantiate()
 		root.add_child(m)
 		var s = m.state
@@ -141,8 +142,8 @@ func _initialize() -> void:
 	print("Endings (300 games): %s" % ends)
 	print("Turns 1-10: %d turns, with a pop-up %d%%, something to build %d%%, a scout with land to explore %d%%; turns with NO decision: %d" % [early_turns, roundi(100.0 * kinds["pop-up"] / early_turns), roundi(100.0 * kinds["build"] / early_turns), roundi(100.0 * kinds["scout"] / early_turns), dead_turns])
 	print("Average hexes explored by turn 10: %d of %d" % [roundi(float(explored_by_10) / 300), HexMap.ROWS * HexMap.COLS])
-	print("Per game: events %.1f, ruins searched by you %.1f / by AIs %.1f, outposts you founded %.1f, AI outposts standing at the end %.1f, your outposts taken %.2f, you took one %.2f" % [stats["events"] / 300.0, stats["ruins: you"] / 300.0, stats["ruins: ai"] / 300.0, stats["outposts: you"] / 300.0, stats["outposts: ai"] / 300.0, stats["your outposts taken"] / 300.0, stats["you took one"] / 300.0])
+	print("Per game: events %.1f, ruins searched by you %.1f / by AIs %.1f, outposts you founded %.1f, AI outposts standing at the end %.1f, your outposts taken %.2f, you took one %.2f" % [stats["events"] / float(n_games), stats["ruins: you"] / float(n_games), stats["ruins: ai"] / float(n_games), stats["outposts: you"] / float(n_games), stats["outposts: ai"] / float(n_games), stats["your outposts taken"] / float(n_games), stats["you took one"] / float(n_games)])
 	print("Games where you found a rift before Sköll arrived: %d; games where you could build on turn 1: %d" % [stats["rifts found before turn 14"], stats["turn-1 builds possible"]])
-	print("AI betrayals per game %.2f, AI-vs-AI fights per game %.1f" % [stats["ai betrayals"] / 300.0, stats["ai vs ai fights"] / 300.0])
+	print("AI betrayals per game %.2f, AI-vs-AI fights per game %.1f" % [stats["ai betrayals"] / float(n_games), stats["ai vs ai fights"] / float(n_games)])
 	print("Impossible states: %s" % (bad if bad.size() > 0 else "none"))
 	quit()

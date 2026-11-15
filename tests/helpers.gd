@@ -28,3 +28,13 @@ static func landing_spots(s) -> Array:
 static func flatten(s) -> void:
 	for c in s.terrain:
 		s.terrain[c] = Terrain.Type.PLAINS
+
+# How many games a simulation plays: the number asked for, or fewer when the
+# GAMES environment variable is set (quick runs while building, e.g. GAMES=50).
+# Averages divide by this number; totals printed in quick mode are smaller.
+static func games(full: int) -> int:
+	var quick := OS.get_environment("GAMES")
+	if quick != "" and int(quick) < full:
+		print("(quick mode: %d games instead of %d)" % [int(quick), full])
+		return int(quick)
+	return full

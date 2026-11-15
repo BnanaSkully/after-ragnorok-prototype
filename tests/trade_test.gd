@@ -65,7 +65,8 @@ func _initialize() -> void:
 	m.queue_free()
 	# 5. full games with trading
 	var bad := 0; var trades := 0; var ai_offers := 0; var ends := {}
-	for g in 200:
+	var n_games: int = H.games(200)
+	for g in n_games:
 		m = new_game(); s = m.state
 		while not s.game_over:
 			H.answer_choices(s)

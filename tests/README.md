@@ -21,6 +21,18 @@ Check a script parses:
 /tmp/godot --headless --check-only --script game_state.gd
 ```
 
+Run every test, 4 at a time (about 26 seconds with GAMES=20; the full 300-game runs take several minutes):
+
+```bash
+GODOT=/tmp/godot tests/run_all.sh
+```
+
+```bash
+GAMES=50 GODOT=/tmp/godot tests/run_all.sh war_test deal_test
+```
+
+(GAMES=N makes every simulation play N games instead of its usual 300; give test names to run only those.)
+
 Run a test:
 
 ```bash

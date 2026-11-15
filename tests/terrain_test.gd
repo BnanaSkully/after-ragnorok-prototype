@@ -14,7 +14,8 @@ func _initialize() -> void:
 	seed(11)
 	# 1. 300 maps
 	var counts := [0, 0, 0, 0, 0]; var bad := {}
-	for g in 300:
+	var n_games: int = H.games(300)
+	for g in n_games:
 		var m = new_game(); var s = m.state
 		for c in s.terrain: counts[s.terrain[c]] += 1
 		if not Terrain.all_connected(s.terrain): bad["not connected"] = bad.get("not connected", 0) + 1

@@ -4,7 +4,8 @@ func _initialize() -> void:
 	await process_frame
 	var bad := {}
 	var rerolled := 0; var drives := 0
-	for g in 200:
+	var n_games: int = H.games(200)
+	for g in n_games:
 		var m = load("res://main.tscn").instantiate()
 		root.add_child(m)
 		var s = m.state
