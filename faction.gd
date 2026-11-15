@@ -7,8 +7,9 @@ extends RefCounted
 
 var name: String
 var city_pos: Vector2i
-var units: Array[Unit] = [] # this faction's army units on the map
-var strength := 3 # Strength of new units (higher = better odds in combat)
+var units: Array[Unit] = [] # this faction's units on the map (armies and scouts)
+var outposts: Array[Vector2i] = [] # hexes of its outposts (each claims the hexes around it)
+var strength := 3 # Strength of new army units (higher = better odds in combat)
 var food := 0
 var industry := 0
 var favour := 0 # how much the Sun's Daughter trusts this faction (0 to 10)
@@ -16,6 +17,10 @@ var walls := 0 # city wall level (each level adds defence)
 var population := 1 # city size: grows from surplus Food, each extra point makes +1 Food and +1 Industry
 var pact_word := "oath" # what this faction calls a sworn agreement (Norse factions swear oaths)
 var is_player := false
+# Fog of war: every hex this faction has ever seen (hex -> true). Seen hexes
+# stay explored; what's on them now is only known while they're in sight.
+var explored := {}
+var known_rifts := {} # rifts it has found (hex -> true); forgotten when the rifts shift
 
 # (How a faction looks on screen, its colours, is up to the view: see main.gd.)
 func _init(p_name: String, p_city: Vector2i, p_pact_word := "oath") -> void:
@@ -23,13 +28,16 @@ func _init(p_name: String, p_city: Vector2i, p_pact_word := "oath") -> void:
 	city_pos = p_city
 	pact_word = p_pact_word
 
-func add_unit(cell: Vector2i) -> Unit:
-	var u := Unit.new(self, cell)
+func add_unit(cell: Vector2i, kind := Unit.Kind.ARMY) -> Unit:
+	var u := Unit.new(self, cell, kind)
 	units.append(u)
 	return u
 
 func remove_unit(u: Unit) -> void:
 	units.erase(u)
+
+func scout_count() -> int:
+	return units.filter(func(u): return u.is_scout()).size()
 
 # The faction is out of the game once its city has fallen.
 func is_alive() -> bool:

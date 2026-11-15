@@ -36,6 +36,7 @@ func unit_colour(f: Faction) -> Color:
 var hover_cell := NO_CELL # the hex under the mouse while landing
 var selected: Unit = null # the player's unit chosen to move (null = none)
 var break_warning_cell := NO_CELL # first click on a unit you've sworn an agreement with only warns
+var placing_outpost := false # after clicking "Outpost": the next click on a hex founds it there
 
 # Buttons and panels
 var crossing_panel: VBoxContainer
@@ -43,6 +44,8 @@ var crossing_label: Label
 var crossing_buttons: VBoxContainer
 var end_turn_button: Button
 var build_button: Button
+var scout_button: Button
+var outpost_button: Button
 var walls_button: Button
 var faction_buttons := {} # AI faction -> {"pact": Button, "food": Button, "industry": Button}
 var trade_button: Button # opens the "trade the Sun's Daughter" panel
@@ -54,12 +57,24 @@ var offer_panel: PanelContainer # an AI faction's Accept/Refuse pop-up
 var offer_label: Label
 var offer_heading: Label
 var offer_accept_button: Button
+var choice_panel: PanelContainer # a ruin or small event: one button per option
+var choice_heading: Label
+var choice_label: Label
+var choice_buttons: VBoxContainer
 
 func _ready() -> void:
-	end_turn_button = add_button("End Turn", Vector2(820, 20), on_end_turn)
-	build_button = add_button("Build Unit (%d Industry)" % GameState.UNIT_COST, Vector2(920, 20), on_build_unit)
-	walls_button = add_button("", Vector2(820, 58), on_build_walls)
-	trade_button = add_button("Trade her", Vector2(1055, 58), on_open_trade)
+	# Build options, each a different trade-off (costs are in Industry).
+	end_turn_button = add_button("End Turn", Vector2(PANEL_X, 20), on_end_turn)
+	build_button = add_button("Army (%d)" % GameState.UNIT_COST, Vector2(PANEL_X + 90, 20), on_build_unit)
+	scout_button = add_button("Scout (%d)" % GameState.SCOUT_COST, Vector2(PANEL_X + 180, 20), on_build_scout)
+	outpost_button = add_button("", Vector2(PANEL_X, 58), on_outpost_button)
+	walls_button = add_button("", Vector2(PANEL_X + 110, 58), on_build_walls)
+	trade_button = add_button("Trade her", Vector2(PANEL_X + 240, 58), on_open_trade)
+	for b in [build_button, scout_button, outpost_button, walls_button, trade_button]:
+		b.add_theme_font_size_override("font_size", 14)
+	build_button.tooltip_text = "An army unit: Strength %d, 1 move, eats %d Food a turn." % [state.player.strength, GameState.UNIT_FOOD_UPKEEP]
+	scout_button.tooltip_text = "A scout: 2 moves, sees 3 hexes, eats nothing, but Strength %d. Up to %d." % [Unit.SCOUT_STRENGTH, GameState.MAX_SCOUTS]
+	outpost_button.tooltip_text = "Found an outpost on a hex you can see, within %d of your city: +%d Food, +%d Industry a turn. Anyone can take it if nobody guards it." % [GameState.OUTPOST_RANGE, GameState.OUTPOST_FOOD, GameState.OUTPOST_INDUSTRY]
 	for i in state.ais.size():
 		var f: Faction = state.ais[i]
 		var y := BLOCK_Y + i * BLOCK_H + 46
@@ -75,6 +90,7 @@ func _ready() -> void:
 	play_again_button.add_theme_font_size_override("font_size", 22)
 	play_again_button.visible = false
 	build_offer_ui()
+	build_choice_ui()
 	build_trade_ui()
 	build_crossing_ui()
 	state.start_crossing()
@@ -98,30 +114,38 @@ func refresh() -> void:
 		b.visible = not crossing
 	if crossing:
 		show_crossing_step()
+	if not state.can_act():
+		placing_outpost = false
 	update_buttons()
-	if state.has_pending_offer() and not offer_panel.visible:
+	if state.has_pending_choice():
+		offer_panel.visible = false
+		show_choice() # a ruin or event comes first; any offer waits behind it
+	elif state.has_pending_offer() and not offer_panel.visible:
 		show_offer()
 	if state.game_over:
 		show_end_screen()
 	queue_redraw()
 
 func all_game_buttons() -> Array[Button]:
-	var list: Array[Button] = [end_turn_button, build_button, walls_button, trade_button]
+	var list: Array[Button] = [end_turn_button, build_button, scout_button, outpost_button, walls_button, trade_button]
 	for set in faction_buttons.values():
 		for b in set.values():
 			list.append(b)
 	return list
 
 func update_buttons() -> void:
-	var playing: bool = state.can_play() and not state.has_pending_offer()
+	var playing: bool = state.can_act()
 	var p := state.player
 	end_turn_button.disabled = not playing
 	build_button.disabled = not playing or p.industry < GameState.UNIT_COST
+	scout_button.disabled = not playing or not state.can_build_scout(p)
+	outpost_button.disabled = not playing or (not placing_outpost and (p.industry < GameState.OUTPOST_COST or state.outpost_spots(p).is_empty()))
+	outpost_button.text = "Cancel" if placing_outpost else "Outpost (%d)" % GameState.OUTPOST_COST
 	walls_button.disabled = not playing or p.industry < GameState.WALL_COST or p.walls >= GameState.MAX_WALLS
 	if p.walls >= GameState.MAX_WALLS:
-		walls_button.text = "Walls complete (+%d defence)" % (GameState.MAX_WALLS * GameState.WALL_DEFENCE)
+		walls_button.text = "Walls done"
 	else:
-		walls_button.text = "Build Walls %d/%d (%d Industry)" % [p.walls + 1, GameState.MAX_WALLS, GameState.WALL_COST]
+		walls_button.text = "Walls %d/%d (%d)" % [p.walls + 1, GameState.MAX_WALLS, GameState.WALL_COST]
 	trade_button.disabled = not playing or not state.can_trade_daughter()
 	for f in state.ais:
 		var d: Diplomacy = state.relation(f)
@@ -169,6 +193,20 @@ func on_build_unit() -> void:
 
 func on_build_walls() -> void:
 	state.player_build_walls()
+	refresh()
+
+func on_build_scout() -> void:
+	state.player_build_scout()
+	refresh()
+
+# First click: choose where (the possible hexes light up). Clicking again cancels.
+func on_outpost_button() -> void:
+	placing_outpost = not placing_outpost
+	selected = null
+	if placing_outpost:
+		state.messages = ["Click a highlighted hex to found your outpost there (or click Cancel). You can only choose hexes you can see right now."]
+	else:
+		state.messages = []
 	refresh()
 
 func on_propose_pact(f: Faction) -> void:
@@ -290,6 +328,62 @@ func answer_offer(accept: bool) -> void:
 		r.answer(accept)
 	refresh()
 
+# --- Ruins and small events (pop-up with one button per option) -------------------
+func build_choice_ui() -> void:
+	choice_panel = PanelContainer.new()
+	choice_panel.position = Vector2(150, 170)
+	choice_panel.custom_minimum_size = Vector2(560, 0)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.08, 0.09, 0.1)
+	style.border_color = Color(0.55, 0.75, 0.9)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(6)
+	style.set_content_margin_all(18)
+	choice_panel.add_theme_stylebox_override("panel", style)
+	add_child(choice_panel)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 12)
+	choice_panel.add_child(box)
+	choice_heading = Label.new()
+	choice_heading.add_theme_font_size_override("font_size", 16)
+	choice_heading.add_theme_color_override("font_color", Color(0.55, 0.75, 0.9))
+	box.add_child(choice_heading)
+	choice_label = Label.new()
+	choice_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	choice_label.custom_minimum_size = Vector2(520, 0)
+	choice_label.add_theme_font_size_override("font_size", 17)
+	box.add_child(choice_label)
+	choice_buttons = VBoxContainer.new()
+	choice_buttons.add_theme_constant_override("separation", 8)
+	box.add_child(choice_buttons)
+	choice_panel.visible = false
+
+func show_choice() -> void:
+	var c: Dictionary = state.pending_choices[0]
+	choice_heading.text = c["title"]
+	choice_label.text = c["text"]
+	for b in choice_buttons.get_children():
+		choice_buttons.remove_child(b)
+		b.queue_free()
+	var options: Array = c["options"]
+	for i in options.size():
+		var b := Button.new()
+		b.text = options[i]["label"]
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.add_theme_font_size_override("font_size", 16)
+		if not state.can_afford(options[i]["effects"]):
+			b.text += "  (you can't afford it)"
+			b.disabled = true
+		b.pressed.connect(on_choice.bind(i))
+		choice_buttons.add_child(b)
+	choice_panel.size = Vector2.ZERO # shrink to fit the new text
+	choice_panel.visible = true
+
+func on_choice(i: int) -> void:
+	state.answer_choice(i)
+	choice_panel.visible = false
+	refresh()
+
 # --- Trading the Sun's Daughter (panel) -------------------------------------------
 func build_trade_ui() -> void:
 	trade_panel = PanelContainer.new()
@@ -363,7 +457,7 @@ func close_trade() -> void:
 
 # --- Mouse clicks: turn screen positions into hexes, then ask the state ---------
 func _unhandled_input(event: InputEvent) -> void:
-	if state.game_over or state.phase == GameState.Phase.CROSSING or state.has_pending_offer() or trade_panel.visible:
+	if state.game_over or state.phase == GameState.Phase.CROSSING or state.is_waiting() or trade_panel.visible:
 		return
 	if state.phase == GameState.Phase.LANDING:
 		if event is InputEventMouseMotion:
@@ -376,6 +470,17 @@ func _unhandled_input(event: InputEvent) -> void:
 				hover_cell = NO_CELL
 			refresh()
 		return
+	if placing_outpost and event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			var spot := HexView2D.cell_at(get_local_mouse_position())
+			if spot in state.outpost_spots(state.player):
+				state.player_build_outpost(spot)
+				placing_outpost = false
+		else:
+			placing_outpost = false # right-click cancels
+			state.messages = []
+		refresh()
+		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var cell := HexView2D.cell_at(get_local_mouse_position())
 		var clicked := state.unit_at(cell)
@@ -386,13 +491,16 @@ func _unhandled_input(event: InputEvent) -> void:
 			if state.would_break_pact(cell) and break_warning_cell != cell:
 				# first click only warns; a second click on the same unit breaks the oath
 				break_warning_cell = cell
-				var word: String = state.unit_at(cell).faction.pact_word
-				state.messages = ["This breaks your %s (Trust %+d, %sbreaker for %d turns, she will see). Click again to attack." % [word, Diplomacy.TRUST_BROKEN, word, Diplomacy.OATHBREAKER_TURNS]]
+				var them: Faction = state.unit_at(cell).faction if state.unit_at(cell) else state.outpost_owner(cell)
+				var word: String = them.pact_word
+				state.messages = ["This breaks your %s (Trust %+d, %sbreaker for %d turns, she will see). Click again to go ahead." % [word, Diplomacy.TRUST_BROKEN, word, Diplomacy.OATHBREAKER_TURNS]]
 				queue_redraw()
 				return
 			break_warning_cell = NO_CELL
+			var mover := selected
 			state.player_unit_act(selected, cell)
-			selected = null
+			# a scout with a move left stays selected so you can click on again
+			selected = mover if mover in state.player.units and mover.moves > 0 and not state.is_waiting() else null
 		else:
 			selected = null
 		refresh()
@@ -409,48 +517,76 @@ func _draw() -> void:
 	var dark := daughter.is_swallowed() # Sköll swallowed the new sun
 	if dark:
 		draw_rect(get_viewport_rect(), Color(0.03, 0.03, 0.05))
-	# Map: green by default, tinted for each faction's city territory,
-	# yellow for hexes the selected player unit can move to,
-	# orange-red for an enemy it can attack.
+	# Map: green by default, tinted for each faction's territory (cities and
+	# outposts claim the hexes around them), yellow for hexes the selected
+	# player unit can move to, orange-red for an enemy it can attack.
+	# Fog of war: never explored = black; explored but out of sight = dimmed.
+	var landing := s.phase == GameState.Phase.LANDING
+	var outpost_spots: Array[Vector2i] = []
+	if placing_outpost:
+		outpost_spots = s.outpost_spots(player)
 	for row in HexMap.ROWS:
 		for col in HexMap.COLS:
 			var c := Vector2i(col, row)
 			var pts := HexView2D.hex_points(HexView2D.hex_center(c))
 			var fill := Color(0.25, 0.45, 0.3)
-			for f in s.factions:
-				if f.city_pos != NO_CELL and (c == f.city_pos or HexMap.is_neighbour(f.city_pos, c)):
-					fill = territory_colour(f)
+			var explored := landing or s.player_has_explored(c)
+			if not landing:
+				var owner := s.territory_owner(c)
+				if owner != null:
+					fill = territory_colour(owner)
 			if dark:
 				fill = fill.darkened(0.7)
-			if not s.player_can_see(c):
-				fill = fill.darkened(0.45) # fog of war: you can't see what's here now
-			if s.phase == GameState.Phase.LANDING:
+			if not explored:
+				fill = Color(0.07, 0.07, 0.09) # never seen
+			elif not landing and not s.player_can_see(c):
+				fill = fill.darkened(0.45) # seen before, but you can't see what's here now
+			if landing:
+				# from the ark you see the shape of the land, not who is on it
 				if not s.can_land_at(c):
-					fill = fill.darkened(0.6) # too close to another faction's city
+					fill = fill.darkened(0.6) # too close to another people's fires
 				elif c == hover_cell:
 					fill = Color(0.9, 0.75, 0.3)
+			if c in outpost_spots:
+				fill = Color(0.55, 0.8, 0.95) # you could found an outpost here
 			if selected and HexMap.is_neighbour(selected.pos, c):
 				var other := s.unit_at(c)
-				if daughter.is_rogue() and c == daughter.pos:
+				if daughter.is_rogue() and c == daughter.pos and s.player_can_see(c):
 					fill = Color(1.0, 0.95, 0.55) # persuade her
-				elif skoll.is_at(c) or (other and other.faction != player):
+				elif (skoll.is_at(c) or (other and other.faction != player)) and s.player_can_see(c):
 					fill = Color(0.95, 0.45, 0.2) # something to attack
-				elif not other:
+				elif not other and not (s.is_city(c) and c != player.city_pos):
 					fill = Color(0.9, 0.75, 0.3) # free to move
 			draw_colored_polygon(pts, fill)
 			pts.append(pts[0])
 			draw_polyline(pts, Color(0.1, 0.1, 0.1), 2.0)
+	# (During the Landing nothing below is drawn: you haven't explored anything yet.)
 
-	# The rift Sköll last came through (a dark swirl). The others stay hidden.
-	if skoll.revealed_rift != NO_CELL and s.player_can_see(skoll.revealed_rift):
-		var rc := HexView2D.hex_center(skoll.revealed_rift)
-		draw_circle(rc, HexView2D.HEX_SIZE * 0.5, Color(0.12, 0.05, 0.18))
-		draw_arc(rc, HexView2D.HEX_SIZE * 0.5, 0, TAU, 24, Color(0.6, 0.3, 0.8), 2.0)
-		draw_arc(rc, HexView2D.HEX_SIZE * 0.28, 0.5, TAU * 0.8, 16, Color(0.6, 0.3, 0.8), 2.0)
+	# Rifts you have found (a dark swirl), and the one Sköll last came through.
+	for rift in player.known_rifts:
+		draw_rift(HexView2D.hex_center(rift))
+	if skoll.revealed_rift != NO_CELL and s.player_can_see(skoll.revealed_rift) and not player.known_rifts.has(skoll.revealed_rift):
+		draw_rift(HexView2D.hex_center(skoll.revealed_rift))
+
+	# Ruins not yet searched, once you've seen them: broken columns.
+	for r in s.ruins:
+		if not r["taken"] and s.player_has_explored(r["cell"]):
+			draw_ruins(HexView2D.hex_center(r["cell"]))
+
+	# Outposts: a small flag-square in the owner's colour.
+	for f in s.factions:
+		for o in f.outposts:
+			if not s.player_has_explored(o):
+				continue
+			var oc := HexView2D.hex_center(o)
+			draw_rect(Rect2(oc - Vector2(10, 10) * k, Vector2(20, 20) * k), Color(0.85, 0.8, 0.65))
+			draw_rect(Rect2(oc - Vector2(10, 10) * k, Vector2(20, 20) * k), unit_colour(f), false, 3.0)
+			draw_line(oc + Vector2(-4, 6) * k, oc + Vector2(-4, -8) * k, Color(0.2, 0.15, 0.1), 2.0)
+			draw_colored_polygon(PackedVector2Array([oc + Vector2(-4, -8) * k, oc + Vector2(6, -5) * k, oc + Vector2(-4, -2) * k]), unit_colour(f))
 
 	for f in s.factions:
-		if f.city_pos == NO_CELL:
-			continue
+		if f.city_pos == NO_CELL or not s.player_has_explored(f.city_pos):
+			continue # a city you haven't found yet is hidden in the fog
 		var cc := HexView2D.hex_center(f.city_pos)
 		var half := 20.0 * k
 		if f.walls > 0: # a grey ring around the city, thicker for higher walls
@@ -469,8 +605,18 @@ func _draw() -> void:
 				continue # hidden by fog of war
 			var ring := Color.WHITE if u == selected else Color(0.1, 0.1, 0.1)
 			var col := unit_colour(f) if u.moves > 0 or f != player else unit_colour(f).darkened(0.4) # dim = moved
-			draw_circle(HexView2D.hex_center(u.pos), HexView2D.HEX_SIZE * 0.55, ring)
-			draw_circle(HexView2D.hex_center(u.pos), HexView2D.HEX_SIZE * 0.45, col)
+			var uc := HexView2D.hex_center(u.pos)
+			if u.is_scout(): # a scout: a smaller diamond
+				var r := HexView2D.HEX_SIZE * 0.5
+				var diamond := PackedVector2Array([uc + Vector2(0, -r), uc + Vector2(r * 0.8, 0), uc + Vector2(0, r), uc + Vector2(-r * 0.8, 0)])
+				draw_colored_polygon(diamond, ring)
+				var inner := PackedVector2Array()
+				for v in diamond:
+					inner.append(uc + (v - uc) * 0.75)
+				draw_colored_polygon(inner, col)
+			else:
+				draw_circle(uc, HexView2D.HEX_SIZE * 0.55, ring)
+				draw_circle(uc, HexView2D.HEX_SIZE * 0.45, col)
 
 	# The Sun's Daughter alone in the open: a bright sun on her hex.
 	if daughter.is_rogue() and s.player_can_see(daughter.pos):
@@ -495,7 +641,7 @@ func _draw() -> void:
 			draw_circle(sc, r * 0.28, Color(1.0, 0.9, 0.3))
 
 	var font := ThemeDB.fallback_font
-	var info := "Turn %d   City %d   Food %d/%d (%+d)   Industry %d (%+d)   Units %d   Army Strength %d   Doom in %d" % [s.turn, player.population, player.food, s.growth_cost(player), s.food_change(player), player.industry, s.industry_change(player), player.units.size(), s.army_power(player), GameState.DOOM_TURN - s.turn]
+	var info := "Turn %d   City %d   Food %d/%d (%+d)   Industry %d (%+d)   Units %d   Outposts %d   Army %d   Doom in %d" % [s.turn, player.population, player.food, s.growth_cost(player), s.food_change(player), player.industry, s.industry_change(player), player.units.size(), player.outposts.size(), s.army_power(player), GameState.DOOM_TURN - s.turn]
 	draw_string(font, Vector2(20, 35), info, HORIZONTAL_ALIGNMENT_LEFT, -1, 18)
 	if skoll.active and player.city_pos != NO_CELL:
 		var where := "%d hexes from yours" % HexMap.hex_distance(skoll.pos, player.city_pos) if s.player_can_see(skoll.pos) else "out of sight"
@@ -550,6 +696,21 @@ func _draw() -> void:
 			draw_string(font, Vector2(0, screen.y / 2 - 10 + i * 30), lines[i], HORIZONTAL_ALIGNMENT_CENTER, screen.x, 20)
 		var totals := "Turn %d    Food %d    Industry %d    Units %d    Army Strength %d" % [s.turn, player.food, player.industry, player.units.size(), s.army_power(player)]
 		draw_string(font, Vector2(0, screen.y / 2 + 10 + lines.size() * 30), totals, HORIZONTAL_ALIGNMENT_CENTER, screen.x, 18, Color(0.7, 0.7, 0.7))
+
+# A rift in the void: a dark swirl.
+func draw_rift(rc: Vector2) -> void:
+	draw_circle(rc, HexView2D.HEX_SIZE * 0.5, Color(0.12, 0.05, 0.18))
+	draw_arc(rc, HexView2D.HEX_SIZE * 0.5, 0, TAU, 24, Color(0.6, 0.3, 0.8), 2.0)
+	draw_arc(rc, HexView2D.HEX_SIZE * 0.28, 0.5, TAU * 0.8, 16, Color(0.6, 0.3, 0.8), 2.0)
+
+# Ruins: three broken grey columns on a slab.
+func draw_ruins(c: Vector2) -> void:
+	var stone := Color(0.72, 0.68, 0.6)
+	draw_rect(Rect2(c + Vector2(-13, 7), Vector2(26, 4)), stone)
+	for i in 3:
+		var h: float = [14.0, 9.0, 12.0][i]
+		draw_rect(Rect2(c + Vector2(-11 + i * 8, 7 - h), Vector2(5, h)), stone)
+		draw_rect(Rect2(c + Vector2(-11 + i * 8, 7 - h), Vector2(5, h)), Color(0.2, 0.18, 0.15), false, 1.0)
 
 # A small sun: a gold circle with rays.
 func draw_sun(center: Vector2, radius: float) -> void:

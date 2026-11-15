@@ -107,6 +107,7 @@ func attack_city(f: Faction) -> void:
 			inside.faction.remove_unit(inside)
 		f.city_pos = HexMap.NO_CELL
 		f.units.clear() # with its city gone, the faction's army scatters
+		f.outposts.clear() # and its outposts are abandoned
 		if she_is_here:
 			swallow_daughter()
 		if f == game.player:
@@ -181,6 +182,9 @@ func drive_back() -> void:
 # One rift on a random hex in each section of the map, at least
 # RIFT_MIN_CITY_DISTANCE from every standing city.
 func place_rifts() -> void:
+	if not game.player.known_rifts.is_empty():
+		game.add_message("The ground shudders: the rifts you found have closed, and new ones have torn open somewhere in the dark.")
+	game.forget_rifts()
 	rifts.clear()
 	for sy in RIFT_SECTIONS_Y:
 		for sx in RIFT_SECTIONS_X:
@@ -192,6 +196,9 @@ func place_rifts() -> void:
 					for f in game.factions:
 						if f.is_alive() and HexMap.hex_distance(c, f.city_pos) < RIFT_MIN_CITY_DISTANCE:
 							far_enough = false
+					for r in game.ruins:
+						if r["cell"] == c:
+							far_enough = false # keep rifts and ruins on different hexes
 					if far_enough:
 						options.append(c)
 			if not options.is_empty():
