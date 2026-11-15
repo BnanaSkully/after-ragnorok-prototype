@@ -27,12 +27,17 @@ static func hex_distance(a: Vector2i, b: Vector2i) -> int:
 static func is_neighbour(a: Vector2i, b: Vector2i) -> bool:
 	return in_bounds(a) and in_bounds(b) and a != b and hex_distance(a, b) == 1
 
-# All hexes touching this one (only ones on the map).
+# All hexes touching this one (only ones on the map). In offset rows the six
+# neighbours depend on whether the row is even or odd (odd rows sit half a hex right).
+const EVEN_ROW_STEPS := [Vector2i(-1, -1), Vector2i(0, -1), Vector2i(-1, 0), Vector2i(1, 0), Vector2i(-1, 1), Vector2i(0, 1)]
+const ODD_ROW_STEPS := [Vector2i(0, -1), Vector2i(1, -1), Vector2i(-1, 0), Vector2i(1, 0), Vector2i(0, 1), Vector2i(1, 1)]
+
 static func neighbours(cell: Vector2i) -> Array[Vector2i]:
 	var result: Array[Vector2i] = []
-	for row in ROWS:
-		for col in COLS:
-			var c := Vector2i(col, row)
-			if is_neighbour(cell, c):
-				result.append(c)
+	if not in_bounds(cell):
+		return result
+	for step in (ODD_ROW_STEPS if cell.y & 1 else EVEN_ROW_STEPS):
+		var c: Vector2i = cell + step
+		if in_bounds(c):
+			result.append(c)
 	return result

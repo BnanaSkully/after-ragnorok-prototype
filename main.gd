@@ -26,6 +26,9 @@ const PANEL_X := 820.0
 const BLOCK_Y := 100.0 # top of the first faction's block
 const BLOCK_H := 100.0 # height of each block
 
+# How each kind of land looks (index = Terrain.Type)
+const TERRAIN_COLOURS := [Color(0.42, 0.58, 0.32), Color(0.2, 0.4, 0.22), Color(0.58, 0.5, 0.32), Color(0.5, 0.5, 0.53), Color(0.2, 0.36, 0.62)]
+
 func territory_colour(f: Faction) -> Color:
 	return FACTION_COLOURS[f.name][0]
 
@@ -74,7 +77,7 @@ func _ready() -> void:
 		b.add_theme_font_size_override("font_size", 14)
 	build_button.tooltip_text = "An army unit: Strength %d, 1 move, eats %d Food a turn." % [state.player.strength, GameState.UNIT_FOOD_UPKEEP]
 	scout_button.tooltip_text = "A scout: 2 moves, sees 3 hexes, eats nothing, but Strength %d. Up to %d." % [Unit.SCOUT_STRENGTH, GameState.MAX_SCOUTS]
-	outpost_button.tooltip_text = "Found an outpost on a hex you can see, within %d of your city: +%d Food, +%d Industry a turn. Anyone can take it if nobody guards it." % [GameState.OUTPOST_RANGE, GameState.OUTPOST_FOOD, GameState.OUTPOST_INDUSTRY]
+	outpost_button.tooltip_text = "Found an outpost on a hex you can see, within %d of your city. Income by land: plains +2 Food, forest +1 Food +1 Industry, hills +2 Industry. An enemy at war can take it if nobody guards it." % GameState.OUTPOST_RANGE
 	for i in state.ais.size():
 		var f: Faction = state.ais[i]
 		var y := BLOCK_Y + i * BLOCK_H + 46
@@ -467,13 +470,14 @@ func close_trade() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if state.game_over or state.phase == GameState.Phase.CROSSING or state.is_waiting() or trade_panel.visible:
 		return
+	if event is InputEventMouseMotion:
+		var cell := HexView2D.cell_at(get_local_mouse_position())
+		if cell != hover_cell:
+			hover_cell = cell # (the landing highlight and the land tooltip use this)
+			queue_redraw()
+		return
 	if state.phase == GameState.Phase.LANDING:
-		if event is InputEventMouseMotion:
-			var cell := HexView2D.cell_at(get_local_mouse_position())
-			if cell != hover_cell:
-				hover_cell = cell
-				queue_redraw()
-		elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 			if state.try_land(HexView2D.cell_at(get_local_mouse_position())):
 				hover_cell = NO_CELL
 			refresh()
@@ -541,12 +545,13 @@ func _draw() -> void:
 		for col in HexMap.COLS:
 			var c := Vector2i(col, row)
 			var pts := HexView2D.hex_points(HexView2D.hex_center(c))
-			var fill := Color(0.25, 0.45, 0.3)
+			var land: int = s.terrain_at(c)
+			var fill: Color = TERRAIN_COLOURS[land]
 			var explored := landing or s.player_has_explored(c)
 			if not landing:
 				var owner := s.territory_owner(c)
 				if owner != null:
-					fill = territory_colour(owner)
+					fill = fill.lerp(territory_colour(owner), 0.55) # territory tints the land
 			if dark:
 				fill = fill.darkened(0.7)
 			if not explored:
@@ -567,9 +572,11 @@ func _draw() -> void:
 					fill = Color(1.0, 0.95, 0.55) # persuade her
 				elif (skoll.is_at(c) or (other and other.faction != player)) and s.player_can_see(c):
 					fill = Color(0.95, 0.45, 0.2) # something to attack
-				elif not other and not (s.is_city(c) and c != player.city_pos):
+				elif not other and not (s.is_city(c) and c != player.city_pos) and s.passable(c) and s.can_afford_move(selected, c):
 					fill = Color(0.9, 0.75, 0.3) # free to move
 			draw_colored_polygon(pts, fill)
+			if explored:
+				draw_terrain_mark(HexView2D.hex_center(c), land, fill)
 			pts.append(pts[0])
 			draw_polyline(pts, Color(0.1, 0.1, 0.1), 2.0)
 	# (During the Landing nothing below is drawn: you haven't explored anything yet.)
@@ -719,6 +726,7 @@ func _draw() -> void:
 		var y := screen.y - 18 - (s.messages.size() - 1 - i) * 22
 		draw_string(font, Vector2(20, y), s.messages[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.85, 0.4))
 
+	draw_land_tooltip()
 	if s.game_over:
 		draw_rect(Rect2(Vector2.ZERO, screen), Color(0, 0, 0, 0.8))
 		draw_string(font, Vector2(0, screen.y / 2 - 60), s.end_title, HORIZONTAL_ALIGNMENT_CENTER, screen.x, 40, Color(0.95, 0.45, 0.15))
@@ -727,6 +735,50 @@ func _draw() -> void:
 			draw_string(font, Vector2(0, screen.y / 2 - 10 + i * 30), lines[i], HORIZONTAL_ALIGNMENT_CENTER, screen.x, 20)
 		var totals := "Turn %d    Food %d    Industry %d    Units %d    Army Strength %d" % [s.turn, player.food, player.industry, player.units.size(), s.army_power(player)]
 		draw_string(font, Vector2(0, screen.y / 2 + 10 + lines.size() * 30), totals, HORIZONTAL_ALIGNMENT_CENTER, screen.x, 18, Color(0.7, 0.7, 0.7))
+
+# A small mark for the kind of land, darker than its fill: trees, a hill,
+# a peak, waves. (Plains have none.)
+func draw_terrain_mark(c: Vector2, land: int, fill: Color) -> void:
+	var ink := fill.darkened(0.35)
+	match land:
+		Terrain.Type.FOREST:
+			for x in [-10.0, 6.0]:
+				var b := c + Vector2(x, 12)
+				draw_colored_polygon(PackedVector2Array([b + Vector2(0, -12), b + Vector2(5, 0), b + Vector2(-5, 0)]), ink)
+		Terrain.Type.HILLS:
+			draw_arc(c + Vector2(-6, 16), 9.0, PI, TAU, 10, ink, 2.5)
+			draw_arc(c + Vector2(8, 18), 7.0, PI, TAU, 10, ink, 2.5)
+		Terrain.Type.MOUNTAINS:
+			draw_colored_polygon(PackedVector2Array([c + Vector2(0, -14), c + Vector2(13, 12), c + Vector2(-13, 12)]), ink)
+			draw_colored_polygon(PackedVector2Array([c + Vector2(0, -14), c + Vector2(4, -6), c + Vector2(-4, -6)]), Color(0.92, 0.92, 0.95))
+		Terrain.Type.WATER:
+			for y in [-5.0, 5.0]:
+				draw_arc(c + Vector2(-5, y), 5.0, 0.2, PI - 0.2, 8, fill.lightened(0.3), 1.5)
+				draw_arc(c + Vector2(5, y), 5.0, 0.2, PI - 0.2, 8, fill.lightened(0.3), 1.5)
+
+# What the hovered hex's land does, in a small box by the mouse.
+func draw_land_tooltip() -> void:
+	var s := state
+	if hover_cell == NO_CELL or not (s.phase == GameState.Phase.LANDING or s.player_has_explored(hover_cell)):
+		return
+	var land: int = s.terrain_at(hover_cell)
+	var text: String = Terrain.NAMES[land]
+	if not Terrain.passable(land):
+		text += ": can't be crossed"
+	else:
+		var bits: Array[String] = []
+		if Terrain.MOVE_COST[land] > 1:
+			bits.append("%d moves" % Terrain.MOVE_COST[land])
+		if Terrain.DEFENCE[land] > 0:
+			bits.append("+%d defence" % Terrain.DEFENCE[land])
+		bits.append("outpost +%d Food +%d Industry" % [Terrain.OUTPOST_FOOD[land], Terrain.OUTPOST_INDUSTRY[land]])
+		text += ": " + ", ".join(bits)
+	var font := ThemeDB.fallback_font
+	var size := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13)
+	var at := HexView2D.hex_center(hover_cell) + Vector2(18, -26)
+	at.x = minf(at.x, get_viewport_rect().size.x - size.x - 12)
+	draw_rect(Rect2(at - Vector2(5, 14), size + Vector2(10, 8)), Color(0.08, 0.08, 0.08, 0.85))
+	draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.95, 0.95, 0.85))
 
 # A rift in the void: a dark swirl.
 func draw_rift(rc: Vector2) -> void:

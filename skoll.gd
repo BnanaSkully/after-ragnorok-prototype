@@ -153,7 +153,7 @@ func swallow_daughter() -> void:
 	game.add_message("Sköll swallowed %s! He is the sun now (Strength %d), and the world goes dark." % [SunDaughter.NAME, strength])
 
 func attack_unit(u: Unit) -> void:
-	var chance: float = game.win_chance(strength, u.strength)
+	var chance: float = game.win_chance(strength, game.defender_strength(u)) # forest and hills help
 	if randf() < chance:
 		game.add_message("Sköll attacked %s's unit and destroyed it (%s)." % [u.faction.name, game.odds_text(chance)])
 		pos = u.pos
@@ -199,6 +199,8 @@ func place_rifts() -> void:
 					for r in game.ruins:
 						if r["cell"] == c:
 							far_enough = false # keep rifts and ruins on different hexes
+					if not game.passable(c):
+						far_enough = false # not in a lake or on a mountain top
 					if far_enough:
 						options.append(c)
 			if not options.is_empty():

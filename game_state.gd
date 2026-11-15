@@ -15,6 +15,7 @@ extends RefCounted
 #   crossing_events.gd  the Crossing's events (text and choices)
 #   turn_events.gd      small events every few turns after the Landing
 #   discoveries.gd      ruins hidden in the fog (placing them, their rewards)
+#   terrain.gd          the land: plains, forest, hills, mountains, water
 
 const DOOM_TURN := 20 # survive until this turn and Phase 3 (chaos) begins
 const MIN_LANDING_DISTANCE := 4 # how many hexes away from every AI city you must land
@@ -27,8 +28,6 @@ const CITY_INDUSTRY := 2 # Industry a city produces each turn
 const UNIT_FOOD_UPKEEP := 1 # Food each army unit eats each turn (scouts eat nothing)
 # Outposts (standard 4X): a small settlement that claims the hexes around it.
 const OUTPOST_COST := 6 # Industry
-const OUTPOST_FOOD := 1 # income each outpost gives its owner every turn
-const OUTPOST_INDUSTRY := 1
 const OUTPOST_RANGE := 5 # an outpost must be within this many hexes of your city...
 const OUTPOST_MIN_DISTANCE := 3 # ...and at least this far from every city and other outpost
 const OUTPOST_SIGHT := 2 # fog of war: an outpost sees this far
@@ -90,8 +89,10 @@ var event_deck: Array = [] # small events not yet seen this game, shuffled
 # starts at peace. (The player's wars are in each Diplomacy, GameState.relations.)
 var ai_war_since := {}
 var ai_truce_until := {} # "Celtic|Greek" -> no new war between them before this turn
+var terrain := {} # hex -> Terrain.Type, a new map every game (made in _init)
 
 func _init() -> void:
+	terrain = Terrain.generate(ais.map(func(f): return f.city_pos))
 	skoll = Skoll.new(self)
 	player.is_player = true
 	factions.append(player)
@@ -135,7 +136,7 @@ func start_landing() -> void:
 	messages = ["Choose where to land: click a hex to found your city."]
 
 func can_land_at(cell: Vector2i) -> bool:
-	if not HexMap.in_bounds(cell):
+	if not HexMap.in_bounds(cell) or not passable(cell):
 		return false
 	for f in ais:
 		if HexMap.hex_distance(cell, f.city_pos) < MIN_LANDING_DISTANCE:
@@ -303,7 +304,8 @@ func judge_readiness() -> void:
 # Food made by the city (and the Daughter's bonus) minus what the army eats.
 func food_change(f: Faction) -> int:
 	var made := CITY_FOOD + (f.population - 1) # each extra population works more fields
-	made += f.outposts.size() * OUTPOST_FOOD
+	for o in f.outposts:
+		made += Terrain.OUTPOST_FOOD[terrain_at(o)] # an outpost's income depends on its land
 	if daughter.shelters_with(f):
 		made += SunDaughter.FOOD
 	var eaten := 0
@@ -312,7 +314,9 @@ func food_change(f: Faction) -> int:
 	return made - eaten
 
 func industry_change(f: Faction) -> int:
-	var made := CITY_INDUSTRY + (f.population - 1) + f.outposts.size() * OUTPOST_INDUSTRY
+	var made := CITY_INDUSTRY + (f.population - 1)
+	for o in f.outposts:
+		made += Terrain.OUTPOST_INDUSTRY[terrain_at(o)]
 	return made + (SunDaughter.INDUSTRY if daughter.shelters_with(f) else 0)
 
 # City growth (the usual 4X rule): when stored Food reaches the growth cost and
@@ -427,8 +431,10 @@ func ai_scout(u: Unit) -> void:
 			if options.is_empty():
 				return
 			step = options.pick_random()
+		if not can_afford_move(u, step):
+			return # forest or hills ahead and only 1 move left: wait for next turn
 		enter_hex(u, step)
-		u.moves -= 1
+		spend_move(u, step)
 		update_sight_for(f)
 
 # The closest hex this faction has never seen (NO_CELL if it has seen everything).
@@ -446,18 +452,36 @@ func nearest_unexplored(f: Faction, from: Vector2i) -> Vector2i:
 				best = c
 	return best
 
-# The free neighbouring hex that gets closest to goal (NO_CELL if none is closer).
+# The first step on the shortest way from "from" to "goal" around mountains,
+# water, units and cities (the goal itself may be occupied: you step next to
+# it). NO_CELL if there's no way, or no step that gets any closer.
 func step_toward(from: Vector2i, goal: Vector2i) -> Vector2i:
-	var best := NO_CELL
-	var best_d := HexMap.hex_distance(from, goal)
-	for c in HexMap.neighbours(from):
-		if is_blocked(c) or (is_city(c) and c != goal):
-			continue
-		var d := HexMap.hex_distance(c, goal)
-		if d < best_d:
-			best_d = d
-			best = c
-	return best
+	if from == goal:
+		return NO_CELL
+	var came_from := {from: NO_CELL}
+	var queue: Array[Vector2i] = [from]
+	var reached := false
+	while not queue.is_empty() and not reached:
+		var c: Vector2i = queue.pop_front()
+		for n in HexMap.neighbours(c):
+			if came_from.has(n):
+				continue
+			if n == goal:
+				came_from[n] = c
+				reached = true
+				break
+			if is_blocked(n) or is_city(n):
+				continue
+			came_from[n] = c
+			queue.append(n)
+	if not reached:
+		return NO_CELL
+	var step := goal
+	while came_from[step] != from:
+		step = came_from[step]
+	if step == goal and is_blocked(goal):
+		return NO_CELL # already next to it
+	return step
 
 # Once the howling starts it builds walls first; otherwise a unit,
 # but only if it can still feed its army afterwards.
@@ -621,7 +645,8 @@ func player_build_outpost(cell: Vector2i) -> bool:
 	if not build_outpost(player, cell):
 		messages = ["Can't found an outpost there."]
 		return false
-	messages = ["You founded an outpost (%d Industry): +%d Food and +%d Industry a turn, and it claims the hexes around it. Leave a unit on it, or anyone can walk in and take it." % [OUTPOST_COST, OUTPOST_FOOD, OUTPOST_INDUSTRY]]
+	var t := terrain_at(cell)
+	messages = ["You founded an outpost on %s (%d Industry): +%d Food and +%d Industry a turn. It claims the hexes around it; in a war, guard it or lose it." % [Terrain.NAMES[t].to_lower(), OUTPOST_COST, Terrain.OUTPOST_FOOD[t], Terrain.OUTPOST_INDUSTRY[t]]]
 	update_sight()
 	return true
 
@@ -644,6 +669,10 @@ func war_target(cell: Vector2i) -> Faction:
 func player_unit_act(u: Unit, cell: Vector2i) -> bool:
 	if not can_act() or u.faction != player or u.moves <= 0 or not HexMap.is_neighbour(u.pos, cell):
 		return false
+	if not passable(cell) and not skoll.is_at(cell):
+		return false # mountains and water
+	if not can_afford_move(u, cell):
+		return false # not enough moves left for forest or hills
 	var other := unit_at(cell)
 	if other and other.faction == player:
 		return false # can't move onto your own unit
@@ -662,7 +691,10 @@ func player_unit_act(u: Unit, cell: Vector2i) -> bool:
 			resolve_combat(u, other) # moving into an enemy = attack
 		else:
 			enter_hex(u, cell)
-	u.moves -= 1
+			spend_move(u, cell)
+			update_sight()
+			return true
+	u.moves = 0 # attacking (or talking to her) ends the unit's turn, as is usual
 	update_sight()
 	return true
 
@@ -676,7 +708,7 @@ func enter_hex(u: Unit, cell: Vector2i) -> void:
 		owner.outposts.erase(cell)
 		f.outposts.append(cell)
 		if f == player:
-			add_message("You took the %s outpost! It now gives you +%d Food and +%d Industry a turn." % [owner.name, OUTPOST_FOOD, OUTPOST_INDUSTRY])
+			add_message("You took the %s outpost! Its income is yours now." % owner.name)
 		elif owner == player:
 			add_message("The %s took your outpost!" % f.name)
 		elif player_can_see(cell):
@@ -895,7 +927,7 @@ func outpost_spots(f: Faction) -> Array[Vector2i]:
 	return spots
 
 func can_place_outpost(f: Faction, c: Vector2i) -> bool:
-	if not HexMap.in_bounds(c) or not can_see(f, c):
+	if not HexMap.in_bounds(c) or not can_see(f, c) or not passable(c):
 		return false
 	if HexMap.hex_distance(c, f.city_pos) > OUTPOST_RANGE:
 		return false
@@ -950,7 +982,7 @@ func odds_text(chance: float) -> String:
 
 # Unit against unit. The loser is destroyed; a winning attacker moves into the hex.
 func resolve_combat(attacker: Unit, defender: Unit) -> void:
-	var chance := win_chance(attacker.strength, defender.strength)
+	var chance := win_chance(attacker.strength, defender_strength(defender))
 	if randf() < chance:
 		var cell := defender.pos
 		defender.faction.remove_unit(defender)
@@ -963,8 +995,12 @@ func resolve_combat(attacker: Unit, defender: Unit) -> void:
 
 # A city's defence (the usual 4X rule): the Strength of its own unit standing
 # in it (the garrison), plus its walls, plus the Daughter's bonus if it shelters her.
+# A unit's Strength when attacked: forest and hills help the defender.
+func defender_strength(u: Unit) -> int:
+	return u.strength + Terrain.DEFENCE[terrain_at(u.pos)]
+
 func city_defence(f: Faction) -> int:
-	var defence := f.walls * WALL_DEFENCE
+	var defence: int = f.walls * WALL_DEFENCE + Terrain.DEFENCE[terrain_at(f.city_pos)] # a city on hills is harder to take
 	var garrison := unit_at(f.city_pos)
 	if garrison and garrison.faction == f:
 		defence += garrison.strength
@@ -1052,8 +1088,29 @@ func unit_at(cell: Vector2i) -> Unit:
 	return null
 
 # True if a unit, Sköll or the Daughter (in the open) is standing on this hex.
+# (Mountains and water count as blocked: nothing can stand there except Sköll.)
 func is_blocked(cell: Vector2i) -> bool:
-	return unit_at(cell) != null or skoll.is_at(cell) or (daughter.is_rogue() and cell == daughter.pos)
+	return not passable(cell) or unit_at(cell) != null or skoll.is_at(cell) or (daughter.is_rogue() and cell == daughter.pos)
+
+# --- Terrain ------------------------------------------------------------------
+func terrain_at(cell: Vector2i) -> int:
+	return terrain.get(cell, Terrain.Type.PLAINS)
+
+func passable(cell: Vector2i) -> bool:
+	return HexMap.in_bounds(cell) and Terrain.passable(terrain_at(cell))
+
+# Moves it takes to enter this hex (forest and hills 2).
+func move_cost(cell: Vector2i) -> int:
+	return Terrain.MOVE_COST[terrain_at(cell)]
+
+# Can unit u step into this hex now? Rough land costs 2 moves, but a unit
+# with all its moves left can always take one step (so armies, with 1 move,
+# still move 1 hex a turn; scouts are slowed down).
+func can_afford_move(u: Unit, cell: Vector2i) -> bool:
+	return u.moves >= move_cost(cell) or u.moves == u.max_moves()
+
+func spend_move(u: Unit, cell: Vector2i) -> void:
+	u.moves = maxi(0, u.moves - move_cost(cell))
 
 func is_city(cell: Vector2i) -> bool:
 	for f in factions:

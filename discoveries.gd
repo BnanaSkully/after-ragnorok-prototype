@@ -25,7 +25,7 @@ static func place_ruins(game: GameState) -> Array[Dictionary]:
 	for row in HexMap.ROWS:
 		for col in HexMap.COLS:
 			var c := Vector2i(col, row)
-			var ok := game.unit_at(c) == null
+			var ok := game.unit_at(c) == null and game.passable(c)
 			for f in game.factions:
 				if f.is_alive() and HexMap.hex_distance(c, f.city_pos) < RUIN_MIN_CITY_DISTANCE:
 					ok = false
