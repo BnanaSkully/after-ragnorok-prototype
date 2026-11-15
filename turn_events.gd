@@ -20,6 +20,17 @@
 # event needs at least one option that's always possible.
 # Each event happens at most once a game.
 
+# Sunna's requests to whoever shelters her (the player only; see
+# sun_daughter.gd REQUEST_*). The game adds the two options itself: grant
+# ("grant" effects, her Favour +1) or refuse (her Favour -2). Placeholder text.
+const SUNNA_REQUESTS := [
+	{"title": "SUNNA ASKS: LIGHT", "text": "\"Your people huddle in the dark. Light the hearths in every house.\"", "grant": "Light them (Industry -5)", "effects": {"industry": -5}},
+	{"title": "SUNNA ASKS: BREAD", "text": "\"There are hungry children at the gate who are not yours. Feed them.\"", "grant": "Feed them (Food -5)", "effects": {"food": -5}},
+	{"title": "SUNNA ASKS: A GUARD", "text": "\"I hear him at night. Let soldiers stand at my door.\"", "grant": "Post a guard (an army unit can't move for 3 turns)", "effects": {"guard_turns": 3}},
+	{"title": "SUNNA ASKS: A SHRINE", "text": "\"Raise a shrine to my mother, so your people remember what was lost.\"", "grant": "Build it (Industry -6)", "effects": {"industry": -6}},
+	{"title": "SUNNA ASKS: KINDNESS", "text": "\"Send grain to your neighbours. The night is long for all of us.\"", "grant": "Send it (Food -4, every AI's Trust +1)", "effects": {"food": -4, "trust_all": 1}},
+]
+
 const MIN_GAP := 2 # turns between events (random, inclusive)
 const MAX_GAP := 3
 
@@ -29,7 +40,7 @@ const EVENTS := [
 		"text": "Stragglers from the Crossing stumble out of the dark: a dozen families, starving.",
 		"options": [
 			{"label": "Take them in (Food -4, population +1: +1 Food, +1 Industry, +1 defence a turn)", "effects": {"food": -4, "population": 1}, "result": "The newcomers are fed and set to work."},
-			{"label": "Turn them away (her Favour -1)", "effects": {"favour": -1}, "result": "They walk back into the dark. The Sun's Daughter watches them go."},
+			{"label": "Turn them away (her Favour -1)", "effects": {"favour": -1}, "result": "They walk back into the dark. Sunna watches them go."},
 		],
 	},
 	{
