@@ -49,6 +49,11 @@ const GIFT_TRUST := 1 # a gift raises their Trust...
 const GIFT_TRUST_CAP := 5 # ...but only up to this (you can't buy friendship forever)
 const PEACE_TRIBUTE := 6 # Industry you can offer to sweeten a peace offer...
 const PEACE_TRIBUTE_BONUS := 0.3 # ...for this much more chance (kept if they refuse)
+# Borders (closed by default; GameState.may_enter). An open-borders agreement
+# lets both sides' units cross each other's territory at peace. Allies (an
+# oath) always have open borders.
+const BORDERS_LENGTH := 10 # turns an open-borders agreement lasts
+const RIVAL_BORDERS_TRUST := 1 # an AI offers open borders itself at this Trust or more
 
 # The AI faction's own diplomacy
 const RIVAL_OFFER_CHANCE := 0.15 # chance each turn that it proposes or demands something (per faction; with 3 AIs about 1 turn in 3 has an offer)
@@ -86,6 +91,7 @@ var pact_turns_left := 0 # 0 = no alliance in force
 var at_war := false
 var war_since := 0 # the turn the current war started
 var truce_until := 0 # after peace, they won't declare war before this turn
+var borders_until := 0 # open-borders agreement in force before this turn
 var oathbreaker_until := 0 # the player counts as an oathbreaker with them before this turn
 var pending: Dictionary = {} # their offer waiting for the player's answer, e.g. {"type": "demand", "resource": "food"}
 var rival_broken_oaths := 0 # how many agreements they have broken
@@ -103,6 +109,33 @@ var action_used: bool:
 
 func pact_active() -> bool:
 	return pact_turns_left > 0
+
+# May the two sides' units cross each other's territory at peace?
+func borders_open() -> bool:
+	return pact_active() or game.turn < borders_until
+
+func borders_turns_left() -> int:
+	return maxi(0, borders_until - game.turn)
+
+func can_ask_borders() -> bool:
+	return can_deal() and not at_war and not borders_open()
+
+# The chance (0 to 1) that they agree to open borders: 40% + 10% per Trust.
+func borders_chance() -> float:
+	return clampf(0.4 + trust * 0.1, 0.05, 0.95)
+
+# The player's diplomatic action: ask for open borders. Returns true if agreed.
+func ask_open_borders() -> bool:
+	if not can_ask_borders():
+		return false
+	action_used = true
+	var chance := borders_chance()
+	if randf() < chance:
+		borders_until = game.turn + BORDERS_LENGTH
+		remember("Turn %d: %s opened their borders to you for %d turns (%d%% chance). Yours are open to them too." % [game.turn, other.name, BORDERS_LENGTH, roundi(chance * 100)])
+		return true
+	remember("Turn %d: %s refused to open their borders (%d%% chance)." % [game.turn, other.name, roundi(chance * 100)])
+	return false
 
 func in_truce() -> bool:
 	return game.turn < truce_until
@@ -312,6 +345,7 @@ func player_declare_war(defending := false) -> void:
 		change_trust(TRUST_DECLARED_WAR)
 	at_war = true
 	war_since = game.turn
+	borders_until = 0
 	if defending:
 		remember("Turn %d: you declared war on %s to defend your ally. Trust %+d." % [game.turn, other.name, TRUST_DEFENDED_WAR])
 		return
@@ -326,6 +360,7 @@ func rival_declare_war(why: String) -> void:
 	var rival: Faction = other
 	at_war = true
 	war_since = game.turn
+	borders_until = 0
 	if pact_active():
 		pact_turns_left = 0
 		rival_broken_oaths += 1
@@ -425,6 +460,10 @@ func rival_make_offer() -> void:
 		return
 	if randf() >= RIVAL_OFFER_CHANCE:
 		return
+	# Trusting enough, and borders still closed: it may offer to open them.
+	if not borders_open() and trust >= RIVAL_BORDERS_TRUST and randf() < 0.4:
+		pending = {"type": "borders"}
+		return
 	if not pact_active() and not is_oathbreaker() and not game.tribute_bound(rival, player) and (afraid or gap < 0 or trust >= 2):
 		pending = {"type": "oath"}
 		return
@@ -452,6 +491,8 @@ func pending_text() -> String:
 	var rival: Faction = other
 	if pending.get("type") == "oath":
 		return "%s proposes %s, a defensive alliance for %d turns: if anyone declares war on one of you, the other joins the war.\n\nAccept: the %s begins, Trust %+d.\nRefuse: Trust %+d." % [rival.name, a_pact(), PACT_LENGTH, pact_word(), TRUST_ACCEPTED_THEIR_OATH, TRUST_REFUSED_THEIR_OATH]
+	if pending.get("type") == "borders":
+		return "%s offers open borders for %d turns: your units may cross their lands at peace, and theirs yours.\n\nAccept: borders open both ways.\nRefuse: they stay closed." % [rival.name, BORDERS_LENGTH]
 	if pending.get("type") == "trade":
 		return "%s is short of %s and offers a trade: %d %s for %d of your %s.\n\nAccept: the trade is made.\nRefuse: no harm done." % [rival.name, String(pending["want"]).capitalize(), pending["amount"], String(pending["give"]).capitalize(), TRADE_AMOUNT, String(pending["want"]).capitalize()]
 	if pending.get("type") == "peace":
@@ -480,6 +521,12 @@ func answer(accept: bool) -> void:
 		else:
 			change_trust(TRUST_REFUSED_THEIR_OATH)
 			remember("Turn %d: you refused %s's %s. Trust %+d." % [game.turn, rival.name, pact_word(), TRUST_REFUSED_THEIR_OATH])
+	elif offer["type"] == "borders":
+		if accept and not at_war:
+			borders_until = game.turn + BORDERS_LENGTH
+			remember("Turn %d: you and %s opened your borders to each other for %d turns." % [game.turn, rival.name, BORDERS_LENGTH])
+		else:
+			game.add_message("You kept your borders closed to %s." % rival.name)
 	elif offer["type"] == "trade":
 		var want: String = offer["want"]
 		var give: String = offer["give"]

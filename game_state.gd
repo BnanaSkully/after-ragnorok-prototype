@@ -196,6 +196,7 @@ func end_turn() -> void:
 		skoll.place_rifts() # hidden until Sköll comes through one
 	skoll.take_turn()
 	if game_over: # Sköll may have destroyed the player's city or found the Daughter
+		eject_trespassers()
 		update_sight()
 		return
 	daughter_flee()
@@ -234,6 +235,7 @@ func end_turn() -> void:
 			if r.has_pending():
 				break
 		maybe_turn_event()
+	eject_trespassers()
 	update_sight()
 	if turn >= DOOM_TURN:
 		end_game("You survived until the Doom",
@@ -389,13 +391,13 @@ func ai_take_turn(f: Faction) -> void:
 			if HexMap.is_neighbour(u.pos, daughter.pos):
 				try_persuade(u)
 				continue
-			var toward := step_toward(u.pos, daughter.pos)
+			var toward := step_toward(u.pos, daughter.pos, f)
 			if toward != NO_CELL:
 				enter_hex(u, toward)
 				continue
 		if skoll.active and HexMap.hex_distance(u.pos, f.city_pos) > 1:
 			# Sköll is loose: fall back toward the city to help defend it
-			var home := step_toward(u.pos, f.city_pos)
+			var home := step_toward(u.pos, f.city_pos, f)
 			if home != NO_CELL:
 				enter_hex(u, home)
 				continue
@@ -407,7 +409,7 @@ func ai_take_turn(f: Faction) -> void:
 				if win_chance(siege_strength(u, siege), city_defence(siege)) >= AI_SIEGE_ODDS:
 					attack_hex(u, siege.city_pos)
 				continue # (otherwise it waits outside for help)
-			var march := step_toward(u.pos, siege.city_pos)
+			var march := step_toward(u.pos, siege.city_pos, f)
 			if march != NO_CELL:
 				enter_hex(u, march)
 				continue
@@ -424,7 +426,7 @@ func ai_take_turn(f: Faction) -> void:
 		var options: Array[Vector2i] = []
 		for c in HexMap.neighbours(u.pos):
 			var o := outpost_owner(c)
-			if not is_blocked(c) and not (is_city(c) and c != f.city_pos) and (o == null or o == f):
+			if not is_blocked(c) and not (is_city(c) and c != f.city_pos) and (o == null or o == f) and may_enter(f, c):
 				options.append(c)
 		if not options.is_empty():
 			enter_hex(u, options.pick_random())
@@ -437,18 +439,18 @@ func ai_scout(u: Unit) -> void:
 		var goal := NO_CELL
 		var best_d := 999
 		for r in ruins:
-			if not r["taken"] and f.explored.has(r["cell"]) and not is_blocked(r["cell"]):
+			if not r["taken"] and f.explored.has(r["cell"]) and not is_blocked(r["cell"]) and may_enter(f, r["cell"]):
 				var d := HexMap.hex_distance(u.pos, r["cell"])
 				if d < best_d:
 					best_d = d
 					goal = r["cell"]
 		if goal == NO_CELL:
 			goal = nearest_unexplored(f, u.pos)
-		var step := step_toward(u.pos, goal) if goal != NO_CELL else NO_CELL
+		var step := step_toward(u.pos, goal, f) if goal != NO_CELL else NO_CELL
 		if step == NO_CELL:
 			var options: Array[Vector2i] = []
 			for c in HexMap.neighbours(u.pos):
-				if not is_blocked(c) and not is_city(c):
+				if not is_blocked(c) and not is_city(c) and may_enter(f, c):
 					options.append(c)
 			if options.is_empty():
 				return
@@ -466,7 +468,7 @@ func nearest_unexplored(f: Faction, from: Vector2i) -> Vector2i:
 	for row in HexMap.ROWS:
 		for col in HexMap.COLS:
 			var c := Vector2i(col, row)
-			if f.explored.has(c):
+			if f.explored.has(c) or not may_enter(f, c):
 				continue
 			var d := HexMap.hex_distance(from, c)
 			if d < best_d:
@@ -476,8 +478,9 @@ func nearest_unexplored(f: Faction, from: Vector2i) -> Vector2i:
 
 # The first step on the shortest way from "from" to "goal" around mountains,
 # water, units and cities (the goal itself may be occupied: you step next to
-# it). NO_CELL if there's no way, or no step that gets any closer.
-func step_toward(from: Vector2i, goal: Vector2i) -> Vector2i:
+# it). With a faction, also around territory it may not enter (closed
+# borders). NO_CELL if there's no way, or no step that gets any closer.
+func step_toward(from: Vector2i, goal: Vector2i, f: Faction = null) -> Vector2i:
 	if from == goal:
 		return NO_CELL
 	var came_from := {from: NO_CELL}
@@ -492,7 +495,7 @@ func step_toward(from: Vector2i, goal: Vector2i) -> Vector2i:
 				came_from[n] = c
 				reached = true
 				break
-			if is_blocked(n) or is_city(n):
+			if is_blocked(n) or is_city(n) or (f != null and not may_enter(f, n)):
 				continue
 			came_from[n] = c
 			queue.append(n)
@@ -501,7 +504,7 @@ func step_toward(from: Vector2i, goal: Vector2i) -> Vector2i:
 	var step := goal
 	while came_from[step] != from:
 		step = came_from[step]
-	if step == goal and is_blocked(goal):
+	if step == goal and (is_blocked(goal) or (f != null and not may_enter(f, goal))):
 		return NO_CELL # already next to it
 	return step
 
@@ -643,6 +646,11 @@ func player_gift(f: Faction, res: String) -> void:
 		messages.clear()
 		relation(f).gift(res)
 
+func player_ask_borders(f: Faction) -> void:
+	if can_act():
+		messages.clear()
+		relation(f).ask_open_borders()
+
 func player_tribute_for_peace(f: Faction) -> void:
 	if can_act():
 		messages.clear()
@@ -698,6 +706,9 @@ func war_target(cell: Vector2i) -> Faction:
 	var owner_city := city_owner(cell)
 	if owner_city != null and owner_city != player and not at_war(player, owner_city):
 		return owner_city
+	var land_owner := territory_owner(cell)
+	if land_owner != null and not may_enter(player, cell):
+		return land_owner # closed borders: crossing them is an act of war
 	var owner := outpost_owner(cell)
 	if owner != null and owner != player and not at_war(player, owner):
 		return owner
@@ -830,6 +841,54 @@ func player_attacked(aggressor: Faction) -> void:
 		else:
 			ai_war_since[pair_key(ally, aggressor)] = turn
 			remember("Turn %d: the %s honour their %s and declare war on the %s!" % [turn, ally.name, r.pact_word(), aggressor.name])
+
+# --- Borders ----------------------------------------------------------------
+# Closed borders (standard 4X): at peace, a faction's units may not enter
+# another faction's territory (its city and outposts and the hexes around
+# them) unless they're at war, allied (an oath), have an open-borders
+# agreement (diplomacy.gd), or one is the other's overlord. AIs keep their
+# borders closed to each other unless at war.
+func may_enter(f: Faction, cell: Vector2i) -> bool:
+	var owner := territory_owner(cell)
+	if owner == null or owner == f or at_war(f, owner) or tribute_bound(f, owner):
+		return true
+	if f == player:
+		return relation(owner).borders_open()
+	if owner == player:
+		return relation(f).borders_open()
+	return false
+
+# Is this hex behind a border the player may not cross right now?
+func closed_border(cell: Vector2i) -> bool:
+	return not may_enter(player, cell)
+
+# Units standing where they may no longer be (peace was made, an agreement
+# ran out, a city became a tributary) walk out to the nearest hex they may use.
+func eject_trespassers() -> void:
+	for f in factions:
+		for u in f.units:
+			if may_enter(f, u.pos):
+				continue
+			var land_owner := territory_owner(u.pos)
+			var spot := nearest_allowed(f, u.pos)
+			if spot != NO_CELL:
+				u.pos = spot
+				if f == player:
+					add_message("Your unit left the %s lands: their borders are closed to you." % land_owner.name)
+
+func nearest_allowed(f: Faction, from: Vector2i) -> Vector2i:
+	var seen := {from: true}
+	var queue: Array[Vector2i] = [from]
+	while not queue.is_empty():
+		var c: Vector2i = queue.pop_front()
+		for n in HexMap.neighbours(c):
+			if seen.has(n) or not passable(n):
+				continue
+			seen[n] = true
+			if may_enter(f, n) and not is_blocked(n) and not is_city(n):
+				return n
+			queue.append(n)
+	return NO_CELL
 
 # --- Taking cities: tributaries ----------------------------------------------
 # A unit attacks a hex next to it: a city (its garrison, walls, land and the

@@ -282,6 +282,12 @@ func on_open_deals(f: Faction) -> void:
 		label += "  (they have none to give)" if chance <= 0.0 else "  (%d%% they pay; Trust %+d if they pay, %+d if not)" % [roundi(chance * 100), Diplomacy.TRUST_DEMAND_PAID, Diplomacy.TRUST_DEMAND_REFUSED]
 		add_deal(label, d.can_demand(), on_deal.bind(func(): state.player_demand(f, res)))
 	if not d.at_war:
+		if d.pact_active():
+			add_deal("Borders: open while you are allies", false, func(): pass)
+		elif d.borders_open():
+			add_deal("Borders: open for %d more turns" % d.borders_turns_left(), false, func(): pass)
+		else:
+			add_deal("Ask for open borders for %d turns, both ways (%d%% chance)" % [Diplomacy.BORDERS_LENGTH, roundi(d.borders_chance() * 100)], d.can_ask_borders(), on_deal.bind(func(): state.player_ask_borders(f)))
 		for give in ["food", "industry"]:
 			var get := d.other_resource(give)
 			var amount: int = d.trade_quote(give)
@@ -410,7 +416,7 @@ func show_offer() -> void:
 	offer_heading.text = "A MESSAGE FROM THE %s" % r.other.name.to_upper()
 	offer_label.text = r.pending_text()
 	var kind: String = r.pending.get("type")
-	offer_accept_button.text = {"demand": "Pay", "daughter": "Take her", "peace": "Make peace", "trade": "Trade"}.get(kind, "Accept")
+	offer_accept_button.text = {"demand": "Pay", "daughter": "Take her", "peace": "Make peace", "trade": "Trade", "borders": "Open borders"}.get(kind, "Accept")
 	offer_panel.visible = true
 	update_buttons()
 
@@ -587,7 +593,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				# first click only warns; a second click on the same hex declares war
 				break_warning_cell = cell
 				var d: Diplomacy = state.relation(them)
-				if state.player.overlord == them.name:
+				if state.unit_at(cell) == null and state.city_owner(cell) == null and state.outpost_owner(cell) == null:
+					state.messages = ["The %s borders are CLOSED to you. Entering their lands declares war" % them.name, "(their Trust %+d, everyone else's %+d). Ask for open borders under Deal... Click again to go ahead." % [Diplomacy.TRUST_DECLARED_WAR, Diplomacy.TRUST_WARMONGER]]
+				elif state.player.overlord == them.name:
 					state.messages = ["The %s are your overlords. Attacking RISES UP against them:" % them.name, "no more tribute, but you are at war with them (Trust %+d). Click again to go ahead." % Diplomacy.TRUST_DECLARED_WAR]
 				elif d.pact_active():
 					var word: String = them.pact_word
@@ -659,7 +667,10 @@ func _draw() -> void:
 				elif s.is_city(c) and c != player.city_pos:
 					fill = Color(0.95, 0.45, 0.2) # a city you could attack (it would become your tributary)
 				elif not other and not (s.is_city(c) and c != player.city_pos) and s.passable(c) and s.can_afford_move(selected, c):
-					fill = Color(0.9, 0.75, 0.3) # free to move
+					if s.closed_border(c):
+						fill = Color(0.75, 0.45, 0.55) # behind a closed border: entering declares war
+					else:
+						fill = Color(0.9, 0.75, 0.3) # free to move
 			draw_colored_polygon(pts, fill)
 			if explored:
 				draw_terrain_mark(HexView2D.hex_center(c), land, fill)
@@ -809,6 +820,8 @@ func _draw() -> void:
 			line += "  war: " + ", ".join(foes)
 		if f.overlord != "" and f.overlord != player.name:
 			line += "  pays " + f.overlord
+		if not d.at_war and not d.pact_active() and d.borders_open():
+			line += "  borders open"
 		var stance_w := font.get_string_size(stance + "  ", HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x if stance != "" else 0.0
 		draw_string(font, Vector2(PANEL_X + stance_w, y + 32), line, HORIZONTAL_ALIGNMENT_LEFT, 330 - stance_w, 13, Color(0.85, 0.85, 0.85))
 	var hy := BLOCK_Y + s.ais.size() * BLOCK_H + 8
