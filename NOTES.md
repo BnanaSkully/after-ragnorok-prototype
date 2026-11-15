@@ -19,6 +19,7 @@ CLAUDE.md holds the rules for working; this file holds the history.
 12. Phase 3 designed (not built): bind Sköll with a 3-link chain; see CLAUDE.md.
 13. Early game fix (Nathan's playtest: "turns 1-10 are dead, I just press End Turn"): fog of war with memory for every faction, scouts, ruins, rifts found by exploring, outposts (capturable), 2 Industry a turn + 5 at the Landing, small events every 2-3 turns, and a choice pop-up. All standard 4X, chosen without asking as CLAUDE.md says.
 14. War and peace: everyone starts at peace; attacking declares war (Trust costs, warmonger); peace by agreement with a truce; AIs declare war on you and on each other. Oaths became defensive alliances with a call-to-arms pop-up.
+15. Terrain (plains, forest, hills, mountains, water: move costs, defence, outpost income, pathfinding), trading (a Deal panel: demands, trades, gifts, paying for peace; AI trade offers), and taking cities in war: they become tributaries paying half their Industry, until they rise up.
 
 ## Decisions Nathan made (and why)
 
@@ -33,6 +34,7 @@ CLAUDE.md holds the rules for working; this file holds the history.
 - Generic 4X mechanics: use the genre default without asking.
 - Rules separate from drawing so a low-poly 3D view can replace the 2D one later.
 - War and peace (Nathan: "you forgot an important factor of 4X games"): without it every faction was always at war, so outposts changed hands constantly and AIs fought every neighbour. Oaths became defensive alliances, since plain peace now does what the old oath did.
+- Asked "what other 4X rules are we missing": Nathan chose terrain first, then trading, and that taken cities become tributaries (not destroyed, not captured outright). Losing your only city would otherwise end the game, so tribute keeps a lost war survivable.
 - Phase 3 design agreed (session of 2026-11-15, Nathan went with all of Claude's picks):
   - Win by binding Sköll with a 3-link chain, each link from a different faction: survival-only would repeat Phase 2, and the chain makes politics the only way to win.
   - Rogue factions are the existing AIs kneeling to Sköll when desperate or betrayed, so Phase 2 diplomacy pays off; no new factions.
@@ -46,6 +48,11 @@ CLAUDE.md holds the rules for working; this file holds the history.
 - A pop-up that blocks end_turn makes every headless test loop forever (the turn never advances). Tests must answer pop-ups (tests/helpers.gd answer_choices), and early_game_test checks the turn always advances.
 - Beating a city's garrison used to move the attacker INTO the city (an old bug, found by the new "unit in someone else's city" check).
 - Two tests (balance_state, rift_timing_test) still used the two-faction names (s.rival, s.diplomacy) and had silently stopped working. Run every test after big changes, not only the new one.
+- A test that places units on fixed hexes breaks once terrain is random (the hex may be water): rule tests call H.flatten(s) to make the map plains; full-game simulations keep random terrain.
+- Assigning a plain list to a typed array (faction.outposts = [...]) is a script error, and a test that hits a script error hangs until its timeout with NO output (Godot buffers it). If a test seems to hang, run it with a timeout and read the end of its output.
+- An AI ally answered your call to arms even when it was the aggressor's tributary (at war with its own overlord): found by the "at war with overlord" check.
+- One army alone almost never takes a walled city (Strength 3 vs defence 7-11), so cities were taken 0.06 times a game: siege support (+2 per extra army next to the city) is the usual 4X answer.
+- HexMap.neighbours used to check all 165 hexes on every call; pathfinding made that too slow, so it now computes the 6 offsets (checked identical on every hex).
 - Count a message once: the same messages can still be on screen after the player's moves and again after End Turn (the outpost-capture count was doubled at first).
 - Sköll's "nearest city" targeting was biased by map geometry (2:1 against the player). Measure fairness with many simulated games before trusting a rule.
 - Without the Daughter, a city made +0 Food with two units and could never grow: added standard city growth.
@@ -64,6 +71,7 @@ CLAUDE.md holds the rules for working; this file holds the history.
 - A scared AI offers her in ~31% of games where it holds her.
 - About 4 AI offers per game; AIs break agreements ~1 per game.
 - War and peace (war_test, 300 games): AIs declare war on you 1.3 times a game, on each other 0.6; 1.5 peaces; allies honour their oath about as often as they break it (0.48 vs 0.44). Your outposts taken 2.0 -> 0.4 a game, AI-vs-AI fights 6 -> 1.
+- Terrain, trading, tributaries (300 games each): about 3 trades a game; cities taken about 0.1 a game; endings 239 survived / 35 fell / 26 Daughter found. Siege: alone 30%, with two armies beside it 45-50%.
 - Early game (300 games, a test player that explores and builds): 0 of 3000 early turns without a decision; endings 225 survived / 49 fell / 26 Daughter found (before the change, four_test: 229 / 50 / 21).
 - Before vs after the early-game change, same simple player that never expands: each AI's units on turn 10 2.7 -> 6.0, AI demands per game 0.5 -> 1.25, oath offers 4.9 -> 5.0.
 

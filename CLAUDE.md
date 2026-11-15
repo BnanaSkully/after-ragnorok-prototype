@@ -45,6 +45,13 @@ Goal: Sköll can't be killed, but he can be bound with a chain (like Fenrir and 
 - Measured (tests/early_game_test.gd, 300 games, a test player that explores and builds): turns 1-10 with no decision 0 of 3000; pop-up on 33% of early turns; something affordable to build on 83%. Per game: 6.7 events, ruins searched 2.2 by you and 5.6 by the three AIs, you found 3.0 outposts, lost about 2 and took about 1.4. Endings 225 survived / 49 city fell / 26 Daughter found
 - Side effect to watch: the AIs expand too, so on turn 10 each AI has about 6 units (was 2.7). Against a player who doesn't expand, AI demands go from 0.5 to 1.25 a game
 
+## Terrain, trading and tributaries: built (Nathan: "terrain first, then trading, cities become tributaries")
+
+- Terrain (terrain.gd, GameState.terrain; standard 4X): plains, forest, hills, mountains, water, a new random map every game (weighted, clumped, always connected; AI cities on plains with passable neighbours). Forest and hills cost 2 moves, but a unit with all its moves can always take one step (armies still move 1 hex a turn; scouts are slowed). Mountains and water can't be crossed or stood on (Sköll ignores terrain). Defence: forest +1, hills +2, for units and for a city standing on them. Outposts earn by land: plains +2 Food, forest +1/+1, hills +2 Industry. Units find paths around obstacles (GameState.step_toward). Hovering a hex shows what its land does. Map ~53% plains, 21% forest, 14% hills, 6% mountains, 6% water
+- Trading (diplomacy.gd; "Deal..." button per AI opens a panel; each deal uses the diplomatic action): demand 5 Food/Industry (as before); trade 5 of one for N of the other, where N = 4, +1 if they need what you give, -1 if they need what they give up, +1 at Trust 3+, -1 at Trust -3 or less (at least 1, at most what they have); gift 5 Food/Industry for Trust +1 (until Trust 5); at war, offer 6 Industry for peace (+30% chance, paid only if accepted). No trading at war. An AI short of one resource with enough of the other offers a trade (pop-up). Numbers TRADE_*, GIFT_*, PEACE_TRIBUTE* in diplomacy.gd
+- Tributaries (game_state.gd "Taking cities"): a unit at war with a city's owner can attack the city from next to it: its Strength +2 for every other army of its own next to the city (siege support) against the whole city defence (garrison + walls + land + the Daughter). Win: the garrison dies, walls -1, and the city becomes the winner's TRIBUTARY (Faction.overlord); the attacker stays outside. Lose: the attacker dies. A tributary pays half its Industry income each turn to its overlord, their war ends, and neither can declare war on the other (nor be dragged into one by an alliance). Ways out: an AI tributary whose army is stronger than its overlord's rises up (20% a turn, then they're at war); the player rises up by attacking their overlord (two-click warning); taking your overlord's city frees you; if Sköll destroys the overlord's city its tributaries go free. Losing your city to an AI does NOT end the game (only Sköll destroying it does). AIs at war with 2+ armies send spare ones at the nearest enemy city and attack at 40%+ odds. Numbers TRIBUTE_SHARE, REBEL_CHANCE, SIEGE_SUPPORT, AI_SIEGE_ODDS in game_state.gd
+- Measured (300 games each): trading about 3 trades and 1 gift a game, AIs offer 0.3 trades; cities taken about 0.07-0.1 a game (almost always an AI taking yours; you were a tributary on 0.4-0.6 turns a game); endings about 235-240 survived / 35-45 fell / 21-26 Daughter found. Siege odds: Strength 3 alone against defence 7 wins 30%, with two armies beside it 45-50%
+
 ## The Sun's Daughter: design in progress
 
 Built so far: she chooses her protector at the Landing by Favour, judges her protector (step 1), can go rogue (step 2) and can be traded (step 3):
@@ -115,7 +122,8 @@ Keep game rules separate from drawing. The game state and rules (map data, terra
 
 - game_state.gd (class GameState): the whole game state and its rules: phases, turns, economy, combat, the AI factions (ai_take_turn, ai_build), the Daughter going rogue, landing rules, and the player's actions (player_unit_act, player_build_unit, ...). No drawing, buttons or pixels. Holds the factions, Sköll, the Daughter and diplomacy
 - main.gd: the 2D view. Draws the state (_draw), builds buttons and pop-ups (refresh keeps them in step), turns clicks into calls on the state. The right panel has a block per AI faction with its own agreement/demand buttons. Owns only screen things: selection, hover, the "click again to break your oath" warning, faction colours. A 3D view would replace this file
-- hex_map.gd (class HexMap, static): the hex grid as the rules see it: map size, hex_distance, is_neighbour, neighbours. Hex coordinates only
+- hex_map.gd (class HexMap, static): the hex grid as the rules see it: map size, hex_distance, is_neighbour, neighbours (computed directly from the 6 offsets). Hex coordinates only
+- terrain.gd (class Terrain, static): land types, move costs, defence, outpost income, and making a random connected map
 - hex_view_2d.gd (class HexView2D, static): where hexes are on the 2D screen: hex size in pixels, hex_center, hex_points, cell_at (hex under the mouse). Only main.gd uses it
 - faction.gd (class Faction): one side's city, units, outposts, resources, walls, population, the Daughter's Favour toward it, and what it has explored (fog of war) and which rifts it knows
 - unit.gd (class Unit): one unit, an army or a scout (Unit.Kind): position, moves, Strength, sight, Food upkeep. Holds a weak link to its faction to avoid a memory leak
@@ -131,7 +139,9 @@ Keep game rules separate from drawing. The game state and rules (map data, terra
 
 ## Later (parked until the full loop is playable)
 
-- Combat: +1 strength when defending in your own territory, so it isn't a pure coin flip
+- Combat: +1 strength when defending in your own territory (terrain defence now exists: forest +1, hills +2)
+- Open borders (whether units may enter another faction's territory at peace) and asking an AI to join your war: the next trading steps
+- Should the player be able to demand tribute without a war (vassalage by diplomacy)? Ask Nathan
 - Deeper politics beyond the basic diplomacy in scope (betrayal schemes, three-way deals, AIs trading the Daughter between themselves)
 - Give the four factions real names (placeholders now: Norse, Japanese, Celtic, Greek)
 - AI factions should choose their own landing spots instead of fixed ones
