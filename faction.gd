@@ -14,6 +14,7 @@ var strength := 3 # Strength of new units (higher = better odds in combat)
 var food := 0
 var industry := 0
 var favour := 0 # how much the Sun's Daughter trusts this faction (0 to 10)
+var walls := 0 # city wall level (each level adds defence)
 
 func _init(p_name: String, p_territory: Color, p_unit: Color, p_city: Vector2i) -> void:
 	name = p_name

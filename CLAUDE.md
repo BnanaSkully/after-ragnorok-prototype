@@ -10,6 +10,7 @@ Survivors of Ragnarök cross the void on Yggdrasil (the Crossing), then land on 
 
 - Phase 1: the Crossing (journey events) and the Landing (found your city). The Sun's Daughter (the new sun, unnamed in the myths) travels with the survivors and watches how each people behaves. She has a Favour score (0-10) toward each faction: Crossing choices that protect people raise it, abandoning them lowers it. The rival's Favour is hidden and random (3-6). At the Landing she chooses to shelter with whoever she trusts most (ties random). The player doesn't choose her; she chooses
 - Sheltering her gives +2 Food and +2 Industry a turn and +3 city defence, but she is what Sköll hunts
+- Economy (standard 4X): a city makes 2 Food and 1 Industry a turn; units cost 5 Industry and eat 1 Food a turn; walls cost 10 Industry per level. City defence = garrison unit's Strength + walls (+3 with the Daughter)
 - Phase 2: settle and survive. Sköll, the wolf who swallowed the sun at Ragnarök, followed the survivors through the void. He arrives on turn 14, hunts the nearest city, and can't be killed, only driven back. In Phase 2 he doesn't know which city hides the Daughter; he finds out only after attacking it. If he loses that battle, Phase 3 starts early. If he wins it, he swallows her: he becomes the sun (Strength 20, a blazing look) and the map goes dark. Lose if your city falls; survive to turn 20 (the Doom) to reach Phase 3
 - Phase 3 (not built yet): Sköll spawns chaos factions and rogue factions join him. Her city is the first he attacks (he charges it straight away if he found her in Phase 2). Needs a design before it can be built: what the player does, how chaos factions behave, how Phase 3 is won or lost
 
@@ -24,7 +25,7 @@ Built so far: she chooses her protector at the Landing by Favour. Planned, in th
 ### Step A: economy with costs (standard 4X), in this order
 1. DONE: several units per faction, built with Industry from the city (one unit per hex, destroyed units are gone, no free respawn; the rival builds too)
 2. DONE: food upkeep: a city makes 2 Food a turn (+2 with the Daughter), every unit eats 1. Running out keeps Food at 0 and the unit farthest from the city deserts. The rival only builds units it can feed. Numbers are constants at the top of main.gd (CITY_FOOD, UNIT_FOOD_UPKEEP, UNIT_COST)
-3. Walls: spend Industry on permanent city defence
+3. DONE: walls: a city improvement, 10 Industry per level, +4 defence each, up to 2 levels. The rival builds walls from turn 10. City defence is now the standard garrison + walls (+3 with the Daughter); stored Industry no longer counts. Numbers: WALL_COST, WALL_DEFENCE, MAX_WALLS in main.gd
 
 ## Current scope: prototype only
 
@@ -38,7 +39,8 @@ Built so far: she chooses her protector at the Landing by Favour. Planned, in th
 - Keep changes small, and say exactly how to test each one (press F5, then click X)
 - He wants honest pushback if an idea will cause problems later
 - Commit after each working step with a clear message
-- Use standard 4X conventions for generic mechanics (upkeep, building units, production, walls, starvation) without asking him to design them. Only ask about what is unique to this game (the Daughter, Sköll, the phases, politics, lore)
+- Default 4X mechanics, no need to ask: unit upkeep, production queues, city growth from food, fog of war, zone of control, healing when units rest, city walls and garrisons, starvation and desertion, movement costs by terrain. Pick the most common genre approach, mention it in the PR, and move on
+- Only ask him about what is unique to this game (the Daughter, Sköll, the phases, politics, lore)
 
 ## Code notes
 
@@ -61,4 +63,4 @@ Built so far: she chooses her protector at the Landing by Favour. Planned, in th
 - The rival should choose its own landing spot instead of a fixed one
 - Crossing event text is placeholder: rewrite in the game's own voice
 - Give the Sun's Daughter a real name
-- Sköll's and the Daughter's numbers need tuning once played (in simulated games where the player stays home: taking her in, ~64% reach turn 20; letting her pass, ~54%)
+- Sköll's and the Daughter's numbers need tuning once played (in simulated games: building walls ~66% reach turn 20, building nothing ~54%)

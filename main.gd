@@ -11,12 +11,14 @@ extends Node2D
 #   crossing_events.gd  the Crossing's events (text and choices)
 
 const DOOM_TURN := 20 # survive until this turn and Phase 3 (chaos) begins
-const INDUSTRY_PER_DEFENCE := 5 # every 5 stored Industry adds 1 to a city's defence
 const MIN_LANDING_DISTANCE := 4 # how many hexes away from the rival's city you must land
 const UNIT_COST := 5 # Industry to build a new unit
 const CITY_FOOD := 2 # Food a city produces each turn
 const CITY_INDUSTRY := 1 # Industry a city produces each turn
 const UNIT_FOOD_UPKEEP := 1 # Food each unit eats each turn
+const WALL_COST := 10 # Industry per wall level
+const WALL_DEFENCE := 4 # city defence each wall level adds
+const MAX_WALLS := 2
 const NO_CELL := HexMap.NO_CELL
 const Crossing := preload("res://crossing_events.gd")
 
@@ -44,6 +46,7 @@ var end_title := "" # big text on the end screen
 var end_detail := "" # smaller text under it (can have several lines)
 var end_turn_button: Button
 var build_button: Button
+var walls_button: Button
 var messages: Array[String] = [] # shown at the bottom of the screen, e.g. combat results
 
 func _init() -> void:
@@ -61,6 +64,10 @@ func _ready() -> void:
 	build_button.position = Vector2(920, 20)
 	build_button.pressed.connect(player_build_unit)
 	add_child(build_button)
+	walls_button = Button.new()
+	walls_button.position = Vector2(920, 58)
+	walls_button.pressed.connect(player_build_walls)
+	add_child(walls_button)
 	build_crossing_ui()
 	start_crossing()
 
@@ -91,6 +98,7 @@ func start_crossing() -> void:
 	daughter.reset(player, rival)
 	end_turn_button.visible = false
 	build_button.visible = false
+	walls_button.visible = false
 	crossing_panel.visible = true
 	messages.clear()
 	show_crossing_step()
@@ -144,10 +152,11 @@ func start_landing() -> void:
 	crossing_panel.visible = false
 	end_turn_button.visible = true
 	build_button.visible = true
+	walls_button.visible = true
 	player.city_pos = NO_CELL
 	player.units.clear()
 	end_turn_button.disabled = true
-	build_button.disabled = true
+	update_build_button() # build buttons stay disabled until you've landed
 	messages = ["Choose where to land: click a hex to found your city."]
 	queue_redraw()
 
@@ -228,6 +237,7 @@ func end_game(title: String, detail: String) -> void:
 	game_over = true
 	end_turn_button.disabled = true
 	build_button.disabled = true
+	walls_button.disabled = true
 	selected = null
 	end_title = title
 	end_detail = detail
@@ -262,10 +272,35 @@ func rival_take_turn() -> void:
 			u.pos = options.pick_random()
 
 # The rival builds a new unit whenever it can afford one.
-# Only if it can still feed its army afterwards.
+# Once the howling starts it builds walls first; otherwise a unit,
+# but only if it can still feed its army afterwards.
 func rival_build() -> void:
-	if rival.is_alive() and rival.industry >= UNIT_COST and food_change(rival) - UNIT_FOOD_UPKEEP >= 0:
+	if not rival.is_alive():
+		return
+	if turn >= Skoll.WARNING_TURN and rival.walls < MAX_WALLS:
+		build_walls(rival)
+		return # saving up for walls
+	if rival.industry >= UNIT_COST and food_change(rival) - UNIT_FOOD_UPKEEP >= 0:
 		build_unit(rival)
+
+# --- Walls ------------------------------------------------------------------
+# A city improvement: each level costs WALL_COST Industry and adds WALL_DEFENCE.
+func build_walls(f: Faction) -> bool:
+	if not f.is_alive() or f.walls >= MAX_WALLS or f.industry < WALL_COST:
+		return false
+	f.industry -= WALL_COST
+	f.walls += 1
+	return true
+
+func player_build_walls() -> void:
+	if game_over or phase != Phase.PLAYING:
+		return
+	if build_walls(player):
+		messages = ["You built walls (level %d): your city's defence +%d." % [player.walls, WALL_DEFENCE]]
+	else:
+		messages = ["Can't build walls: you need %d Industry (and walls go up to level %d)." % [WALL_COST, MAX_WALLS]]
+	update_build_button()
+	queue_redraw()
 
 # --- Building units -----------------------------------------------------------
 # A new unit appears on the city, or on a free hex next to it if the city is occupied.
@@ -302,6 +337,11 @@ func player_build_unit() -> void:
 
 func update_build_button() -> void:
 	build_button.disabled = game_over or phase != Phase.PLAYING or player.industry < UNIT_COST
+	walls_button.disabled = game_over or phase != Phase.PLAYING or player.industry < WALL_COST or player.walls >= MAX_WALLS
+	if player.walls >= MAX_WALLS:
+		walls_button.text = "Walls complete (+%d defence)" % (MAX_WALLS * WALL_DEFENCE)
+	else:
+		walls_button.text = "Build Walls %d/%d (%d Industry)" % [player.walls + 1, MAX_WALLS, WALL_COST]
 
 # --- Combat -----------------------------------------------------------------
 # Every fight uses the same rule: the attacker wins with chance
@@ -325,11 +365,10 @@ func resolve_combat(attacker: Unit, defender: Unit) -> void:
 		attacker.faction.remove_unit(attacker)
 		add_message("%s attacked %s and lost (%s)." % [attacker.faction.name, defender.faction.name, odds_text(chance)])
 
-# A city's defence: the Strength of its own unit standing in it (the garrison),
-# plus 1 for every INDUSTRY_PER_DEFENCE Industry stored,
-# plus the Daughter's bonus if it shelters her.
+# A city's defence (the usual 4X rule): the Strength of its own unit standing
+# in it (the garrison), plus its walls, plus the Daughter's bonus if it shelters her.
 func city_defence(f: Faction) -> int:
-	var defence := f.industry / INDUSTRY_PER_DEFENCE
+	var defence := f.walls * WALL_DEFENCE
 	var garrison := unit_at(f.city_pos)
 	if garrison and garrison.faction == f:
 		defence += garrison.strength
@@ -395,6 +434,8 @@ func _draw() -> void:
 		if f.city_pos == NO_CELL:
 			continue
 		var cc := HexMap.hex_center(f.city_pos)
+		if f.walls > 0: # a grey ring around the city, thicker for higher walls
+			draw_rect(Rect2(cc - Vector2(25, 25), Vector2(50, 50)), Color(0.55, 0.55, 0.6), false, 3.0 * f.walls)
 		draw_rect(Rect2(cc - Vector2(20, 20), Vector2(40, 40)), Color(0.95, 0.95, 0.85))
 		draw_rect(Rect2(cc - Vector2(20, 20), Vector2(40, 40)), f.unit_color, false, 3.0)
 		if daughter.shelters_with(f):
