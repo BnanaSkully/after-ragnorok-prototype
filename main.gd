@@ -15,9 +15,16 @@ var state := GameState.new()
 
 # How each faction looks: [territory colour, unit colour]
 const FACTION_COLOURS := {
-	"Player": [Color(0.3, 0.4, 0.6), Color(0.2, 0.4, 0.9)],
-	"Rival": [Color(0.6, 0.3, 0.3), Color(0.85, 0.2, 0.2)],
+	"Norse": [Color(0.3, 0.4, 0.6), Color(0.2, 0.4, 0.9)],
+	"Japanese": [Color(0.6, 0.3, 0.3), Color(0.85, 0.2, 0.2)],
+	"Celtic": [Color(0.25, 0.5, 0.5), Color(0.1, 0.75, 0.65)],
+	"Greek": [Color(0.6, 0.52, 0.25), Color(0.95, 0.75, 0.15)],
 }
+
+# Right-hand panel: one block per AI faction
+const PANEL_X := 820.0
+const BLOCK_Y := 100.0 # top of the first faction's block
+const BLOCK_H := 100.0 # height of each block
 
 func territory_colour(f: Faction) -> Color:
 	return FACTION_COLOURS[f.name][0]
@@ -28,7 +35,7 @@ func unit_colour(f: Faction) -> Color:
 # What the player is doing on screen (not part of the game rules)
 var hover_cell := NO_CELL # the hex under the mouse while landing
 var selected: Unit = null # the player's unit chosen to move (null = none)
-var break_warning_cell := NO_CELL # first click on a rival unit during an oath only warns
+var break_warning_cell := NO_CELL # first click on a unit you've sworn an agreement with only warns
 
 # Buttons and panels
 var crossing_panel: VBoxContainer
@@ -37,21 +44,28 @@ var crossing_buttons: VBoxContainer
 var end_turn_button: Button
 var build_button: Button
 var walls_button: Button
-var oath_button: Button
-var demand_food_button: Button
-var demand_industry_button: Button
+var faction_buttons := {} # AI faction -> {"pact": Button, "food": Button, "industry": Button}
 var play_again_button: Button # shown on the end screen
-var offer_panel: PanelContainer # the rival's Accept/Refuse pop-up
+var offer_panel: PanelContainer # an AI faction's Accept/Refuse pop-up
 var offer_label: Label
+var offer_heading: Label
 var offer_accept_button: Button
 
 func _ready() -> void:
 	end_turn_button = add_button("End Turn", Vector2(820, 20), on_end_turn)
 	build_button = add_button("Build Unit (%d Industry)" % GameState.UNIT_COST, Vector2(920, 20), on_build_unit)
 	walls_button = add_button("", Vector2(820, 58), on_build_walls)
-	oath_button = add_button("", Vector2(820, 96), on_propose_pact)
-	demand_food_button = add_button("", Vector2(820, 134), on_demand.bind("food"))
-	demand_industry_button = add_button("", Vector2(820, 172), on_demand.bind("industry"))
+	for i in state.ais.size():
+		var f: Faction = state.ais[i]
+		var y := BLOCK_Y + i * BLOCK_H + 46
+		var set := {
+			"pact": add_button("", Vector2(PANEL_X, y), on_propose_pact.bind(f)),
+			"food": add_button("", Vector2(PANEL_X + 108, y), on_demand.bind(f, "food")),
+			"industry": add_button("", Vector2(PANEL_X + 216, y), on_demand.bind(f, "industry")),
+		}
+		for b in set.values():
+			b.add_theme_font_size_override("font_size", 13)
+		faction_buttons[f] = set
 	play_again_button = add_button("Play Again", Vector2.ZERO, restart)
 	play_again_button.add_theme_font_size_override("font_size", 22)
 	play_again_button.visible = false
@@ -74,19 +88,26 @@ func add_button(text: String, pos: Vector2, action: Callable) -> Button:
 func refresh() -> void:
 	var crossing := state.phase == GameState.Phase.CROSSING
 	crossing_panel.visible = crossing
-	for b in [end_turn_button, build_button, walls_button, oath_button, demand_food_button, demand_industry_button]:
+	for b in all_game_buttons():
 		b.visible = not crossing
 	if crossing:
 		show_crossing_step()
 	update_buttons()
-	if state.diplomacy.has_pending() and not offer_panel.visible:
+	if state.has_pending_offer() and not offer_panel.visible:
 		show_offer()
 	if state.game_over:
 		show_end_screen()
 	queue_redraw()
 
+func all_game_buttons() -> Array[Button]:
+	var list: Array[Button] = [end_turn_button, build_button, walls_button]
+	for set in faction_buttons.values():
+		for b in set.values():
+			list.append(b)
+	return list
+
 func update_buttons() -> void:
-	var playing := state.can_play() and not state.diplomacy.has_pending()
+	var playing: bool = state.can_play() and not state.has_pending_offer()
 	var p := state.player
 	end_turn_button.disabled = not playing
 	build_button.disabled = not playing or p.industry < GameState.UNIT_COST
@@ -95,26 +116,26 @@ func update_buttons() -> void:
 		walls_button.text = "Walls complete (+%d defence)" % (GameState.MAX_WALLS * GameState.WALL_DEFENCE)
 	else:
 		walls_button.text = "Build Walls %d/%d (%d Industry)" % [p.walls + 1, GameState.MAX_WALLS, GameState.WALL_COST]
-	var d := state.diplomacy
-	var word: String = state.rival.pact_word
-	if d.pact_active():
-		oath_button.text = "%s in force: %d turns left" % [word.capitalize(), d.pact_turns_left]
-	elif d.is_oathbreaker():
-		oath_button.text = "%s refuses: you broke your %s" % [state.rival.name, word]
-	elif d.action_used:
-		oath_button.text = "Diplomacy used this turn"
-	else:
-		oath_button.text = "Swear %s (%d%% they accept)" % [d.a_pact(), roundi(d.accept_chance() * 100)]
-	oath_button.disabled = not playing or not d.can_propose() or d.is_oathbreaker()
-	for pair in [[demand_food_button, "food"], [demand_industry_button, "industry"]]:
-		var button: Button = pair[0]
-		var resource: String = pair[1]
-		var chance := d.demand_chance(resource)
-		if chance <= 0.0:
-			button.text = "Demand %d %s (they don't have it)" % [Diplomacy.DEMAND_AMOUNT, resource.capitalize()]
+	for f in state.ais:
+		var d: Diplomacy = state.relation(f)
+		var set: Dictionary = faction_buttons[f]
+		var pact: Button = set["pact"]
+		var word: String = f.pact_word.capitalize()
+		if not f.is_alive():
+			pact.text = "Fallen"
+		elif d.pact_active():
+			pact.text = "%s: %d turns" % [word, d.pact_turns_left]
+		elif d.is_oathbreaker():
+			pact.text = "They refuse"
 		else:
-			button.text = "Demand %d %s (%d%% they pay)" % [Diplomacy.DEMAND_AMOUNT, resource.capitalize(), roundi(chance * 100)]
-		button.disabled = not playing or not d.can_demand()
+			pact.text = "%s %d%%" % [word, roundi(d.accept_chance() * 100)]
+		pact.disabled = not playing or not d.can_propose() or d.is_oathbreaker()
+		for resource in ["food", "industry"]:
+			var button: Button = set[resource]
+			var chance: float = d.demand_chance(resource)
+			var short := "Food" if resource == "food" else "Industry"
+			button.text = "%s: none" % short if chance <= 0.0 else "%s %d%%" % [short, roundi(chance * 100)]
+			button.disabled = not playing or not d.can_demand()
 
 func show_end_screen() -> void:
 	# The Play Again button sits under the end-screen text (see _draw).
@@ -143,12 +164,12 @@ func on_build_walls() -> void:
 	state.player_build_walls()
 	refresh()
 
-func on_propose_pact() -> void:
-	state.player_propose_pact()
+func on_propose_pact(f: Faction) -> void:
+	state.player_propose_pact(f)
 	refresh()
 
-func on_demand(resource: String) -> void:
-	state.player_demand(resource)
+func on_demand(f: Faction, resource: String) -> void:
+	state.player_demand(f, resource)
 	refresh()
 
 # --- The Crossing screen ------------------------------------------------------
@@ -173,7 +194,7 @@ func show_crossing_step() -> void:
 		b.queue_free()
 	var p := state.player
 	var tally := "Your people carry:  Food %d    Industry %d    Strength %d" % [p.food, p.industry, p.strength]
-	tally += "\n%s's Favour toward you: %d    (the rival's is unknown)" % [SunDaughter.NAME.capitalize(), p.favour]
+	tally += "\n%s's Favour toward you: %d    (the other factions' is unknown)" % [SunDaughter.NAME.capitalize(), p.favour]
 	if not state.crossing_finished():
 		var event: Dictionary = Crossing.EVENTS[state.crossing_step]
 		crossing_label.text = "THE CROSSING  (%d of %d)\n\n%s\n\n%s" % [state.crossing_step + 1, Crossing.EVENTS.size(), event["text"], tally]
@@ -224,11 +245,10 @@ func build_offer_ui() -> void:
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 14)
 	offer_panel.add_child(box)
-	var heading := Label.new()
-	heading.text = "A MESSAGE FROM %s" % state.rival.name.to_upper()
-	heading.add_theme_font_size_override("font_size", 16)
-	heading.add_theme_color_override("font_color", Color(0.85, 0.7, 0.35))
-	box.add_child(heading)
+	offer_heading = Label.new()
+	offer_heading.add_theme_font_size_override("font_size", 16)
+	offer_heading.add_theme_color_override("font_color", Color(0.85, 0.7, 0.35))
+	box.add_child(offer_heading)
 	offer_label = Label.new()
 	offer_label.autowrap_mode = TextServer.AUTOWRAP_WORD
 	offer_label.add_theme_font_size_override("font_size", 18)
@@ -248,19 +268,23 @@ func build_offer_ui() -> void:
 
 # While the pop-up is open the player must answer before doing anything else.
 func show_offer() -> void:
-	offer_label.text = state.diplomacy.pending_text()
-	offer_accept_button.text = "Pay" if state.diplomacy.pending.get("type") == "demand" else "Accept"
+	var r: Diplomacy = state.pending_relation()
+	offer_heading.text = "A MESSAGE FROM THE %s" % r.other.name.to_upper()
+	offer_label.text = r.pending_text()
+	offer_accept_button.text = "Pay" if r.pending.get("type") == "demand" else "Accept"
 	offer_panel.visible = true
 	update_buttons()
 
 func answer_offer(accept: bool) -> void:
 	offer_panel.visible = false
-	state.diplomacy.answer(accept)
+	var r: Diplomacy = state.pending_relation()
+	if r:
+		r.answer(accept)
 	refresh()
 
 # --- Mouse clicks: turn screen positions into hexes, then ask the state ---------
 func _unhandled_input(event: InputEvent) -> void:
-	if state.game_over or state.phase == GameState.Phase.CROSSING or state.diplomacy.has_pending():
+	if state.game_over or state.phase == GameState.Phase.CROSSING or state.has_pending_offer():
 		return
 	if state.phase == GameState.Phase.LANDING:
 		if event is InputEventMouseMotion:
@@ -283,7 +307,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			if state.would_break_pact(cell) and break_warning_cell != cell:
 				# first click only warns; a second click on the same unit breaks the oath
 				break_warning_cell = cell
-				var word: String = state.rival.pact_word
+				var word: String = state.unit_at(cell).faction.pact_word
 				state.messages = ["This breaks your %s (Trust %+d, %sbreaker for %d turns, she will see). Click again to attack." % [word, Diplomacy.TRUST_BROKEN, word, Diplomacy.OATHBREAKER_TURNS]]
 				queue_redraw()
 				return
@@ -300,7 +324,7 @@ func _draw() -> void:
 	if s.phase == GameState.Phase.CROSSING:
 		return # the Crossing panel is shown instead of the map
 	var player := s.player
-	var rival := s.rival
+	var k := HexView2D.HEX_SIZE / 32.0 # city drawings were designed for 32-pixel hexes
 	var daughter := s.daughter
 	var skoll := s.skoll
 	var dark := daughter.is_swallowed() # Sköll swallowed the new sun
@@ -321,7 +345,7 @@ func _draw() -> void:
 				fill = fill.darkened(0.7)
 			if s.phase == GameState.Phase.LANDING:
 				if not s.can_land_at(c):
-					fill = fill.darkened(0.6) # too close to the rival
+					fill = fill.darkened(0.6) # too close to another faction's city
 				elif c == hover_cell:
 					fill = Color(0.9, 0.75, 0.3)
 			if selected and HexMap.is_neighbour(selected.pos, c):
@@ -347,15 +371,16 @@ func _draw() -> void:
 		if f.city_pos == NO_CELL:
 			continue
 		var cc := HexView2D.hex_center(f.city_pos)
+		var half := 20.0 * k
 		if f.walls > 0: # a grey ring around the city, thicker for higher walls
-			draw_rect(Rect2(cc - Vector2(25, 25), Vector2(50, 50)), Color(0.55, 0.55, 0.6), false, 3.0 * f.walls)
-		draw_rect(Rect2(cc - Vector2(20, 20), Vector2(40, 40)), Color(0.95, 0.95, 0.85))
-		draw_rect(Rect2(cc - Vector2(20, 20), Vector2(40, 40)), unit_colour(f), false, 3.0)
+			draw_rect(Rect2(cc - Vector2(half + 5, half + 5), Vector2(half * 2 + 10, half * 2 + 10)), Color(0.55, 0.55, 0.6), false, 2.5 * f.walls)
+		draw_rect(Rect2(cc - Vector2(half, half), Vector2(half * 2, half * 2)), Color(0.95, 0.95, 0.85))
+		draw_rect(Rect2(cc - Vector2(half, half), Vector2(half * 2, half * 2)), unit_colour(f), false, 3.0)
 		# city size: a small badge on the bottom-left corner, so a unit in the city doesn't hide it
-		draw_circle(cc + Vector2(-20, 20), 9.0, Color(0.15, 0.15, 0.15))
-		draw_string(ThemeDB.fallback_font, cc + Vector2(-29, 25), str(f.population), HORIZONTAL_ALIGNMENT_CENTER, 18, 14, Color.WHITE)
+		draw_circle(cc + Vector2(-half, half), 8.0, Color(0.15, 0.15, 0.15))
+		draw_string(ThemeDB.fallback_font, cc + Vector2(-half - 9, half + 5), str(f.population), HORIZONTAL_ALIGNMENT_CENTER, 18, 13, Color.WHITE)
 		if daughter.shelters_with(f):
-			draw_sun(cc + Vector2(20, -20), 7.0) # a little sun on the city sheltering her
+			draw_sun(cc + Vector2(half, -half), 6.0) # a little sun on the city sheltering her
 
 	for f in s.factions:
 		for u in f.units:
@@ -387,15 +412,11 @@ func _draw() -> void:
 			draw_circle(sc, r * 0.28, Color(1.0, 0.9, 0.3))
 
 	var font := ThemeDB.fallback_font
-	var info := "Turn %d   City %d   Food %d/%d (%+d)   Industry %d (%+d)   Units %d   Army Strength %d   Doom in %d" % [s.turn, player.population, player.food, s.growth_cost(player), s.food_change(player), player.industry, s.industry_change(player), player.units.size(), s.diplomacy.army_power(player), GameState.DOOM_TURN - s.turn]
+	var info := "Turn %d   City %d   Food %d/%d (%+d)   Industry %d (%+d)   Units %d   Army Strength %d   Doom in %d" % [s.turn, player.population, player.food, s.growth_cost(player), s.food_change(player), player.industry, s.industry_change(player), player.units.size(), s.army_power(player), GameState.DOOM_TURN - s.turn]
 	draw_string(font, Vector2(20, 35), info, HORIZONTAL_ALIGNMENT_LEFT, -1, 18)
-	var rival_info := "Rival:  City %d   Food %d   Industry %d   Units %d" % [rival.population, rival.food, rival.industry, rival.units.size()]
-	if rival.city_pos == NO_CELL:
-		rival_info = "Rival:  city destroyed"
-	draw_string(font, Vector2(20, 60), rival_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.9, 0.6, 0.6))
 	if skoll.active and player.city_pos != NO_CELL:
 		var skoll_info := "Sköll hunts %s (%d hexes from yours)   Your defence: %d" % [skoll.target_text(), HexMap.hex_distance(skoll.pos, player.city_pos), s.city_defence(player)]
-		draw_string(font, Vector2(345, 60), skoll_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.6, 0.2))
+		draw_string(font, Vector2(20, 60), skoll_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.6, 0.2))
 	var daughter_info := ""
 	if daughter.is_swallowed():
 		daughter_info = "Sköll swallowed %s. He is the sun now (Strength %d)." % [SunDaughter.NAME, skoll.strength]
@@ -404,26 +425,31 @@ func _draw() -> void:
 		if daughter.holder == player and player.favour <= SunDaughter.WARN_FAVOUR:
 			note = "(UNHAPPY: at Favour %d she leaves)" % SunDaughter.LEAVE_FAVOUR
 		elif daughter.holder == player and s.turn < Skoll.ARRIVAL_TURN:
-			note = "(for turn %d: defence %d/%d, army %d/%d)" % [Skoll.ARRIVAL_TURN, s.city_defence(player), SunDaughter.READY_DEFENCE, s.diplomacy.army_power(player), SunDaughter.READY_ARMY]
-		daughter_info = "%s %s %s    Her Favour: you %d, %s %d" % ["You shelter" if daughter.holder == player else daughter.holder.name + " shelters", SunDaughter.NAME, note, player.favour, rival.name, rival.favour]
+			note = "(for turn %d: defence %d/%d, army %d/%d)" % [Skoll.ARRIVAL_TURN, s.city_defence(player), SunDaughter.READY_DEFENCE, s.army_power(player), SunDaughter.READY_ARMY]
+		daughter_info = "%s %s %s    Her Favour toward you: %d" % ["You shelter" if daughter.holder == player else "The " + daughter.holder.name + " shelter", SunDaughter.NAME, note, player.favour]
 	if daughter.is_rogue():
-		daughter_info = "She is ALONE IN THE OPEN! Move a unit onto her to persuade her: you %d%%, %s %d%%" % [roundi(daughter.persuade_chance(player) * 100), rival.name, roundi(daughter.persuade_chance(rival) * 100)]
+		daughter_info = "She is ALONE IN THE OPEN! Move a unit onto her to persuade her (your chance %d%%)." % roundi(daughter.persuade_chance(player) * 100)
 	draw_string(font, Vector2(20, 82), daughter_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.9, 0.5))
 
-	# Diplomacy panel (right side): trust, the oath, and the memory of promises.
-	var d := s.diplomacy
-	var dx := 820.0
-	var dy := 228.0
-	draw_string(font, Vector2(dx, dy), "DIPLOMACY with %s" % rival.name, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.9, 0.85, 0.7))
-	var record := "    They broke %d %s%s" % [d.rival_broken_oaths, rival.pact_word, "" if d.rival_broken_oaths == 1 else "s"]
-	draw_string(font, Vector2(dx, dy + 22), "Their trust in you: %+d%s" % [d.trust, record], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.85, 0.85))
-	if d.pact_active():
-		draw_string(font, Vector2(dx, dy + 42), "%s in force: %d turns left" % [rival.pact_word.capitalize(), d.pact_turns_left], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.6, 0.9, 0.6))
-	elif d.is_oathbreaker():
-		draw_string(font, Vector2(dx, dy + 42), "You are an %sbreaker until turn %d" % [rival.pact_word, d.oathbreaker_until], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.5, 0.4))
-	draw_string(font, Vector2(dx, dy + 70), "They remember:", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.7, 0.7))
-	for i in d.history.size():
-		draw_multiline_string(font, Vector2(dx, dy + 92 + i * 44), d.history[i], HORIZONTAL_ALIGNMENT_LEFT, 320, 13, 2, Color(0.8, 0.8, 0.75))
+	# Diplomacy panel (right side): a block per AI faction, then what they remember.
+	for i in s.ais.size():
+		var f: Faction = s.ais[i]
+		var d: Diplomacy = s.relation(f)
+		var y := BLOCK_Y + i * BLOCK_H
+		var status := "City %d  Units %d  Food %d  Ind %d" % [f.population, f.units.size(), f.food, f.industry] if f.is_alive() else "city destroyed"
+		draw_string(font, Vector2(PANEL_X, y + 12), "%s  %s" % [f.name.to_upper(), status], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, unit_colour(f).lightened(0.3))
+		var line := "Trust %+d" % d.trust
+		if d.pact_active():
+			line += "   %s in force: %d turns" % [f.pact_word, d.pact_turns_left]
+		elif d.is_oathbreaker():
+			line += "   you broke your %s (until turn %d)" % [f.pact_word, d.oathbreaker_until]
+		if d.rival_broken_oaths > 0:
+			line += "   they broke %d" % d.rival_broken_oaths
+		draw_string(font, Vector2(PANEL_X, y + 32), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.85, 0.85, 0.85))
+	var hy := BLOCK_Y + s.ais.size() * BLOCK_H + 8
+	draw_string(font, Vector2(PANEL_X, hy), "They remember:", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.7, 0.7, 0.7))
+	for i in s.diplomacy_log.size():
+		draw_multiline_string(font, Vector2(PANEL_X, hy + 18 + i * 36), s.diplomacy_log[i], HORIZONTAL_ALIGNMENT_LEFT, 320, 12, 2, Color(0.8, 0.8, 0.75))
 
 	# Messages, newest at the bottom.
 	var screen := get_viewport_rect().size
@@ -437,7 +463,7 @@ func _draw() -> void:
 		var lines := s.end_detail.split("\n")
 		for i in lines.size():
 			draw_string(font, Vector2(0, screen.y / 2 - 10 + i * 30), lines[i], HORIZONTAL_ALIGNMENT_CENTER, screen.x, 20)
-		var totals := "Turn %d    Food %d    Industry %d    Units %d    Army Strength %d" % [s.turn, player.food, player.industry, player.units.size(), d.army_power(player)]
+		var totals := "Turn %d    Food %d    Industry %d    Units %d    Army Strength %d" % [s.turn, player.food, player.industry, player.units.size(), s.army_power(player)]
 		draw_string(font, Vector2(0, screen.y / 2 + 10 + lines.size() * 30), totals, HORIZONTAL_ALIGNMENT_CENTER, screen.x, 18, Color(0.7, 0.7, 0.7))
 
 # A small sun: a gold circle with rays.

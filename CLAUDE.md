@@ -8,10 +8,10 @@ Survivors of Ragnarök cross the void on Yggdrasil (the Crossing), then land on 
 
 ## Game structure
 
-- Phase 1: the Crossing (journey events) and the Landing (found your city). The Sun's Daughter (the new sun, unnamed in the myths) travels with the survivors and watches how each people behaves. She has a Favour score (0-10) toward each faction: Crossing choices that protect people raise it, abandoning them lowers it. The rival's Favour is hidden and random (3-6). At the Landing she chooses to shelter with whoever she trusts most (ties random). The player doesn't choose her; she chooses
+- Phase 1: the Crossing (journey events) and the Landing (found your city). The Sun's Daughter (the new sun, unnamed in the myths) travels with the survivors and watches how each people behaves. She has a Favour score (0-10) toward each faction: Crossing choices that protect people raise it, abandoning them lowers it. Each AI faction's Favour is hidden and random (3-6). At the Landing she chooses to shelter with whichever faction she trusts most (ties random). The player doesn't choose her; she chooses
 - Sheltering her gives +2 Food and +2 Industry a turn and +3 city defence, but she is what Sköll hunts
 - Economy (standard 4X): a city starts at population 1 making 2 Food and 1 Industry a turn; each extra population adds +1 Food and +1 Industry. City growth: when stored Food reaches the growth cost (10, then 15, 20...) and Food isn't falling, the city grows and the Food is used up. Units cost 5 Industry and eat 1 Food a turn; walls cost 10 Industry per level. City defence = garrison unit's Strength + walls (+3 with the Daughter). Numbers: GROWTH_BASE, GROWTH_STEP etc. at the top of game_state.gd
-- Phase 2: settle and survive. Sköll, the wolf who swallowed the sun at Ragnarök, followed the survivors through the void. He arrives on turn 14 and can't be killed, only driven back. Each time he appears (arrival, or after being driven back) he comes through one of 6 rifts in the void, chosen at random, and hunts the city nearest that rift (he doesn't know where the Daughter is). The map is split into 6 sections (3 x 2) and every section gets one rift on a random hex, at least 3 from every city (Skoll.place_rifts). Rifts are rolled on turn 2 (after the Landing) and stay hidden; when he comes through one, only that rift is revealed. Every time he is driven back, the rifts are rolled again. Over 1000 games his first attack is even between the cities. Once he is loose, the rival's units fall back to defend their city. In Phase 2 he doesn't know which city hides the Daughter; he finds out only after attacking it. If he loses that battle, Phase 3 starts early. If he wins it, he swallows her: he becomes the sun (Strength 20, a blazing look) and the map goes dark. Lose if your city falls; survive to turn 20 (the Doom) to reach Phase 3
+- Phase 2: settle and survive. Sköll, the wolf who swallowed the sun at Ragnarök, followed the survivors through the void. He arrives on turn 14 and can't be killed, only driven back. Each time he appears (arrival, or after being driven back) he comes through one of 6 rifts in the void, chosen at random, and hunts the city nearest that rift (he doesn't know where the Daughter is). The map is split into 6 sections (3 x 2) and every section gets one rift on a random hex, at least 3 from every city (Skoll.place_rifts). Rifts are rolled on turn 2 (after the Landing) and stay hidden; when he comes through one, only that rift is revealed. Every time he is driven back, the rifts are rolled again. Over 1000 games his first attack is even between the cities. Once he is loose, AI units fall back to defend their cities. In Phase 2 he doesn't know which city hides the Daughter; he finds out only after attacking it. If he loses that battle, Phase 3 starts early. If he wins it, he swallows her: he becomes the sun (Strength 20, a blazing look) and the map goes dark. Lose if your city falls; survive to turn 20 (the Doom) to reach Phase 3
 - Phase 3 (not built yet): Sköll spawns chaos factions and rogue factions join him. Her city is the first he attacks (he charges it straight away if he found her in Phase 2). Needs a design before it can be built: what the player does, how chaos factions behave, how Phase 3 is won or lost
 
 ## The Sun's Daughter: design in progress
@@ -29,17 +29,20 @@ Built so far: she chooses her protector at the Landing by Favour, judges her pro
 
 ## Current scope: prototype only
 
-- Two Norse factions, one small hex map, no art (shapes and colours only)
-- Do not add factions, pantheons, rogue factions or lore unless asked
+- Four factions: the player (Norse) and three AI factions with placeholder names, one per pantheon: Japanese, Celtic, Greek. Each has its own word for a sworn agreement (Norse oath, Japanese pact, Celtic bond, Greek treaty: placeholders, not lore). AI cities start at fixed spots spread around the map; the player lands at least 4 hexes from all of them
+- One 15 x 11 hex map, no art (shapes and colours only)
+- Do not add more factions, pantheons, rogue factions or lore unless asked
 - Goal: a playable loop of Crossing, Landing, turns, cities, auto-resolve and the Doom
 - Basic diplomacy with the rival: pacts, demands, and a memory of whether promises were kept. This is the core hook and should be built before more combat or Sköll features.
-- Planned step: support 3+ factions on the map, before Phase 3 and before trading the Daughter (both need it). Each extra faction needs its own AI, Trust and oaths with every other faction, more map space and room on screen. Several factions also spread out Sköll's targeting and make the Daughter a less decisive prize. Until then the prototype stays at two factions
+- DONE: support for 3+ factions. Every AI faction runs the same AI (build, feed, walls from turn 10, guard its city, chase the Daughter, fight neighbours including other AIs). The player has a separate diplomatic relationship with each AI. Over 300 simulated games Sköll's first attack lands on the player about 26% of the time (fair share with 4 cities is 25%)
 
 ## Diplomacy: agreed design
 
 - Each faction has its own word for a sworn agreement (Faction.pact_word). Norse factions swear "oaths"; other pantheons later may use other words
-- One diplomatic action per turn (for now)
-- The rival keeps a Trust score toward the player (-10 to 10) and a short history of who kept or broke their word, shown on screen
+- The player has a separate relationship with each AI faction (its own Trust, agreement, oathbreaker status, demands and broken-promise count): one Diplomacy object per AI in GameState.relations. AI factions don't do diplomacy with each other yet
+- One diplomatic action per turn in total, shared across all factions (for now)
+- Each AI keeps a Trust score toward the player (-10 to 10); what all factions remember (who kept or broke their word) is shown on screen
+- Each turn, each AI has a 15% chance to make the player an offer, and at most one offer is shown per turn
 - Steps, in order:
   1. DONE: oaths. Propose a 5-turn oath; the rival accepts by chance (50% + 10% per Trust, +20% once Sköll's howling starts, +10% if you have more units). During an oath neither side's units attack. Kept to the end: Trust +2. Breaking it (attacking the rival, which needs two clicks): Trust -5, oathbreaker for 8 turns (no new oaths), the Sun's Daughter's Favour -2
   2. DONE: demands. Demand 5 Food or 5 Industry (uses the turn's diplomatic action). The rival pays with chance 50% + 10% per point of army Strength you have over it (5-95%), 0% if it doesn't have 5. Paying: Trust -1 (resentment, as is usual in 4X). Refusing: Trust -2. Demanding something the rival doesn't have gets a rude reply (lines in diplomacy.gd, CANT_PAY_REPLIES) and costs nothing: no action used, no Trust change
@@ -60,15 +63,15 @@ Keep game rules separate from drawing. The game state and rules (map data, terra
 
 ## Code notes
 
-- game_state.gd (class GameState): the whole game state and its rules: phases, turns, economy, combat, the rival's AI, the Daughter going rogue, landing rules, and the player's actions (player_unit_act, player_build_unit, ...). No drawing, buttons or pixels. Holds the factions, Sköll, the Daughter and diplomacy
-- main.gd: the 2D view. Draws the state (_draw), builds buttons and pop-ups (refresh keeps them in step), turns clicks into calls on the state. Owns only screen things: selection, hover, the "click again to break your oath" warning, faction colours. A 3D view would replace this file
+- game_state.gd (class GameState): the whole game state and its rules: phases, turns, economy, combat, the AI factions (ai_take_turn, ai_build), the Daughter going rogue, landing rules, and the player's actions (player_unit_act, player_build_unit, ...). No drawing, buttons or pixels. Holds the factions, Sköll, the Daughter and diplomacy
+- main.gd: the 2D view. Draws the state (_draw), builds buttons and pop-ups (refresh keeps them in step), turns clicks into calls on the state. The right panel has a block per AI faction with its own agreement/demand buttons. Owns only screen things: selection, hover, the "click again to break your oath" warning, faction colours. A 3D view would replace this file
 - hex_map.gd (class HexMap, static): the hex grid as the rules see it: map size, hex_distance, is_neighbour, neighbours. Hex coordinates only
 - hex_view_2d.gd (class HexView2D, static): where hexes are on the 2D screen: hex size in pixels, hex_center, hex_points, cell_at (hex under the mouse). Only main.gd uses it
 - faction.gd (class Faction): one side's city, list of units, resources, walls, population and the Daughter's Favour toward it
 - unit.gd (class Unit): one army unit (position, moves, Strength). Holds a weak link to its faction to avoid a memory leak
 - skoll.gd (class Skoll): everything Sköll does: warnings, rifts, arrival, walking, attacking cities and units, being driven back, hunting and swallowing the Daughter. Holds a weak link to the GameState ("game")
 - sun_daughter.gd (class SunDaughter): her name, bonuses, Favour rules and state (who holds her, rogue, swallowed)
-- diplomacy.gd (class Diplomacy): oaths, demands, Trust, the rival's offers and betrayals, the history of promises; numbers are constants at its top. Holds a weak link to the GameState
+- diplomacy.gd (class Diplomacy): the player's relationship with ONE AI faction ("other"): agreements, demands, Trust, that faction's offers and betrayals; numbers are constants at its top. Holds a weak link to the GameState
 - crossing_events.gd: the Crossing's events (text, choices, effects), kept separate so they can be edited without touching game logic
 - Code phases in order: CROSSING, LANDING, PLAYING (PLAYING covers game Phase 2), in GameState.Phase
 - Sköll's numbers (ARRIVAL_TURN, STRENGTH, ...) are constants at the top of skoll.gd; the Daughter's (NAME, FOOD, DEFENCE, Favour ranges) at the top of sun_daughter.gd
@@ -78,8 +81,9 @@ Keep game rules separate from drawing. The game state and rules (map data, terra
 
 - Combat: +1 strength when defending in your own territory, so it isn't a pure coin flip
 - Deeper politics beyond the basic diplomacy in scope (betrayal schemes, trading the Daughter, three-way deals)
-- Give the two factions real names
-- The rival should choose its own landing spot instead of a fixed one
+- Give the four factions real names (placeholders now: Norse, Japanese, Celtic, Greek)
+- AI factions should choose their own landing spots instead of fixed ones
+- Diplomacy between AI factions (they currently only deal with the player)
 - Crossing event text is placeholder: rewrite in the game's own voice
 - Give the Sun's Daughter a real name
 - Sköll's and the Daughter's numbers need tuning once played (in simulated games: building walls ~66% reach turn 20, building nothing ~54%)

@@ -1,27 +1,28 @@
 class_name Diplomacy
 extends RefCounted
 
-# Diplomacy between the player and the rival: sworn agreements (oaths), and a
-# memory of whether promises were kept. The player gets one diplomatic action
-# per turn.
+# The diplomatic relationship between the player and ONE AI faction ("other"):
+# sworn agreements (an oath, pact, bond... each faction has its own word),
+# demands, Trust, and a memory of whether promises were kept. GameState keeps
+# one of these per AI faction. The player gets one diplomatic action per turn
+# in total, across all factions (GameState.diplomacy_action_used).
 #
-# "game" is the GameState (game_state.gd): diplomacy uses it to see the factions, the turn and the
-# Sun's Daughter, and to post messages.
+# "game" is the GameState (game_state.gd): used to see the factions, the turn
+# and the Sun's Daughter, and to post messages.
 
 const PACT_LENGTH := 5 # turns an oath lasts
 const TRUST_MIN := -10
 const TRUST_MAX := 10
 const TRUST_KEPT := 2 # trust gained when an oath runs its full length
 const TRUST_BROKEN := -5 # trust lost when the player breaks an oath
-const OATHBREAKER_TURNS := 8 # after breaking an oath, the rival refuses new ones for this long
+const OATHBREAKER_TURNS := 8 # after breaking an oath, that faction refuses new ones for this long
 const BROKEN_OATH_FAVOUR := -2 # the Sun's Daughter sees it too
-const HISTORY_SIZE := 6 # how many past events are shown
 const DEMAND_AMOUNT := 5 # Food or Industry asked for in a demand
 const TRUST_DEMAND_PAID := -1 # they resent being squeezed even when they pay
 const TRUST_DEMAND_REFUSED := -2 # and resent it more when they refuse
 
-# The rival's own diplomacy
-const RIVAL_OFFER_CHANCE := 0.35 # chance each turn that it proposes or demands something
+# The AI faction's own diplomacy
+const RIVAL_OFFER_CHANCE := 0.15 # chance each turn that it proposes or demands something (per faction; with 3 AIs about 1 turn in 3 has an offer)
 const RIVAL_DEMAND_GAP := 3 # it makes demands when its army is this much stronger
 const RIVAL_BREAK_GAP := 4 # it may break an oath when its army is this much stronger...
 const RIVAL_BREAK_CHANCE := 0.25 # ...or when starving, with this chance each turn
@@ -47,16 +48,23 @@ var game: GameState:
 	get:
 		return _game.get_ref()
 var _game: WeakRef
-var trust := 0 # how much the rival trusts the player (-10 to 10)
-var pact_turns_left := 0 # 0 = no oath in force
-var oathbreaker_until := 0 # the player counts as an oathbreaker before this turn
-var action_used := false # the player's one diplomatic action this turn
-var history: Array[String] = [] # newest last
-var pending: Dictionary = {} # the rival's offer waiting for the player's answer, e.g. {"type": "demand", "resource": "food"}
-var rival_broken_oaths := 0 # how many oaths the rival has broken
+var other: Faction # the AI faction this relationship is with
+var trust := 0 # how much that faction trusts the player (-10 to 10)
+var pact_turns_left := 0 # 0 = no agreement in force
+var oathbreaker_until := 0 # the player counts as an oathbreaker with them before this turn
+var pending: Dictionary = {} # their offer waiting for the player's answer, e.g. {"type": "demand", "resource": "food"}
+var rival_broken_oaths := 0 # how many agreements they have broken
 
-func _init(p_game: GameState) -> void:
+func _init(p_game: GameState, p_other: Faction) -> void:
 	_game = weakref(p_game)
+	other = p_other
+
+# The player's one diplomatic action per turn is shared across all factions.
+var action_used: bool:
+	get:
+		return game.diplomacy_action_used
+	set(value):
+		game.diplomacy_action_used = value
 
 func pact_active() -> bool:
 	return pact_turns_left > 0
@@ -66,7 +74,7 @@ func is_oathbreaker() -> bool:
 
 # The word this faction uses for a sworn agreement (e.g. "oath").
 func pact_word() -> String:
-	return game.rival.pact_word
+	return other.pact_word
 
 # "an oath", "a pact"
 func a_pact() -> String:
@@ -80,33 +88,29 @@ func accept_chance() -> float:
 	var chance := 0.5 + trust * 0.1
 	if game.turn >= Skoll.WARNING_TURN:
 		chance += 0.2 # the howling makes allies
-	if game.player.units.size() > game.rival.units.size():
+	if game.player.units.size() > other.units.size():
 		chance += 0.1 # it respects strength
 	return clampf(chance, 0.05, 0.95)
 
-# Army strength: the total Strength of a faction's units.
 func army_power(f: Faction) -> int:
-	var power := 0
-	for u in f.units:
-		power += u.strength
-	return power
+	return game.army_power(f)
 
 # The chance (0 to 1) that the rival gives in to a demand for "food" or "industry".
 func demand_chance(resource: String) -> float:
-	var rival: Faction = game.rival
+	var rival: Faction = other
 	if rival.get(resource) < DEMAND_AMOUNT:
 		return 0.0 # it doesn't have that much
 	var gap := army_power(game.player) - army_power(rival)
 	return clampf(0.5 + gap * 0.1, 0.05, 0.95)
 
 func can_demand() -> bool:
-	return not action_used and game.rival.is_alive()
+	return not action_used and other.is_alive()
 
 # The player's diplomatic action: demand Food or Industry. Returns true if paid.
 func demand(resource: String) -> bool:
 	if not can_demand():
 		return false
-	var rival: Faction = game.rival
+	var rival: Faction = other
 	var player: Faction = game.player
 	if rival.get(resource) < DEMAND_AMOUNT:
 		# They can't pay: a rude answer, but no action used and no Trust change.
@@ -128,7 +132,7 @@ func demand(resource: String) -> bool:
 	return false
 
 func can_propose() -> bool:
-	return not action_used and not pact_active() and game.rival.is_alive()
+	return not action_used and not pact_active() and other.is_alive()
 
 # The player's diplomatic action: propose an oath. Returns true if accepted.
 func propose_pact() -> bool:
@@ -137,14 +141,14 @@ func propose_pact() -> bool:
 	action_used = true
 	var word := pact_word()
 	if is_oathbreaker():
-		remember("Turn %d: %s refused your %s. You broke your word before." % [game.turn, game.rival.name, word])
+		remember("Turn %d: %s refused your %s. You broke your word before." % [game.turn, other.name, word])
 		return false
 	var chance := accept_chance()
 	if randf() < chance:
 		pact_turns_left = PACT_LENGTH
-		remember("Turn %d: you and %s swore %s for %d turns." % [game.turn, game.rival.name, a_pact(), PACT_LENGTH])
+		remember("Turn %d: you and %s swore %s for %d turns." % [game.turn, other.name, a_pact(), PACT_LENGTH])
 		return true
-	remember("Turn %d: %s refused your %s (%d%% chance)." % [game.turn, game.rival.name, word, roundi(chance * 100)])
+	remember("Turn %d: %s refused your %s (%d%% chance)." % [game.turn, other.name, word, roundi(chance * 100)])
 	return false
 
 # The player attacks the rival while an oath is in force.
@@ -154,7 +158,7 @@ func break_pact() -> void:
 	oathbreaker_until = game.turn + OATHBREAKER_TURNS
 	var p: Faction = game.player
 	p.favour = clampi(p.favour + BROKEN_OATH_FAVOUR, 0, SunDaughter.MAX_FAVOUR)
-	remember("Turn %d: YOU BROKE YOUR %s with %s. Trust %+d. %s Favour %+d." % [game.turn, pact_word().to_upper(), game.rival.name, TRUST_BROKEN, SunDaughter.NAME.capitalize(), BROKEN_OATH_FAVOUR])
+	remember("Turn %d: YOU BROKE YOUR %s with %s. Trust %+d. %s Favour %+d." % [game.turn, pact_word().to_upper(), other.name, TRUST_BROKEN, SunDaughter.NAME.capitalize(), BROKEN_OATH_FAVOUR])
 
 # Called at the end of every turn.
 func new_turn() -> void:
@@ -163,7 +167,7 @@ func new_turn() -> void:
 		pact_turns_left -= 1
 		if pact_turns_left == 0:
 			change_trust(TRUST_KEPT)
-			remember("Turn %d: the %s with %s ran its course. Both kept their word. Trust %+d." % [game.turn, pact_word(), game.rival.name, TRUST_KEPT])
+			remember("Turn %d: the %s with %s ran its course. Both kept their word. Trust %+d." % [game.turn, pact_word(), other.name, TRUST_KEPT])
 
 # --- The rival's own diplomacy ------------------------------------------------
 # Called at the start of the rival's turn, before its units move: it may break
@@ -171,7 +175,7 @@ func new_turn() -> void:
 func rival_consider_breaking() -> void:
 	if not pact_active():
 		return
-	var rival: Faction = game.rival
+	var rival: Faction = other
 	var gap := army_power(rival) - army_power(game.player)
 	var starving: bool = rival.food <= 0 and game.food_change(rival) < 0
 	if (gap >= RIVAL_BREAK_GAP or starving) and randf() < RIVAL_BREAK_CHANCE:
@@ -185,7 +189,7 @@ func rival_consider_breaking() -> void:
 # make a demand. Sets "pending"; main.gd shows the Accept/Refuse pop-up.
 func rival_make_offer() -> void:
 	pending = {}
-	var rival: Faction = game.rival
+	var rival: Faction = other
 	var player: Faction = game.player
 	if not rival.is_alive() or randf() >= RIVAL_OFFER_CHANCE:
 		return
@@ -207,7 +211,7 @@ func has_pending() -> bool:
 
 # The text of the pop-up for the pending offer.
 func pending_text() -> String:
-	var rival: Faction = game.rival
+	var rival: Faction = other
 	if pending.get("type") == "oath":
 		return "%s proposes %s: %d turns in which neither side attacks.\n\nAccept: the %s begins, Trust %+d.\nRefuse: Trust %+d." % [rival.name, a_pact(), PACT_LENGTH, pact_word(), TRUST_ACCEPTED_THEIR_OATH, TRUST_REFUSED_THEIR_OATH]
 	if pending.get("type") == "demand":
@@ -219,7 +223,7 @@ func pending_text() -> String:
 func answer(accept: bool) -> void:
 	if pending.is_empty():
 		return
-	var rival: Faction = game.rival
+	var rival: Faction = other
 	var player: Faction = game.player
 	var offer := pending
 	pending = {}
@@ -245,8 +249,6 @@ func answer(accept: bool) -> void:
 func change_trust(amount: int) -> void:
 	trust = clampi(trust + amount, TRUST_MIN, TRUST_MAX)
 
+# Shown at the bottom of the screen and kept in the diplomacy memory.
 func remember(event: String) -> void:
-	history.append(event)
-	if history.size() > HISTORY_SIZE:
-		history.pop_front()
-	game.add_message(event)
+	game.remember(event)

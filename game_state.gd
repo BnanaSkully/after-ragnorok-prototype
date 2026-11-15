@@ -11,11 +11,11 @@ extends RefCounted
 #   hex_map.gd          the hex grid (distances, neighbours)
 #   skoll.gd            Sköll, the wolf boss
 #   sun_daughter.gd     the Sun's Daughter
-#   diplomacy.gd        oaths with the rival, trust and the memory of promises
+#   diplomacy.gd        the player's relationship with one AI faction (oaths, demands, Trust)
 #   crossing_events.gd  the Crossing's events (text and choices)
 
 const DOOM_TURN := 20 # survive until this turn and Phase 3 (chaos) begins
-const MIN_LANDING_DISTANCE := 4 # how many hexes away from the rival's city you must land
+const MIN_LANDING_DISTANCE := 4 # how many hexes away from every AI city you must land
 const UNIT_COST := 5 # Industry to build a new unit
 const CITY_FOOD := 2 # Food a city produces each turn
 const CITY_INDUSTRY := 1 # Industry a city produces each turn
@@ -33,12 +33,21 @@ const Crossing := preload("res://crossing_events.gd")
 enum Phase { CROSSING, LANDING, PLAYING }
 
 # The player has no city or units until they land (see try_land below).
-var player := Faction.new("Player", NO_CELL)
-var rival := Faction.new("Rival", Vector2i(9, 7))
-var factions: Array[Faction] = [player, rival]
+var player := Faction.new("Norse", NO_CELL) # you
+# The AI factions (placeholder names; one per pantheon). Each has its own word
+# for a sworn agreement. Their cities start spread around the map.
+var ais: Array[Faction] = [
+	Faction.new("Japanese", Vector2i(12, 2), "pact"),
+	Faction.new("Celtic", Vector2i(2, 8), "bond"),
+	Faction.new("Greek", Vector2i(12, 8), "treaty"),
+]
+var factions: Array[Faction] = []
 var daughter := SunDaughter.new()
 var skoll: Skoll
-var diplomacy: Diplomacy
+var relations: Array[Diplomacy] = [] # the player's relationship with each AI faction
+var diplomacy_action_used := false # the player's one diplomatic action this turn (shared)
+var diplomacy_log: Array[String] = [] # what the factions remember, newest last
+const DIPLOMACY_LOG_SIZE := 5
 
 var phase := Phase.CROSSING
 var crossing_step := 0 # which Crossing event we're on
@@ -50,8 +59,12 @@ var messages: Array[String] = [] # what happened, newest last (the view shows th
 
 func _init() -> void:
 	skoll = Skoll.new(self)
-	diplomacy = Diplomacy.new(self)
-	rival.add_unit(Vector2i(8, 6))
+	player.is_player = true
+	factions.append(player)
+	for f in ais:
+		factions.append(f)
+		relations.append(Diplomacy.new(self, f))
+		f.add_unit(f.city_pos) # each AI starts with one unit in its city
 
 # --- The Crossing -----------------------------------------------------------
 func start_crossing() -> void:
@@ -61,7 +74,7 @@ func start_crossing() -> void:
 	player.units.clear()
 	player.food = Crossing.START_FOOD
 	player.industry = Crossing.START_INDUSTRY
-	daughter.reset(player, rival)
+	daughter.reset(player, ais)
 	skoll.rifts.clear() # rolled on Skoll.RIFT_TURN, after both cities exist
 	skoll.revealed_rift = NO_CELL
 	messages.clear()
@@ -81,13 +94,18 @@ func crossing_finished() -> bool:
 # The player has no city or unit yet and must pick a hex to settle.
 func start_landing() -> void:
 	phase = Phase.LANDING
-	daughter.choose_protector(player, rival)
+	daughter.choose_protector(factions)
 	player.city_pos = NO_CELL
 	player.units.clear()
 	messages = ["Choose where to land: click a hex to found your city."]
 
 func can_land_at(cell: Vector2i) -> bool:
-	return HexMap.in_bounds(cell) and HexMap.hex_distance(cell, rival.city_pos) >= MIN_LANDING_DISTANCE
+	if not HexMap.in_bounds(cell):
+		return false
+	for f in ais:
+		if HexMap.hex_distance(cell, f.city_pos) < MIN_LANDING_DISTANCE:
+			return false
+	return true
 
 # Returns true if the player landed there.
 func try_land(cell: Vector2i) -> bool:
@@ -97,7 +115,10 @@ func try_land(cell: Vector2i) -> bool:
 	player.add_unit(cell) # your first unit starts standing on the new city
 	phase = Phase.PLAYING
 	messages = ["Your people have landed. Click a unit to move it, or build more."]
-	var scores := "(her Favour: you %d, %s %d)" % [player.favour, rival.name, rival.favour]
+	var parts: Array[String] = ["you %d" % player.favour]
+	for f in ais:
+		parts.append("%s %d" % [f.name, f.favour])
+	var scores := "(her Favour: %s)" % ", ".join(parts)
 	if daughter.holder == player:
 		add_message("%s chose you %s: +%d Food, +%d Industry a turn, +%d city defence." % [SunDaughter.NAME.capitalize(), scores, SunDaughter.FOOD, SunDaughter.INDUSTRY, SunDaughter.DEFENCE])
 	else:
@@ -109,11 +130,13 @@ func can_play() -> bool:
 	return not game_over and phase == Phase.PLAYING
 
 func end_turn() -> void:
-	if game_over or phase != Phase.PLAYING or diplomacy.has_pending():
-		return # (answer the rival's offer first)
+	if game_over or phase != Phase.PLAYING or has_pending_offer():
+		return # (answer the offer first)
 	messages.clear()
-	diplomacy.rival_consider_breaking() # before its units move, so a betrayal can strike at once
-	rival_take_turn()
+	for r in relations:
+		r.rival_consider_breaking() # before its units move, so a betrayal can strike at once
+	for f in ais:
+		ai_take_turn(f)
 	turn += 1
 	if turn == Skoll.RIFT_TURN:
 		skoll.place_rifts() # hidden until Sköll comes through one
@@ -141,10 +164,19 @@ func end_turn() -> void:
 			u.moves = 1
 	judge_readiness()
 	check_daughter_leaving()
-	rival_build()
-	diplomacy.new_turn()
+	for f in ais:
+		ai_build(f)
+	for r in relations:
+		r.new_turn()
+	diplomacy_action_used = false
 	if not game_over and turn < DOOM_TURN:
-		diplomacy.rival_make_offer() # the view shows a pop-up if this left an offer pending
+		# at most one AI faction makes an offer each turn (the view shows a pop-up)
+		var order := relations.duplicate()
+		order.shuffle()
+		for r in order:
+			r.rival_make_offer()
+			if r.has_pending():
+				break
 	if turn >= DOOM_TURN:
 		end_game("You survived until the Doom",
 			"Sköll howls, and chaos pours out of the void.\nPHASE 3 BEGINS: chaos factions rise and rogues join Sköll.\n(Phase 3 is not built yet.)")
@@ -216,7 +248,7 @@ func judge_readiness() -> void:
 	if turn == Skoll.WARNING_TURN and holder == player:
 		add_message("%s is afraid. When Sköll comes (turn %d) she wants city defence %d+ and army Strength %d+." % [SunDaughter.NAME.capitalize(), Skoll.ARRIVAL_TURN, SunDaughter.READY_DEFENCE, SunDaughter.READY_ARMY])
 	if turn == Skoll.ARRIVAL_TURN:
-		add_message(daughter.judge_readiness(city_defence(holder), diplomacy.army_power(holder)))
+		add_message(daughter.judge_readiness(city_defence(holder), army_power(holder)))
 
 # --- Food -------------------------------------------------------------------
 # Food made by the city (and the Daughter's bonus) minus what the army eats.
@@ -258,25 +290,29 @@ func starve(f: Faction) -> void:
 	else:
 		add_message("%s is starving: one of its units deserted." % f.name)
 
-# --- The rival --------------------------------------------------------------
-# Placeholder rival behaviour, for each of its units: attack a player unit
-# next door; otherwise stay home if it's guarding the city and there are other
-# units; otherwise chase the Daughter if she's in the open, fall back home if
-# Sköll is loose, or step to a random free neighbouring hex.
-func rival_take_turn() -> void:
-	for u in rival.units.duplicate(): # copy: units can die during the loop
-		if not u in rival.units:
+# --- The AI factions ----------------------------------------------------------
+# Placeholder AI, for each of a faction's units: attack an enemy unit next door
+# (never the player's while an agreement with the player is in force); otherwise
+# stay home if it's guarding the city and there are other units; otherwise
+# chase the Daughter if she's in the open, fall back home if Sköll is loose, or
+# step to a random free neighbouring hex.
+func ai_take_turn(f: Faction) -> void:
+	for u in f.units.duplicate(): # copy: units can die during the loop
+		if not u in f.units:
 			continue
 		var target: Unit = null
 		for c in HexMap.neighbours(u.pos):
 			var other := unit_at(c)
-			if other and other.faction == player and not diplomacy.pact_active():
-				target = other
-				break
+			if other == null or other.faction == f:
+				continue
+			if other.faction == player and relation(f).pact_active():
+				continue
+			target = other
+			break
 		if target:
 			resolve_combat(u, target)
 			continue
-		if u.pos == rival.city_pos and rival.units.size() > 1:
+		if u.pos == f.city_pos and f.units.size() > 1:
 			continue # this one guards the city
 		if daughter.is_rogue():
 			if HexMap.is_neighbour(u.pos, daughter.pos):
@@ -286,9 +322,9 @@ func rival_take_turn() -> void:
 			if toward != NO_CELL:
 				u.pos = toward
 				continue
-		if skoll.active and HexMap.hex_distance(u.pos, rival.city_pos) > 1:
+		if skoll.active and HexMap.hex_distance(u.pos, f.city_pos) > 1:
 			# Sköll is loose: fall back toward the city to help defend it
-			var home := step_toward(u.pos, rival.city_pos)
+			var home := step_toward(u.pos, f.city_pos)
 			if home != NO_CELL:
 				u.pos = home
 				continue
@@ -314,27 +350,58 @@ func step_toward(from: Vector2i, goal: Vector2i) -> Vector2i:
 
 # Once the howling starts it builds walls first; otherwise a unit,
 # but only if it can still feed its army afterwards.
-func rival_build() -> void:
-	if not rival.is_alive():
+func ai_build(f: Faction) -> void:
+	if not f.is_alive():
 		return
-	if turn >= Skoll.WARNING_TURN and rival.walls < MAX_WALLS:
-		build_walls(rival)
+	if turn >= Skoll.WARNING_TURN and f.walls < MAX_WALLS:
+		build_walls(f)
 		return # saving up for walls
-	if rival.industry >= UNIT_COST and food_change(rival) - UNIT_FOOD_UPKEEP >= 0:
-		build_unit(rival)
+	if f.industry >= UNIT_COST and food_change(f) - UNIT_FOOD_UPKEEP >= 0:
+		build_unit(f)
+
+# --- Diplomacy helpers -----------------------------------------------------------
+# The player's relationship with this AI faction.
+func relation(f: Faction) -> Diplomacy:
+	for r in relations:
+		if r.other == f:
+			return r
+	return null
+
+# The relationship whose offer is waiting for the player's answer (or null).
+func pending_relation() -> Diplomacy:
+	for r in relations:
+		if r.has_pending():
+			return r
+	return null
+
+func has_pending_offer() -> bool:
+	return pending_relation() != null
+
+# Army strength: the total Strength of a faction's units.
+func army_power(f: Faction) -> int:
+	var power := 0
+	for u in f.units:
+		power += u.strength
+	return power
+
+func remember(event: String) -> void:
+	diplomacy_log.append(event)
+	if diplomacy_log.size() > DIPLOMACY_LOG_SIZE:
+		diplomacy_log.pop_front()
+	add_message(event)
 
 # --- Player actions (the view calls these) -----------------------------------
-func player_propose_pact() -> void:
+func player_propose_pact(f: Faction) -> void:
 	if not can_play():
 		return
 	messages.clear()
-	diplomacy.propose_pact() # posts its own message
+	relation(f).propose_pact() # posts its own message
 
-func player_demand(resource: String) -> void:
+func player_demand(f: Faction, resource: String) -> void:
 	if not can_play():
 		return
 	messages.clear()
-	diplomacy.demand(resource) # posts its own message
+	relation(f).demand(resource) # posts its own message
 
 func player_build_walls() -> void:
 	if not can_play():
@@ -359,7 +426,7 @@ func player_build_unit() -> void:
 # (the view asks for a second click before it does).
 func would_break_pact(cell: Vector2i) -> bool:
 	var other := unit_at(cell)
-	return diplomacy.pact_active() and other != null and other.faction != player
+	return other != null and other.faction != player and relation(other.faction).pact_active()
 
 # One of the player's units acts on a neighbouring hex: attack Sköll, persuade
 # the Daughter, attack an enemy unit (breaking an oath if one is in force), or
@@ -376,8 +443,9 @@ func player_unit_act(u: Unit, cell: Vector2i) -> bool:
 	elif daughter.is_rogue() and cell == daughter.pos:
 		try_persuade(u)
 	elif other:
-		if diplomacy.pact_active():
-			diplomacy.break_pact()
+		var r := relation(other.faction)
+		if r.pact_active():
+			r.break_pact()
 		resolve_combat(u, other) # moving into an enemy = attack
 	else:
 		u.pos = cell

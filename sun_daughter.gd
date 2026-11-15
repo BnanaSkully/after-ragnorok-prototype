@@ -8,7 +8,7 @@ extends RefCounted
 
 const NAME := "the Sun's Daughter" # change her name here
 const PLAYER_START_FAVOUR := 3
-const RIVAL_FAVOUR_MIN := 3 # the rival's Favour is hidden and random in this range
+const RIVAL_FAVOUR_MIN := 3 # each AI faction's Favour is hidden and random in this range
 const RIVAL_FAVOUR_MAX := 6
 const MAX_FAVOUR := 10
 
@@ -39,20 +39,26 @@ var fed_turns := 0 # turns in a row her protector has kept its people fed
 var pos := HexMap.NO_CELL # where she stands while ROGUE
 
 # Start of a new game: nobody holds her yet, and Favour is set.
-func reset(player: Faction, rival: Faction) -> void:
+func reset(player: Faction, ai_factions: Array[Faction]) -> void:
 	state = State.SHELTERED
 	holder = null
 	fed_turns = 0
 	pos = HexMap.NO_CELL
 	player.favour = PLAYER_START_FAVOUR
-	rival.favour = randi_range(RIVAL_FAVOUR_MIN, RIVAL_FAVOUR_MAX) # hidden from the player
+	for f in ai_factions:
+		f.favour = randi_range(RIVAL_FAVOUR_MIN, RIVAL_FAVOUR_MAX) # hidden from the player
 
 # She shelters with whoever she trusts most. A tie is decided at random.
-func choose_protector(player: Faction, rival: Faction) -> void:
-	if player.favour == rival.favour:
-		holder = [player, rival].pick_random()
-	else:
-		holder = player if player.favour > rival.favour else rival
+func choose_protector(candidates: Array[Faction]) -> void:
+	var best: Array[Faction] = []
+	var best_favour := -1
+	for f in candidates:
+		if f.favour > best_favour:
+			best_favour = f.favour
+			best = [f]
+		elif f.favour == best_favour:
+			best.append(f)
+	holder = best.pick_random()
 
 func shelters_with(f: Faction) -> bool:
 	return state == State.SHELTERED and holder == f
@@ -84,7 +90,7 @@ func change_favour(f: Faction, amount: int) -> void:
 	f.favour = clampi(f.favour + amount, 0, MAX_FAVOUR)
 
 func whose(f: Faction) -> String:
-	return "your" if f.name == "Player" else f.name + "'s"
+	return "your" if f.is_player else f.name + "'s"
 
 # Once a turn, for her protector. Returns a message, or "" if nothing changed.
 func judge_feeding(starved: bool) -> String:

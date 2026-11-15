@@ -15,11 +15,13 @@ var favour := 0 # how much the Sun's Daughter trusts this faction (0 to 10)
 var walls := 0 # city wall level (each level adds defence)
 var population := 1 # city size: grows from surplus Food, each extra point makes +1 Food and +1 Industry
 var pact_word := "oath" # what this faction calls a sworn agreement (Norse factions swear oaths)
+var is_player := false
 
 # (How a faction looks on screen, its colours, is up to the view: see main.gd.)
-func _init(p_name: String, p_city: Vector2i) -> void:
+func _init(p_name: String, p_city: Vector2i, p_pact_word := "oath") -> void:
 	name = p_name
 	city_pos = p_city
+	pact_word = p_pact_word
 
 func add_unit(cell: Vector2i) -> Unit:
 	var u := Unit.new(self, cell)

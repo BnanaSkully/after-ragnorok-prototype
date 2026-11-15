@@ -4,8 +4,8 @@ class_name HexView2D
 # the game rules never do (they use hex coordinates from hex_map.gd). A future
 # 3D view would replace this file with its own positions.
 
-const HEX_SIZE := 32.0 # pixels from a hex's centre to a corner
-const OFFSET := Vector2(60, 115) # where the top-left hex sits on screen
+const HEX_SIZE := 27.0 # pixels from a hex's centre to a corner
+const OFFSET := Vector2(45, 112) # where the top-left hex sits on screen
 
 # The screen position of a hex's centre.
 static func hex_center(cell: Vector2i) -> Vector2:
