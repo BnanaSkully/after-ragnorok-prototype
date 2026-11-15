@@ -20,6 +20,16 @@ const DEMAND_AMOUNT := 5 # Food or Industry asked for in a demand
 const TRUST_DEMAND_PAID := -1 # they resent being squeezed even when they pay
 const TRUST_DEMAND_REFUSED := -2 # and resent it more when they refuse
 
+# What the rival says when you demand something it doesn't have. Costs nothing.
+# %s is the resource (e.g. "Industry"). Rewrite or add lines freely.
+const CANT_PAY_REPLIES := [
+	"\"We have no %s. Piss off.\"",
+	"\"%s? Look around you. Go dig your own.\"",
+	"\"Come back when our stores aren't empty. Or don't. Preferably don't.\"",
+	"\"You want %s? Sköll can have you first.\"",
+	"\"Our cupboards are bare and your manners are worse. Leave.\"",
+]
+
 var game # main.gd
 var trust := 0 # how much the rival trusts the player (-10 to 10)
 var pact_turns_left := 0 # 0 = no oath in force
@@ -78,9 +88,16 @@ func can_demand() -> bool:
 func demand(resource: String) -> bool:
 	if not can_demand():
 		return false
-	action_used = true
 	var rival: Faction = game.rival
 	var player: Faction = game.player
+	if rival.get(resource) < DEMAND_AMOUNT:
+		# They can't pay: a rude answer, but no action used and no Trust change.
+		var line: String = CANT_PAY_REPLIES.pick_random()
+		if "%s" in line:
+			line = line % resource.capitalize()
+		game.add_message("%s: %s  (No action used.)" % [rival.name, line])
+		return false
+	action_used = true
 	var chance := demand_chance(resource)
 	if randf() < chance:
 		rival.set(resource, rival.get(resource) - DEMAND_AMOUNT)

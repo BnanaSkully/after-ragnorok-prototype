@@ -346,10 +346,10 @@ func update_oath_button() -> void:
 		var resource: String = pair[1]
 		var chance := diplomacy.demand_chance(resource)
 		if chance <= 0.0:
-			button.text = "Demand %s: they don't have %d" % [resource.capitalize(), Diplomacy.DEMAND_AMOUNT]
+			button.text = "Demand %d %s (they don't have it)" % [Diplomacy.DEMAND_AMOUNT, resource.capitalize()]
 		else:
 			button.text = "Demand %d %s (%d%% they pay)" % [Diplomacy.DEMAND_AMOUNT, resource.capitalize(), roundi(chance * 100)]
-		button.disabled = game_over or phase != Phase.PLAYING or not diplomacy.can_demand() or chance <= 0.0
+		button.disabled = game_over or phase != Phase.PLAYING or not diplomacy.can_demand()
 
 # --- Walls ------------------------------------------------------------------
 # A city improvement: each level costs WALL_COST Industry and adds WALL_DEFENCE.
