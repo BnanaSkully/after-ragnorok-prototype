@@ -36,7 +36,9 @@ func unit_colour(f: Faction) -> Color:
 	return FACTION_COLOURS[f.name][1]
 
 # What the player is doing on screen (not part of the game rules)
-var hover_cell := NO_CELL # the hex under the mouse while landing
+var hover_cell := NO_CELL # the hex under the mouse (landing highlight, tooltips)
+var hover_pos := Vector2(-1, -1) # the mouse, for tooltips on the top bar
+var top_bar_tips: Array = [] # [Rect2, tooltip text] for each part of the top bar (filled by _draw)
 var selected: Unit = null # the player's unit chosen to move (null = none)
 var break_warning_cell := NO_CELL # first click on a unit you've sworn an agreement with only warns
 var placing_outpost := false # after clicking "Outpost": the next click on a hex founds it there
@@ -625,10 +627,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if state.game_over or state.phase == GameState.Phase.CROSSING or state.is_waiting() or trade_panel.visible or deal_panel.visible or city_panel.visible:
 		return
 	if event is InputEventMouseMotion:
-		var cell := HexView2D.cell_at(get_local_mouse_position())
-		if cell != hover_cell:
-			hover_cell = cell # (the landing highlight and the land tooltip use this)
-			queue_redraw()
+		hover_pos = get_local_mouse_position()
+		hover_cell = HexView2D.cell_at(hover_pos) # (the landing highlight and the tooltips use this)
+		queue_redraw()
 		return
 	if state.phase == GameState.Phase.LANDING:
 		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
@@ -823,8 +824,7 @@ func _draw() -> void:
 			draw_circle(sc, r * 0.28, Color(1.0, 0.9, 0.3))
 
 	var font := ThemeDB.fallback_font
-	var info := "Turn %d   Pop %d   Food %d/%d (%+d)   Industry %d (%+d)   Units %d   Outposts %d   Army %d   Doom in %d" % [s.turn, player.population, player.food, s.growth_cost(player), s.food_change(player), player.industry, s.industry_change(player) - s.tribute_amount(player), player.units.size(), player.outposts.size(), s.army_power(player), GameState.DOOM_TURN - s.turn]
-	draw_string(font, Vector2(20, 35), info, HORIZONTAL_ALIGNMENT_LEFT, -1, 18)
+	draw_top_bar(font)
 	var line2: Array[String] = [] # second line: tribute you pay, and where Sköll is
 	if player.overlord != "":
 		line2.append("TRIBUTARY of the %s: %d Industry a turn to them (attack them to rise up)" % [player.overlord, s.tribute_amount(player)])
@@ -901,7 +901,7 @@ func _draw() -> void:
 		var y := screen.y - 18 - (s.messages.size() - 1 - i) * 22
 		draw_string(font, Vector2(20, y), s.messages[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.85, 0.4))
 
-	draw_land_tooltip()
+	draw_tooltip()
 	if s.game_over:
 		draw_rect(Rect2(Vector2.ZERO, screen), Color(0, 0, 0, 0.8))
 		draw_string(font, Vector2(0, screen.y / 2 - 60), s.end_title, HORIZONTAL_ALIGNMENT_CENTER, screen.x, 40, Color(0.95, 0.45, 0.15))
@@ -932,11 +932,109 @@ func draw_terrain_mark(c: Vector2, land: int, fill: Color) -> void:
 				draw_arc(c + Vector2(5, y), 5.0, 0.2, PI - 0.2, 8, fill.lightened(0.3), 1.5)
 
 # What the hovered hex's land does, in a small box by the mouse.
-func draw_land_tooltip() -> void:
+# The top bar: each part is drawn separately so hovering it can explain it.
+func draw_top_bar(font: Font) -> void:
 	var s := state
-	if hover_cell == NO_CELL or not (s.phase == GameState.Phase.LANDING or s.player_has_explored(hover_cell)):
+	var p := s.player
+	var industry_net: int = s.industry_change(p) - s.tribute_amount(p)
+	var parts := [
+		["Turn %d" % s.turn, "Turn %d. Sköll's howling starts on turn %d, he arrives on turn %d; the Doom is on turn %d." % [s.turn, Skoll.WARNING_TURN, Skoll.ARRIVAL_TURN, GameState.DOOM_TURN]],
+		["Pop %d" % p.population, "Population %d (your city's size). Every point above 1 gives +1 Food, +1 Industry and +%d city defence a turn.\nThe city grows by 1 when stored Food reaches %d and Food isn't falling." % [p.population, GameState.POP_DEFENCE, s.growth_cost(p)]],
+		["Food %d/%d (%+d)" % [p.food, s.growth_cost(p), s.food_change(p)], "Food: %d stored; at %d your city grows. Each army unit eats %d a turn (scouts nothing); if it runs out, a unit deserts.\nThis turn: %s" % [p.food, s.growth_cost(p), GameState.UNIT_FOOD_UPKEEP, parts_text(s.food_parts(p))]],
+		["Industry %d (%+d)" % [p.industry, industry_net], "Industry: %d stored, spent on units, outposts and city buildings (Build...).\nThis turn: %s%s" % [p.industry, parts_text(s.industry_parts(p)), ", tribute %+d" % -s.tribute_amount(p) if s.tribute_amount(p) > 0 else ""]],
+		["Units %d" % p.units.size(), "Units: %d army and %d scouts. Each army eats %d Food a turn." % [p.units.size() - p.scout_count(), p.scout_count(), GameState.UNIT_FOOD_UPKEEP]],
+		["Outposts %d" % p.outposts.size(), "Outposts: each earns by its land (plains +2 Food, forest +1/+1, hills +2 Industry), sees 2 hexes and claims the hexes around it. An enemy at war can take an unguarded one."],
+		["Army %d" % s.army_power(p), "Army: the total Strength of your units. The AIs compare armies before demanding or declaring war; %s wants %d+ by turn %d." % [SunDaughter.NAME, SunDaughter.READY_ARMY, Skoll.ARRIVAL_TURN]],
+		["Doom in %d" % (GameState.DOOM_TURN - s.turn), "Turns until the Doom (turn %d)." % GameState.DOOM_TURN],
+	]
+	top_bar_tips.clear()
+	var x := 20.0
+	for part in parts:
+		var w := font.get_string_size(part[0], HORIZONTAL_ALIGNMENT_LEFT, -1, 17).x
+		draw_string(font, Vector2(x, 35), part[0], HORIZONTAL_ALIGNMENT_LEFT, -1, 17)
+		top_bar_tips.append([Rect2(x - 4, 14, w + 8, 28), part[1]])
+		x += w + 16
+
+# [["city", 2], ["armies eat", -1]] -> "city +2, armies eat -1"
+func parts_text(parts: Array) -> String:
+	return ", ".join(parts.map(func(p): return "%s %+d" % [p[0], p[1]]))
+
+# What's under the mouse: a part of the top bar, or what's on a hex and its land.
+func draw_tooltip() -> void:
+	var lines: Array[String] = []
+	for tip in top_bar_tips:
+		if tip[0].has_point(hover_pos):
+			lines.assign(String(tip[1]).split("\n"))
+	var at := hover_pos + Vector2(14, 22)
+	if lines.is_empty():
+		lines = hex_tooltip(hover_cell)
+		at = HexView2D.hex_center(hover_cell) + Vector2(18, -26)
+	if lines.is_empty():
 		return
-	var land: int = s.terrain_at(hover_cell)
+	var font := ThemeDB.fallback_font
+	var w := 0.0
+	for line in lines:
+		w = maxf(w, font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x)
+	var screen := get_viewport_rect().size
+	at.x = clampf(at.x, 8, PANEL_X - w - 16) # stay left of the side panel: its buttons would cover the box
+	at.y = clampf(at.y, 18, screen.y - lines.size() * 17 - 4)
+	draw_rect(Rect2(at - Vector2(6, 14), Vector2(w + 12, lines.size() * 17 + 6)), Color(0.06, 0.06, 0.06, 0.9))
+	for i in lines.size():
+		draw_string(font, at + Vector2(0, i * 17), lines[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.95, 0.95, 0.85) if i == 0 else Color(0.8, 0.8, 0.75))
+
+# Everything the player knows about a hex, one line each (empty if unexplored).
+func hex_tooltip(c: Vector2i) -> Array[String]:
+	var s := state
+	var lines: Array[String] = []
+	if c == NO_CELL or not (s.phase == GameState.Phase.LANDING or s.player_has_explored(c)):
+		return lines
+	var seen := s.player_can_see(c)
+	if seen and s.skoll.is_at(c):
+		lines.append("Sköll, the wolf who swallowed the sun: Strength %d. He can't be killed, only driven back. Hunting %s." % [s.skoll.strength, s.skoll.target_text()])
+	var u := s.unit_at(c)
+	if u != null and (seen or u.faction == s.player):
+		var who := "Your" if u.faction == s.player else "The %s" % u.faction.name
+		var kind := "scout" if u.is_scout() else "army"
+		var line := "%s %s: Strength %d" % [who, kind, u.strength]
+		if s.defender_strength(u) != u.strength:
+			line += " (defends at %d here)" % s.defender_strength(u)
+		line += ", moves %d/%d" % [u.moves, u.max_moves()]
+		if u.busy_until > s.turn:
+			line += ", standing watch until turn %d" % u.busy_until
+		if u.faction != s.player:
+			line += "  [%s]" % ("AT WAR with you" if s.at_war(s.player, u.faction) else "at peace")
+		lines.append(line)
+	if seen and s.daughter.is_rogue() and s.daughter.pos == c:
+		lines.append("%s, alone in the open. Move a unit onto her to persuade her (%d%%)." % [SunDaughter.NAME.capitalize(), roundi(s.daughter.persuade_chance(s.player) * 100)])
+	var city := s.city_owner(c)
+	if city != null:
+		var who := "Your city" if city == s.player else "The %s city" % city.name
+		lines.append("%s: population %d, %+d Food and %+d Industry a turn, defence %d" % [who, city.population, s.food_change(city), s.industry_change(city), s.city_defence(city)])
+		var extra: Array[String] = []
+		if city.walls > 0:
+			extra.append("walls %d" % city.walls)
+		for key in city.buildings:
+			extra.append(GameState.Buildings.LIST[key]["name"])
+		if s.daughter.shelters_with(city):
+			extra.append("shelters %s" % SunDaughter.NAME)
+		if city.overlord != "":
+			extra.append("pays tribute to the %s" % city.overlord)
+		if not extra.is_empty():
+			lines.append("   " + ", ".join(extra))
+	var post := s.outpost_owner(c)
+	if post != null:
+		var t: int = s.terrain_at(c)
+		lines.append("%s outpost: +%d Food, +%d Industry a turn (from its %s)" % ["Your" if post == s.player else "The %s" % post.name, Terrain.OUTPOST_FOOD[t], Terrain.OUTPOST_INDUSTRY[t], Terrain.NAMES[t].to_lower()])
+	if s.player.known_rifts.has(c) or (c == s.skoll.revealed_rift and seen):
+		lines.append("A rift in the void: Sköll can come through here.")
+	for r in s.ruins:
+		if r["cell"] == c and not r["taken"]:
+			lines.append("Ruins: move a unit here to search them.")
+	if s.phase == GameState.Phase.PLAYING:
+		var land_owner := s.territory_owner(c)
+		if land_owner != null and land_owner != s.player:
+			lines.append("%s land%s" % [land_owner.name, " (borders CLOSED to you: entering declares war)" if s.closed_border(c) else ""])
+	var land: int = s.terrain_at(c)
 	var text: String = Terrain.NAMES[land]
 	if not Terrain.passable(land):
 		text += ": can't be crossed"
@@ -948,12 +1046,8 @@ func draw_land_tooltip() -> void:
 			bits.append("+%d defence" % Terrain.DEFENCE[land])
 		bits.append("outpost +%d Food +%d Industry" % [Terrain.OUTPOST_FOOD[land], Terrain.OUTPOST_INDUSTRY[land]])
 		text += ": " + ", ".join(bits)
-	var font := ThemeDB.fallback_font
-	var size := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13)
-	var at := HexView2D.hex_center(hover_cell) + Vector2(18, -26)
-	at.x = minf(at.x, get_viewport_rect().size.x - size.x - 12)
-	draw_rect(Rect2(at - Vector2(5, 14), size + Vector2(10, 8)), Color(0.08, 0.08, 0.08, 0.85))
-	draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.95, 0.95, 0.85))
+	lines.append(text)
+	return lines
 
 # A rift in the void: a dark swirl.
 func draw_rift(rc: Vector2) -> void:

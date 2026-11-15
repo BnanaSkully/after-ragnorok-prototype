@@ -318,25 +318,53 @@ func judge_readiness() -> void:
 # --- Food -------------------------------------------------------------------
 # Food made by the city (and the Daughter's bonus) minus what the army eats.
 func food_change(f: Faction) -> int:
-	var made := CITY_FOOD + (f.population - 1) # each extra population works more fields
+	return sum_parts(food_parts(f))
+
+func industry_change(f: Faction) -> int:
+	return sum_parts(industry_parts(f))
+
+# Where a faction's Food comes from and goes, as [what, amount] pairs. The
+# totals above are made from these, so the view's breakdown can't disagree.
+func food_parts(f: Faction) -> Array:
+	var parts := [["city", CITY_FOOD]]
+	if f.population > 1:
+		parts.append(["population %d" % f.population, f.population - 1]) # each extra population works more fields
+	var outposts := 0
 	for o in f.outposts:
-		made += Terrain.OUTPOST_FOOD[terrain_at(o)] # an outpost's income depends on its land
+		outposts += Terrain.OUTPOST_FOOD[terrain_at(o)] # an outpost's income depends on its land
+	if outposts != 0:
+		parts.append(["outposts", outposts])
 	if f.buildings.has("granary"):
-		made += Buildings.GRANARY_FOOD
+		parts.append(["Granary", Buildings.GRANARY_FOOD])
 	if daughter.shelters_with(f):
-		made += SunDaughter.FOOD
+		parts.append([SunDaughter.NAME, SunDaughter.FOOD])
 	var eaten := 0
 	for u in f.units:
 		eaten += u.upkeep(UNIT_FOOD_UPKEEP)
-	return made - eaten
+	if eaten != 0:
+		parts.append(["armies eat", -eaten])
+	return parts
 
-func industry_change(f: Faction) -> int:
-	var made := CITY_INDUSTRY + (f.population - 1)
+func industry_parts(f: Faction) -> Array:
+	var parts := [["city", CITY_INDUSTRY]]
+	if f.population > 1:
+		parts.append(["population %d" % f.population, f.population - 1])
+	var outposts := 0
 	for o in f.outposts:
-		made += Terrain.OUTPOST_INDUSTRY[terrain_at(o)]
+		outposts += Terrain.OUTPOST_INDUSTRY[terrain_at(o)]
+	if outposts != 0:
+		parts.append(["outposts", outposts])
 	if f.buildings.has("workshop"):
-		made += Buildings.WORKSHOP_INDUSTRY
-	return made + (SunDaughter.INDUSTRY if daughter.shelters_with(f) else 0)
+		parts.append(["Workshop", Buildings.WORKSHOP_INDUSTRY])
+	if daughter.shelters_with(f):
+		parts.append([SunDaughter.NAME, SunDaughter.INDUSTRY])
+	return parts
+
+func sum_parts(parts: Array) -> int:
+	var total := 0
+	for p in parts:
+		total += p[1]
+	return total
 
 # City growth (the usual 4X rule): when stored Food reaches the growth cost and
 # the city isn't losing Food, the city grows by 1 and the cost is used up.
