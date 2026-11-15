@@ -31,6 +31,7 @@ const TRUST_REFUSED_THEIR_OATH := -1
 const TRUST_PAID_THEIR_DEMAND := 1
 const TRUST_REFUSED_THEIR_DEMAND := -1
 const RIVAL_BROKEN_OATH_FAVOUR := -2 # the Sun's Daughter sees the rival's betrayal too
+const SCARED_OFFER_CHANCE := 0.5 # each turn, a faction sheltering her that fears Sköll tries to give her to you
 const TRUST_TOOK_THE_DAUGHTER := 1 # you took her off their hands
 const TRUST_REFUSED_THE_DAUGHTER := -1
 
@@ -193,16 +194,16 @@ func rival_make_offer() -> void:
 	pending = {}
 	var rival: Faction = other
 	var player: Faction = game.player
-	if not rival.is_alive() or randf() >= RIVAL_OFFER_CHANCE:
+	if not rival.is_alive():
 		return
-	# Sheltering the Daughter but too afraid of Sköll to keep her: offer her to the
-	# player, paying them to take her.
-	var d: SunDaughter = game.daughter
-	if d.shelters_with(rival) and game.turn >= SunDaughter.TRADE_TURN:
-		var keep := game.daughter_value(rival)
-		if keep < 0:
-			pending = {"type": "daughter", "pay": mini(-keep, rival.industry)}
-			return
+	# Sheltering the Daughter but scared of Sköll: try to give her to the player
+	# (checked first, with its own chance). If she's still worth something to
+	# them they hand her over for nothing; if not, they pay the player to take her.
+	if game.ai_wants_rid_of_daughter(rival) and randf() < SCARED_OFFER_CHANCE:
+		pending = {"type": "daughter", "pay": mini(maxi(0, -game.daughter_value(rival)), rival.industry)}
+		return
+	if randf() >= RIVAL_OFFER_CHANCE:
+		return
 	var gap := army_power(rival) - army_power(player)
 	var afraid: bool = game.turn >= Skoll.WARNING_TURN
 	if not pact_active() and not is_oathbreaker() and (afraid or gap < 0 or trust >= 2):
@@ -228,7 +229,8 @@ func pending_text() -> String:
 		var res: String = String(pending["resource"]).capitalize()
 		return "%s demands %d %s from you. Their army is stronger than yours.\n\nPay: you lose %d %s, Trust %+d.\nRefuse: Trust %+d." % [rival.name, DEMAND_AMOUNT, res, DEMAND_AMOUNT, res, TRUST_PAID_THEIR_DEMAND, TRUST_REFUSED_THEIR_DEMAND]
 	if pending.get("type") == "daughter":
-		return "The %s fear Sköll and want %s gone. They offer her to you, and will pay you %d Industry to take her.\n\nTake her: she shelters in your city (+%d Food, +%d Industry a turn, +%d defence, but Sköll hunts her). Trust %+d.\nRefuse: Trust %+d." % [rival.name, SunDaughter.NAME, pending["pay"], SunDaughter.FOOD, SunDaughter.INDUSTRY, SunDaughter.DEFENCE, TRUST_TOOK_THE_DAUGHTER, TRUST_REFUSED_THE_DAUGHTER]
+		var deal := "and will pay you %d Industry to take her" % pending["pay"] if pending["pay"] > 0 else "for nothing"
+		return "The %s fear Sköll and want %s gone. They offer her to you, %s.\n\nTake her: she shelters in your city (+%d Food, +%d Industry a turn, +%d defence, but Sköll hunts her). Trust %+d.\nRefuse: Trust %+d." % [rival.name, SunDaughter.NAME, deal, SunDaughter.FOOD, SunDaughter.INDUSTRY, SunDaughter.DEFENCE, TRUST_TOOK_THE_DAUGHTER, TRUST_REFUSED_THE_DAUGHTER]
 	return ""
 
 # The player's answer to the pending offer.
@@ -254,7 +256,8 @@ func answer(accept: bool) -> void:
 			player.industry += pay
 			game.hand_over_daughter(rival, player)
 			change_trust(TRUST_TOOK_THE_DAUGHTER)
-			remember("Turn %d: you took %s from the %s, and they paid you %d Industry. Trust %+d." % [game.turn, SunDaughter.NAME, rival.name, pay, TRUST_TOOK_THE_DAUGHTER])
+			var paid := "and they paid you %d Industry" % pay if pay > 0 else "for nothing"
+			remember("Turn %d: you took %s from the %s, %s. Trust %+d." % [game.turn, SunDaughter.NAME, rival.name, paid, TRUST_TOOK_THE_DAUGHTER])
 		else:
 			change_trust(TRUST_REFUSED_THE_DAUGHTER)
 			remember("Turn %d: you refused to take %s from the %s. Trust %+d." % [game.turn, SunDaughter.NAME, rival.name, TRUST_REFUSED_THE_DAUGHTER])

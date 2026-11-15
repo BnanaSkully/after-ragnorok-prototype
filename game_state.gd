@@ -173,6 +173,8 @@ func end_turn() -> void:
 		# at most one AI faction makes an offer each turn (the view shows a pop-up)
 		var order := relations.duplicate()
 		order.shuffle()
+		# a faction desperate to be rid of the Daughter gets to speak first
+		order.sort_custom(func(a, b): return ai_wants_rid_of_daughter(a.other) and not ai_wants_rid_of_daughter(b.other))
 		for r in order:
 			r.rival_make_offer()
 			if r.has_pending():
@@ -375,6 +377,13 @@ func daughter_value(f: Faction) -> int:
 	if stronger > 0:
 		value -= stronger / SunDaughter.DISDAIN_PER # a powerful faction needs her less
 	return clampi(value, -SunDaughter.TRADE_MAX_PRICE, SunDaughter.TRADE_MAX_PRICE)
+
+# An AI sheltering her wants her gone (from TRADE_TURN) if she's worth less than
+# nothing to it, or if Sköll is hunting its city.
+func ai_wants_rid_of_daughter(f: Faction) -> bool:
+	if not daughter.shelters_with(f) or turn < SunDaughter.TRADE_TURN:
+		return false
+	return daughter_value(f) < 0 or (skoll.active and skoll.target == f)
 
 func can_trade_daughter() -> bool:
 	return can_play() and daughter.shelters_with(player) and turn >= SunDaughter.TRADE_TURN and not diplomacy_action_used
