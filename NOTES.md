@@ -20,6 +20,7 @@ CLAUDE.md holds the rules for working; this file holds the history.
 13. Early game fix (Nathan's playtest: "turns 1-10 are dead, I just press End Turn"): fog of war with memory for every faction, scouts, ruins, rifts found by exploring, outposts (capturable), 2 Industry a turn + 5 at the Landing, small events every 2-3 turns, and a choice pop-up. All standard 4X, chosen without asking as CLAUDE.md says.
 14. War and peace: everyone starts at peace; attacking declares war (Trust costs, warmonger); peace by agreement with a truce; AIs declare war on you and on each other. Oaths became defensive alliances with a call-to-arms pop-up.
 15. Terrain (plains, forest, hills, mountains, water: move costs, defence, outpost income, pathfinding), trading (a Deal panel: demands, trades, gifts, paying for peace; AI trade offers), and taking cities in war: they become tributaries paying half their Industry, until they rise up.
+16. Closed borders: at peace you can't enter another faction's land without an oath or an open-borders agreement; crossing declares war; units left inside walk out at the end of the turn.
 
 ## Decisions Nathan made (and why)
 
@@ -53,6 +54,9 @@ CLAUDE.md holds the rules for working; this file holds the history.
 - An AI ally answered your call to arms even when it was the aggressor's tributary (at war with its own overlord): found by the "at war with overlord" check.
 - One army alone almost never takes a walled city (Strength 3 vs defence 7-11), so cities were taken 0.06 times a game: siege support (+2 per extra army next to the city) is the usual 4X answer.
 - HexMap.neighbours used to check all 165 hexes on every call; pathfinding made that too slow, so it now computes the 6 offsets (checked identical on every hex).
+- A turn can't end while a pop-up waits, so a test that moves units (which can find ruins) must answer pop-ups again right before End Turn, or end_turn silently does nothing and later checks run on a turn that never ended.
+- Check rules at the moment they're promised: units are walked out of closed borders at the END of the turn, so checking right after answering a peace offer (mid-turn) reports false problems.
+- An AI offer that comes after another in the same "if" chain may never be reached: AI open-borders offers were 0 a game until they were checked before oath offers.
 - Count a message once: the same messages can still be on screen after the player's moves and again after End Turn (the outpost-capture count was doubled at first).
 - Sköll's "nearest city" targeting was biased by map geometry (2:1 against the player). Measure fairness with many simulated games before trusting a rule.
 - Without the Daughter, a city made +0 Food with two units and could never grow: added standard city growth.
