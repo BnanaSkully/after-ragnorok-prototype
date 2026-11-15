@@ -17,6 +17,8 @@ const UNIT_COST := 5 # Industry to build a new unit
 const CITY_FOOD := 2 # Food a city produces each turn
 const CITY_INDUSTRY := 1 # Industry a city produces each turn
 const UNIT_FOOD_UPKEEP := 1 # Food each unit eats each turn
+const GROWTH_BASE := 10 # Food stored to grow from population 1 to 2...
+const GROWTH_STEP := 5 # ...and each later growth costs this much more
 const WALL_COST := 10 # Industry per wall level
 const WALL_DEFENCE := 4 # city defence each wall level adds
 const MAX_WALLS := 2
@@ -231,12 +233,14 @@ func end_turn() -> void:
 		if f.city_pos == NO_CELL:
 			continue # this faction's city has fallen; it's out of the game
 		f.food += food_change(f)
-		f.industry += CITY_INDUSTRY
+		f.industry += CITY_INDUSTRY + (f.population - 1)
 		if daughter.shelters_with(f):
 			f.industry += SunDaughter.INDUSTRY
 		var starved := f.food < 0
 		if starved:
 			starve(f)
+		else:
+			grow(f)
 		if daughter.shelters_with(f):
 			var verdict := daughter.judge_feeding(starved)
 			if verdict != "":
@@ -271,10 +275,26 @@ func judge_readiness() -> void:
 # --- Food -------------------------------------------------------------------
 # Food made by the city (and the Daughter's bonus) minus what the army eats.
 func food_change(f: Faction) -> int:
-	var made := CITY_FOOD
+	var made := CITY_FOOD + (f.population - 1) # each extra population works more fields
 	if daughter.shelters_with(f):
 		made += SunDaughter.FOOD
 	return made - f.units.size() * UNIT_FOOD_UPKEEP
+
+func industry_change(f: Faction) -> int:
+	return CITY_INDUSTRY + (f.population - 1) + (SunDaughter.INDUSTRY if daughter.shelters_with(f) else 0)
+
+# City growth (the usual 4X rule): when stored Food reaches the growth cost and
+# the city isn't losing Food, the city grows by 1 and the cost is used up.
+func growth_cost(f: Faction) -> int:
+	return GROWTH_BASE + (f.population - 1) * GROWTH_STEP
+
+func grow(f: Faction) -> void:
+	if f.food < growth_cost(f) or food_change(f) < 0:
+		return
+	f.food -= growth_cost(f)
+	f.population += 1
+	if f == player:
+		add_message("Your city grew to population %d: +1 Food and +1 Industry a turn." % f.population)
 
 # Not enough Food: stores stay at 0 and one unit deserts (the one farthest
 # from the city, so the garrison stays).
@@ -620,6 +640,9 @@ func _draw() -> void:
 			draw_rect(Rect2(cc - Vector2(25, 25), Vector2(50, 50)), Color(0.55, 0.55, 0.6), false, 3.0 * f.walls)
 		draw_rect(Rect2(cc - Vector2(20, 20), Vector2(40, 40)), Color(0.95, 0.95, 0.85))
 		draw_rect(Rect2(cc - Vector2(20, 20), Vector2(40, 40)), f.unit_color, false, 3.0)
+		# city size: a small badge on the bottom-left corner, so a unit in the city doesn't hide it
+		draw_circle(cc + Vector2(-20, 20), 9.0, Color(0.15, 0.15, 0.15))
+		draw_string(ThemeDB.fallback_font, cc + Vector2(-29, 25), str(f.population), HORIZONTAL_ALIGNMENT_CENTER, 18, 14, Color.WHITE)
 		if daughter.shelters_with(f):
 			draw_sun(cc + Vector2(20, -20), 7.0) # a little sun on the city sheltering her
 
@@ -647,9 +670,9 @@ func _draw() -> void:
 			draw_circle(sc, r * 0.28, Color(1.0, 0.9, 0.3))
 
 	var font := ThemeDB.fallback_font
-	var info := "Turn %d    Food %d (%+d/turn)    Industry %d    Units %d    Army Strength %d    Doom in %d" % [turn, player.food, food_change(player), player.industry, player.units.size(), diplomacy.army_power(player), DOOM_TURN - turn]
-	draw_string(font, Vector2(20, 35), info, HORIZONTAL_ALIGNMENT_LEFT, -1, 20)
-	var rival_info := "Rival:  Food %d    Industry %d    Units %d" % [rival.food, rival.industry, rival.units.size()]
+	var info := "Turn %d   City %d   Food %d/%d (%+d)   Industry %d (%+d)   Units %d   Army Strength %d   Doom in %d" % [turn, player.population, player.food, growth_cost(player), food_change(player), player.industry, industry_change(player), player.units.size(), diplomacy.army_power(player), DOOM_TURN - turn]
+	draw_string(font, Vector2(20, 35), info, HORIZONTAL_ALIGNMENT_LEFT, -1, 18)
+	var rival_info := "Rival:  City %d   Food %d   Industry %d   Units %d" % [rival.population, rival.food, rival.industry, rival.units.size()]
 	if rival.city_pos == NO_CELL:
 		rival_info = "Rival:  city destroyed"
 	draw_string(font, Vector2(20, 60), rival_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.9, 0.6, 0.6))
