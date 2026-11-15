@@ -41,7 +41,7 @@ Built so far: she chooses her protector at the Landing by Favour. Planned, in th
 - The rival keeps a Trust score toward the player (-10 to 10) and a short history of who kept or broke their word, shown on screen
 - Steps, in order:
   1. DONE: oaths. Propose a 5-turn oath; the rival accepts by chance (50% + 10% per Trust, +20% once Sköll's howling starts, +10% if you have more units). During an oath neither side's units attack. Kept to the end: Trust +2. Breaking it (attacking the rival, which needs two clicks): Trust -5, oathbreaker for 8 turns (no new oaths), the Sun's Daughter's Favour -2
-  2. Demands: demand Food or Industry; the rival pays if it thinks you are stronger, otherwise refuses and its Trust drops
+  2. DONE: demands. Demand 5 Food or 5 Industry (uses the turn's diplomatic action). The rival pays with chance 50% + 10% per point of army Strength you have over it (5-95%), 0% if it doesn't have 5. Paying: Trust -1 (resentment, as is usual in 4X). Refusing: Trust -2. Impossible demands are greyed out
   3. The rival's own diplomacy: it proposes oaths and makes demands of the player (Accept/Refuse pop-up), and may break oaths itself when strong or desperate
 
 ## How Nathan works

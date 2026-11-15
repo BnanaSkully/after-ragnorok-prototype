@@ -50,6 +50,8 @@ var end_turn_button: Button
 var build_button: Button
 var walls_button: Button
 var oath_button: Button
+var demand_food_button: Button
+var demand_industry_button: Button
 var break_warning_cell := NO_CELL # first click on a rival unit during an oath only warns
 var messages: Array[String] = [] # shown at the bottom of the screen, e.g. combat results
 
@@ -77,6 +79,14 @@ func _ready() -> void:
 	oath_button.position = Vector2(820, 96)
 	oath_button.pressed.connect(player_propose_pact)
 	add_child(oath_button)
+	demand_food_button = Button.new()
+	demand_food_button.position = Vector2(820, 134)
+	demand_food_button.pressed.connect(player_demand.bind("food"))
+	add_child(demand_food_button)
+	demand_industry_button = Button.new()
+	demand_industry_button.position = Vector2(820, 172)
+	demand_industry_button.pressed.connect(player_demand.bind("industry"))
+	add_child(demand_industry_button)
 	build_crossing_ui()
 	start_crossing()
 
@@ -109,6 +119,8 @@ func start_crossing() -> void:
 	build_button.visible = false
 	walls_button.visible = false
 	oath_button.visible = false
+	demand_food_button.visible = false
+	demand_industry_button.visible = false
 	crossing_panel.visible = true
 	messages.clear()
 	show_crossing_step()
@@ -164,6 +176,8 @@ func start_landing() -> void:
 	build_button.visible = true
 	walls_button.visible = true
 	oath_button.visible = true
+	demand_food_button.visible = true
+	demand_industry_button.visible = true
 	player.city_pos = NO_CELL
 	player.units.clear()
 	end_turn_button.disabled = true
@@ -252,6 +266,8 @@ func end_game(title: String, detail: String) -> void:
 	build_button.disabled = true
 	walls_button.disabled = true
 	oath_button.disabled = true
+	demand_food_button.disabled = true
+	demand_industry_button.disabled = true
 	selected = null
 	end_title = title
 	end_detail = detail
@@ -306,6 +322,14 @@ func player_propose_pact() -> void:
 	update_build_button()
 	queue_redraw()
 
+func player_demand(resource: String) -> void:
+	if game_over or phase != Phase.PLAYING:
+		return
+	messages.clear()
+	diplomacy.demand(resource) # posts its own message
+	update_build_button()
+	queue_redraw()
+
 func update_oath_button() -> void:
 	var word: String = rival.pact_word
 	if diplomacy.pact_active():
@@ -315,8 +339,17 @@ func update_oath_button() -> void:
 	elif diplomacy.action_used:
 		oath_button.text = "Diplomacy used this turn"
 	else:
-		oath_button.text = "Swear %s with %s (%d%% they accept)" % [diplomacy.a_pact(), rival.name, roundi(diplomacy.accept_chance() * 100)]
+		oath_button.text = "Swear %s (%d%% they accept)" % [diplomacy.a_pact(), roundi(diplomacy.accept_chance() * 100)]
 	oath_button.disabled = game_over or phase != Phase.PLAYING or not diplomacy.can_propose() or diplomacy.is_oathbreaker()
+	for pair in [[demand_food_button, "food"], [demand_industry_button, "industry"]]:
+		var button: Button = pair[0]
+		var resource: String = pair[1]
+		var chance := diplomacy.demand_chance(resource)
+		if chance <= 0.0:
+			button.text = "Demand %s: they don't have %d" % [resource.capitalize(), Diplomacy.DEMAND_AMOUNT]
+		else:
+			button.text = "Demand %d %s (%d%% they pay)" % [Diplomacy.DEMAND_AMOUNT, resource.capitalize(), roundi(chance * 100)]
+		button.disabled = game_over or phase != Phase.PLAYING or not diplomacy.can_demand() or chance <= 0.0
 
 # --- Walls ------------------------------------------------------------------
 # A city improvement: each level costs WALL_COST Industry and adds WALL_DEFENCE.
@@ -519,7 +552,7 @@ func _draw() -> void:
 
 	# Diplomacy panel (right side): trust, the oath, and the memory of promises.
 	var dx := 820.0
-	var dy := 150.0
+	var dy := 228.0
 	draw_string(font, Vector2(dx, dy), "DIPLOMACY with %s" % rival.name, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.9, 0.85, 0.7))
 	draw_string(font, Vector2(dx, dy + 22), "Their trust in you: %+d" % diplomacy.trust, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.85, 0.85))
 	if diplomacy.pact_active():

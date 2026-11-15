@@ -16,6 +16,9 @@ const TRUST_BROKEN := -5 # trust lost when the player breaks an oath
 const OATHBREAKER_TURNS := 8 # after breaking an oath, the rival refuses new ones for this long
 const BROKEN_OATH_FAVOUR := -2 # the Sun's Daughter sees it too
 const HISTORY_SIZE := 6 # how many past events are shown
+const DEMAND_AMOUNT := 5 # Food or Industry asked for in a demand
+const TRUST_DEMAND_PAID := -1 # they resent being squeezed even when they pay
+const TRUST_DEMAND_REFUSED := -2 # and resent it more when they refuse
 
 var game # main.gd
 var trust := 0 # how much the rival trusts the player (-10 to 10)
@@ -52,6 +55,42 @@ func accept_chance() -> float:
 	if game.player.units.size() > game.rival.units.size():
 		chance += 0.1 # it respects strength
 	return clampf(chance, 0.05, 0.95)
+
+# Army strength: the total Strength of a faction's units.
+func army_power(f: Faction) -> int:
+	var power := 0
+	for u in f.units:
+		power += u.strength
+	return power
+
+# The chance (0 to 1) that the rival gives in to a demand for "food" or "industry".
+func demand_chance(resource: String) -> float:
+	var rival: Faction = game.rival
+	if rival.get(resource) < DEMAND_AMOUNT:
+		return 0.0 # it doesn't have that much
+	var gap := army_power(game.player) - army_power(rival)
+	return clampf(0.5 + gap * 0.1, 0.05, 0.95)
+
+func can_demand() -> bool:
+	return not action_used and game.rival.is_alive()
+
+# The player's diplomatic action: demand Food or Industry. Returns true if paid.
+func demand(resource: String) -> bool:
+	if not can_demand():
+		return false
+	action_used = true
+	var rival: Faction = game.rival
+	var player: Faction = game.player
+	var chance := demand_chance(resource)
+	if randf() < chance:
+		rival.set(resource, rival.get(resource) - DEMAND_AMOUNT)
+		player.set(resource, player.get(resource) + DEMAND_AMOUNT)
+		change_trust(TRUST_DEMAND_PAID)
+		remember("Turn %d: %s paid your demand of %d %s (%d%% chance). Trust %+d." % [game.turn, rival.name, DEMAND_AMOUNT, resource.capitalize(), roundi(chance * 100), TRUST_DEMAND_PAID])
+		return true
+	change_trust(TRUST_DEMAND_REFUSED)
+	remember("Turn %d: %s refused your demand of %d %s (%d%% chance). Trust %+d." % [game.turn, rival.name, DEMAND_AMOUNT, resource.capitalize(), roundi(chance * 100), TRUST_DEMAND_REFUSED])
+	return false
 
 func can_propose() -> bool:
 	return not action_used and not pact_active() and game.rival.is_alive()
