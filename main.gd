@@ -8,6 +8,7 @@ extends Node2D
 #   hex_map.gd          hex maths (positions, distances, neighbours)
 #   skoll.gd            Sköll, the wolf boss
 #   sun_daughter.gd     the Sun's Daughter
+#   diplomacy.gd        oaths with the rival, trust and the memory of promises
 #   crossing_events.gd  the Crossing's events (text and choices)
 
 const DOOM_TURN := 20 # survive until this turn and Phase 3 (chaos) begins
@@ -32,6 +33,7 @@ var rival := Faction.new("Rival", Color(0.6, 0.3, 0.3), Color(0.85, 0.2, 0.2), V
 var factions: Array[Faction] = [player, rival]
 var daughter := SunDaughter.new()
 var skoll: Skoll
+var diplomacy: Diplomacy
 
 var phase := Phase.CROSSING
 var crossing_step := 0 # which Crossing event we're on
@@ -47,10 +49,13 @@ var end_detail := "" # smaller text under it (can have several lines)
 var end_turn_button: Button
 var build_button: Button
 var walls_button: Button
+var oath_button: Button
+var break_warning_cell := NO_CELL # first click on a rival unit during an oath only warns
 var messages: Array[String] = [] # shown at the bottom of the screen, e.g. combat results
 
 func _init() -> void:
 	skoll = Skoll.new(self)
+	diplomacy = Diplomacy.new(self)
 	rival.add_unit(Vector2i(8, 6))
 
 func _ready() -> void:
@@ -68,6 +73,10 @@ func _ready() -> void:
 	walls_button.position = Vector2(920, 58)
 	walls_button.pressed.connect(player_build_walls)
 	add_child(walls_button)
+	oath_button = Button.new()
+	oath_button.position = Vector2(820, 96)
+	oath_button.pressed.connect(player_propose_pact)
+	add_child(oath_button)
 	build_crossing_ui()
 	start_crossing()
 
@@ -99,6 +108,7 @@ func start_crossing() -> void:
 	end_turn_button.visible = false
 	build_button.visible = false
 	walls_button.visible = false
+	oath_button.visible = false
 	crossing_panel.visible = true
 	messages.clear()
 	show_crossing_step()
@@ -153,6 +163,7 @@ func start_landing() -> void:
 	end_turn_button.visible = true
 	build_button.visible = true
 	walls_button.visible = true
+	oath_button.visible = true
 	player.city_pos = NO_CELL
 	player.units.clear()
 	end_turn_button.disabled = true
@@ -202,7 +213,9 @@ func end_turn() -> void:
 		for u in f.units:
 			u.moves = 1
 	rival_build()
+	diplomacy.new_turn()
 	selected = null
+	break_warning_cell = NO_CELL
 	update_build_button()
 	if turn >= DOOM_TURN:
 		end_game("You survived until the Doom",
@@ -238,6 +251,7 @@ func end_game(title: String, detail: String) -> void:
 	end_turn_button.disabled = true
 	build_button.disabled = true
 	walls_button.disabled = true
+	oath_button.disabled = true
 	selected = null
 	end_title = title
 	end_detail = detail
@@ -256,7 +270,7 @@ func rival_take_turn() -> void:
 		var target: Unit = null
 		for c in HexMap.neighbours(u.pos):
 			var other := unit_at(c)
-			if other and other.faction == player:
+			if other and other.faction == player and not diplomacy.pact_active():
 				target = other
 				break
 		if target:
@@ -282,6 +296,27 @@ func rival_build() -> void:
 		return # saving up for walls
 	if rival.industry >= UNIT_COST and food_change(rival) - UNIT_FOOD_UPKEEP >= 0:
 		build_unit(rival)
+
+# --- Diplomacy --------------------------------------------------------------
+func player_propose_pact() -> void:
+	if game_over or phase != Phase.PLAYING:
+		return
+	messages.clear()
+	diplomacy.propose_pact() # posts its own message
+	update_build_button()
+	queue_redraw()
+
+func update_oath_button() -> void:
+	var word: String = rival.pact_word
+	if diplomacy.pact_active():
+		oath_button.text = "%s in force: %d turns left" % [word.capitalize(), diplomacy.pact_turns_left]
+	elif diplomacy.is_oathbreaker():
+		oath_button.text = "%s refuses: you broke your %s" % [rival.name, word]
+	elif diplomacy.action_used:
+		oath_button.text = "Diplomacy used this turn"
+	else:
+		oath_button.text = "Swear %s with %s (%d%% they accept)" % [diplomacy.a_pact(), rival.name, roundi(diplomacy.accept_chance() * 100)]
+	oath_button.disabled = game_over or phase != Phase.PLAYING or not diplomacy.can_propose() or diplomacy.is_oathbreaker()
 
 # --- Walls ------------------------------------------------------------------
 # A city improvement: each level costs WALL_COST Industry and adds WALL_DEFENCE.
@@ -338,6 +373,7 @@ func player_build_unit() -> void:
 func update_build_button() -> void:
 	build_button.disabled = game_over or phase != Phase.PLAYING or player.industry < UNIT_COST
 	walls_button.disabled = game_over or phase != Phase.PLAYING or player.industry < WALL_COST or player.walls >= MAX_WALLS
+	update_oath_button()
 	if player.walls >= MAX_WALLS:
 		walls_button.text = "Walls complete (+%d defence)" % (MAX_WALLS * WALL_DEFENCE)
 	else:
@@ -481,6 +517,19 @@ func _draw() -> void:
 		daughter_info = "%s %s (Sköll doesn't know which city)    Her Favour: you %d, %s %d" % ["You shelter" if daughter.holder == player else daughter.holder.name + " shelters", SunDaughter.NAME, player.favour, rival.name, rival.favour]
 	draw_string(font, Vector2(20, 82), daughter_info, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.9, 0.5))
 
+	# Diplomacy panel (right side): trust, the oath, and the memory of promises.
+	var dx := 820.0
+	var dy := 150.0
+	draw_string(font, Vector2(dx, dy), "DIPLOMACY with %s" % rival.name, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.9, 0.85, 0.7))
+	draw_string(font, Vector2(dx, dy + 22), "Their trust in you: %+d" % diplomacy.trust, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.85, 0.85))
+	if diplomacy.pact_active():
+		draw_string(font, Vector2(dx, dy + 42), "%s in force: %d turns left" % [rival.pact_word.capitalize(), diplomacy.pact_turns_left], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.6, 0.9, 0.6))
+	elif diplomacy.is_oathbreaker():
+		draw_string(font, Vector2(dx, dy + 42), "You are an %sbreaker until turn %d" % [rival.pact_word, diplomacy.oathbreaker_until], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.5, 0.4))
+	draw_string(font, Vector2(dx, dy + 70), "They remember:", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.7, 0.7))
+	for i in diplomacy.history.size():
+		draw_multiline_string(font, Vector2(dx, dy + 92 + i * 44), diplomacy.history[i], HORIZONTAL_ALIGNMENT_LEFT, 320, 13, 2, Color(0.8, 0.8, 0.75))
+
 	# Messages, newest at the bottom.
 	var screen := get_viewport_rect().size
 	for i in messages.size():
@@ -528,6 +577,15 @@ func _unhandled_input(event: InputEvent) -> void:
 			if skoll.is_at(cell):
 				skoll.attacked_by(selected)
 			elif clicked and clicked.faction != player:
+				if diplomacy.pact_active() and break_warning_cell != cell:
+					# first click only warns; a second click on the same unit breaks the oath
+					break_warning_cell = cell
+					messages = ["This breaks your %s (Trust %+d, %sbreaker for %d turns, she will see). Click again to attack." % [rival.pact_word, Diplomacy.TRUST_BROKEN, rival.pact_word, Diplomacy.OATHBREAKER_TURNS]]
+					queue_redraw()
+					return
+				if diplomacy.pact_active():
+					diplomacy.break_pact()
+				break_warning_cell = NO_CELL
 				resolve_combat(selected, clicked) # moving into an enemy = attack
 			elif not clicked:
 				selected.pos = cell

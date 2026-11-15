@@ -34,6 +34,16 @@ Built so far: she chooses her protector at the Landing by Favour. Planned, in th
 - Goal: a playable loop of Crossing, Landing, turns, cities, auto-resolve and the Doom
 - Basic diplomacy with the rival: pacts, demands, and a memory of whether promises were kept. This is the core hook and should be built before more combat or Sköll features.
 
+## Diplomacy: agreed design
+
+- Each faction has its own word for a sworn agreement (Faction.pact_word). Norse factions swear "oaths"; other pantheons later may use other words
+- One diplomatic action per turn (for now)
+- The rival keeps a Trust score toward the player (-10 to 10) and a short history of who kept or broke their word, shown on screen
+- Steps, in order:
+  1. DONE: oaths. Propose a 5-turn oath; the rival accepts by chance (50% + 10% per Trust, +20% once Sköll's howling starts, +10% if you have more units). During an oath neither side's units attack. Kept to the end: Trust +2. Breaking it (attacking the rival, which needs two clicks): Trust -5, oathbreaker for 8 turns (no new oaths), the Sun's Daughter's Favour -2
+  2. Demands: demand Food or Industry; the rival pays if it thinks you are stronger, otherwise refuses and its Trust drops
+  3. The rival's own diplomacy: it proposes oaths and makes demands of the player (Accept/Refuse pop-up), and may break oaths itself when strong or desperate
+
 ## How Nathan works
 
 - He is self-taught and new to game code: explain changes in plain words
@@ -50,6 +60,7 @@ Built so far: she chooses her protector at the Landing by Favour. Planned, in th
 - hex_map.gd (class HexMap, all static): hex maths: hex_center, hex_distance, is_neighbour, neighbours, cell_at, map size
 - skoll.gd (class Skoll): everything Sköll does: warnings, arrival, walking, attacking cities and units, being driven back, swallowing the Daughter. Holds a reference to main.gd ("game")
 - sun_daughter.gd (class SunDaughter): her name, bonuses, Favour rules and state (who holds her, swallowed or not)
+- diplomacy.gd (class Diplomacy): oaths, Trust, the oathbreaker penalty and the history of promises; numbers are constants at its top
 - crossing_events.gd: the Crossing's events (text, choices, effects), kept separate so they can be edited without touching game logic
 - Code phases in order: CROSSING, LANDING, PLAYING (PLAYING covers game Phase 2)
 - Sköll's numbers (ARRIVAL_TURN, STRENGTH, ...) are constants at the top of skoll.gd; the Daughter's (NAME, FOOD, DEFENCE, Favour ranges) at the top of sun_daughter.gd
