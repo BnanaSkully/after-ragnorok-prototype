@@ -1,4 +1,5 @@
 extends SceneTree
+const H := preload("res://tests/helpers.gd")
 func _initialize() -> void:
 	await process_frame
 	seed(99)
@@ -20,6 +21,7 @@ func _initialize() -> void:
 		s.try_land(spots[(g * 7) % spots.size()])
 		var first := ""
 		while not s.game_over:
+			H.answer_choices(s)
 			if s.player.industry >= 10 and s.player.walls < 1 and s.turn >= 8: s.player_build_walls()
 			elif s.player.units.size() < 3: s.player_build_unit()
 			if g % 2 == 0:

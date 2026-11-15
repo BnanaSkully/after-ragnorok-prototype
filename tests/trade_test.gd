@@ -1,4 +1,5 @@
 extends SceneTree
+const H := preload("res://tests/helpers.gd")
 func new_game():
 	var m = load("res://main.tscn").instantiate()
 	root.add_child(m)
@@ -67,6 +68,7 @@ func _initialize() -> void:
 	for g in 200:
 		m = new_game(); s = m.state
 		while not s.game_over:
+			H.answer_choices(s)
 			if g % 2 == 0 and s.can_trade_daughter():
 				var f = s.ais[g % 3]
 				if s.trade_quote(f)["possible"] and s.player_trade_daughter(f): trades += 1

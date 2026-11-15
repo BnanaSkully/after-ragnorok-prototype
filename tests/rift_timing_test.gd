@@ -1,4 +1,5 @@
 extends SceneTree
+const H := preload("res://tests/helpers.gd")
 func _initialize() -> void:
 	await process_frame
 	var bad := {}
@@ -10,14 +11,11 @@ func _initialize() -> void:
 		for step in 4: s.choose(s.Crossing.EVENTS[step]["choices"][0]["effects"])
 		s.start_landing()
 		if s.skoll.rifts.size() != 0: bad["rifts during landing"] = 1
-		var spots = []
-		for r in 10:
-			for c in 12:
-				if s.can_land_at(Vector2i(c, r)): spots.append(Vector2i(c, r))
+		var spots = H.landing_spots(s)
 		s.try_land(spots[(g * 7) % spots.size()])
 		if g == 0: print("valid landing hexes now that rifts don't block: %d" % spots.size())
 		s.end_turn()
-		if s.diplomacy.has_pending(): s.diplomacy.answer(false)
+		if s.has_pending_offer(): s.pending_relation().answer(false)
 		if s.turn != 2 or s.skoll.rifts.size() != 6: bad["not 6 rifts on turn 2"] = bad.get("not 6 rifts on turn 2", 0) + 1
 		for r in s.skoll.rifts:
 			for f in s.factions:
@@ -25,8 +23,9 @@ func _initialize() -> void:
 		if s.skoll.revealed_rift != HexMap.NO_CELL: bad["revealed before 14"] = 1
 		var turn2 = s.skoll.rifts.duplicate()
 		while s.turn < 14 and not s.game_over:
+			H.answer_choices(s)
 			s.end_turn()
-			if s.diplomacy.has_pending(): s.diplomacy.answer(false)
+			if s.has_pending_offer(): s.pending_relation().answer(false)
 		if s.game_over: m.queue_free(); continue
 		if s.skoll.rifts != turn2: bad["rifts changed before arrival"] = 1
 		if s.skoll.revealed_rift != s.skoll.pos or not s.skoll.pos in s.skoll.rifts: bad["arrival not at a revealed rift"] = bad.get("arrival not at a revealed rift", 0) + 1

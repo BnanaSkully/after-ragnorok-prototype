@@ -35,6 +35,8 @@ Run a test:
 | sight_test.gd | Sköll's 2-hex sight (fog of war) on a rogue Daughter |
 | rift_timing_test.gd | Rifts: none before turn 2, hidden, reveal on arrival, re-roll on return |
 | balance_state.gd | 1000 games: how often your city falls with/without her, first-attack fairness |
+| early_game_test.gd | 300 games with a player who explores and builds: impossible states (units, outposts, fog), decisions on turns 1-10, ruins, outposts taken, events |
+| helpers.gd | not a test: shared helpers (answer every pop-up, list landing hexes) |
 
 Screenshot scripts need a virtual screen and an output folder in `S`:
 
@@ -42,9 +44,10 @@ Screenshot scripts need a virtual screen and an output folder in `S`:
 S=/tmp/shots xvfb-run -a -s "-screen 0 1152x648x24" /tmp/godot --rendering-driver opengl3 --script tests/fog_screenshot.gd
 ```
 
-(fog_screenshot.gd, four_click_screenshot.gd: real clicks in a window; images go to $S.)
+(fog_screenshot.gd, four_click_screenshot.gd, early_screenshot.gd: real clicks in a window; images go to $S. early_screenshot.gd saves the Landing, turn 1, a scout move, choosing an outpost, a pop-up and turn 9.)
 
 Gotchas:
+- Ruins and small events open a pop-up that blocks End Turn. A test that loops over end_turn must answer them first (`H.answer_choices(s)`), or it never ends.
 - If a test script hits a script error it stops before quit() and Godot hangs until the timeout. Always run with `timeout`.
 - Godot buffers output; if a run is killed you may see nothing. Write progress to a file to debug.
 - ALSA/audio and V-Sync warnings in a virtual screen are harmless.

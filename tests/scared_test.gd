@@ -1,4 +1,5 @@
 extends SceneTree
+const H := preload("res://tests/helpers.gd")
 func _initialize() -> void:
 	await process_frame
 	seed(31)
@@ -18,6 +19,7 @@ func _initialize() -> void:
 		games_ai_held += 1
 		var got := false
 		while not s.game_over:
+			H.answer_choices(s)
 			if s.player.units.size() < 2: s.player_build_unit()
 			s.end_turn()
 			if s.has_pending_offer():
