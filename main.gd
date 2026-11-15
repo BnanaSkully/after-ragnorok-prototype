@@ -335,12 +335,31 @@ func rival_take_turn() -> void:
 			continue
 		if u.pos == rival.city_pos and rival.units.size() > 1:
 			continue # this one guards the city
+		if skoll.active and HexMap.hex_distance(u.pos, rival.city_pos) > 1:
+			# Sköll is loose: fall back toward the city to help defend it
+			var home := step_toward(u.pos, rival.city_pos)
+			if home != NO_CELL:
+				u.pos = home
+				continue
 		var options: Array[Vector2i] = []
 		for c in HexMap.neighbours(u.pos):
 			if not is_blocked(c):
 				options.append(c)
 		if not options.is_empty():
 			u.pos = options.pick_random()
+
+# The free neighbouring hex that gets closest to goal (NO_CELL if none is closer).
+func step_toward(from: Vector2i, goal: Vector2i) -> Vector2i:
+	var best := NO_CELL
+	var best_d := HexMap.hex_distance(from, goal)
+	for c in HexMap.neighbours(from):
+		if is_blocked(c) or (is_city(c) and c != goal):
+			continue
+		var d := HexMap.hex_distance(c, goal)
+		if d < best_d:
+			best_d = d
+			best = c
+	return best
 
 # The rival builds a new unit whenever it can afford one.
 # Once the howling starts it builds walls first; otherwise a unit,

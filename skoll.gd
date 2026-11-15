@@ -3,7 +3,8 @@ extends RefCounted
 
 # Sköll, the wolf who swallowed the sun at Ragnarök. He followed the survivors
 # through the void. He warns from WARNING_TURN, arrives at the map edge on
-# ARRIVAL_TURN, then walks one hex a turn toward the nearest city and attacks it.
+# ARRIVAL_TURN, then picks a city to hunt (at random: he doesn't know where the Daughter is),
+# walks one hex a turn toward it and attacks it.
 # He can't be killed, only driven back to the edge of the map.
 #
 # "game" is main.gd: Sköll uses it to see the factions, post messages and end
@@ -18,6 +19,7 @@ var game # main.gd
 var active := false # false until he arrives
 var pos := HexMap.NO_CELL
 var strength := STRENGTH
+var target: Faction = null # the city he is hunting right now
 
 func _init(p_game) -> void:
 	game = p_game
@@ -34,10 +36,12 @@ func take_turn() -> void:
 		return
 	if not active:
 		active = true
+		pick_target()
 		pos = random_edge_cell()
-		game.add_message("Sköll, the wolf who swallowed the sun, has followed you through the void!")
+		game.add_message("Sköll, the wolf who swallowed the sun, has followed you through the void! He is hunting %s." % target_text())
 		return
-	var target := nearest_city_to(pos)
+	if target == null or not target.is_alive():
+		pick_target()
 	if target == null:
 		return
 	if HexMap.is_neighbour(pos, target.city_pos):
@@ -117,9 +121,27 @@ func attacked_by(u: Unit) -> void:
 
 # Sköll can't be killed: losing a fight sends him back to the edge of the map.
 func drive_back() -> void:
+	pick_target()
 	pos = random_edge_cell()
+	if target:
+		game.add_message("Sköll slinks back into the void's edge... and turns toward %s." % target_text())
 
-# A free hex on the edge of the map, at least 3 hexes from every city.
+# He doesn't know which city hides the Daughter, so each time he appears he
+# chooses a standing city at random to hunt. Fair to both factions.
+func pick_target() -> void:
+	var cities: Array[Faction] = []
+	for f in game.factions:
+		if f.is_alive():
+			cities.append(f)
+	target = cities.pick_random() if not cities.is_empty() else null
+
+func target_text() -> String:
+	if target == null:
+		return "nobody"
+	return "your city" if target == game.player else "%s's city" % target.name
+
+# A free hex on the edge of the map, at least 3 hexes from every city, and as
+# close as possible to the city he's hunting (so he arrives in time).
 func random_edge_cell() -> Vector2i:
 	var options: Array[Vector2i] = []
 	for row in HexMap.ROWS:
@@ -135,13 +157,11 @@ func random_edge_cell() -> Vector2i:
 					far_enough = false
 			if far_enough:
 				options.append(c)
-	return options.pick_random() if not options.is_empty() else Vector2i(0, 0)
-
-func nearest_city_to(cell: Vector2i) -> Faction:
-	var best: Faction = null
-	var best_d := 999
-	for f in game.factions:
-		if f.city_pos != HexMap.NO_CELL and HexMap.hex_distance(cell, f.city_pos) < best_d:
-			best_d = HexMap.hex_distance(cell, f.city_pos)
-			best = f
-	return best
+	if options.is_empty():
+		return Vector2i(0, 0)
+	if target != null and target.is_alive():
+		var closest := 999
+		for c in options:
+			closest = mini(closest, HexMap.hex_distance(c, target.city_pos))
+		options = options.filter(func(c): return HexMap.hex_distance(c, target.city_pos) <= closest + 1)
+	return options.pick_random()
