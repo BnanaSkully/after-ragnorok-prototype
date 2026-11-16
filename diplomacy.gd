@@ -221,17 +221,17 @@ func needs(f: Faction, res: String) -> bool:
 func trade_quote(give: String) -> int:
 	if at_war or not other.is_alive():
 		return 0
-	var get := other_resource(give)
+	var back := other_resource(give)
 	var amount := TRADE_BASE
 	if needs(other, give):
 		amount += 1
-	if needs(other, get):
+	if needs(other, back):
 		amount -= 1
 	if trust >= 3:
 		amount += 1
 	elif trust <= -3:
 		amount -= 1
-	return clampi(amount, 1, other.get(get)) if other.get(get) > 0 else 0
+	return clampi(amount, 1, other.get(back)) if other.get(back) > 0 else 0
 
 func can_deal() -> bool:
 	return not action_used and other.is_alive()
@@ -243,12 +243,12 @@ func trade(give: String) -> bool:
 	if not can_deal() or amount <= 0 or player.get(give) < TRADE_AMOUNT:
 		return false
 	action_used = true
-	var get := other_resource(give)
+	var back := other_resource(give)
 	player.set(give, player.get(give) - TRADE_AMOUNT)
 	other.set(give, other.get(give) + TRADE_AMOUNT)
-	other.set(get, other.get(get) - amount)
-	player.set(get, player.get(get) + amount)
-	remember("Turn %d: you traded %d %s to %s for %d %s." % [game.turn, TRADE_AMOUNT, give.capitalize(), other.name, amount, get.capitalize()])
+	other.set(back, other.get(back) - amount)
+	player.set(back, player.get(back) + amount)
+	remember("Turn %d: you traded %d %s to %s for %d %s." % [game.turn, TRADE_AMOUNT, give.capitalize(), other.name, amount, back.capitalize()])
 	return true
 
 func gift_trust_gain() -> int:

@@ -584,6 +584,7 @@ func daughter_value(f: Faction) -> int:
 	var giver: Faction = daughter.holder if daughter.holder != null else player
 	var stronger := army_power(f) - army_power(giver)
 	if stronger > 0:
+		@warning_ignore("integer_division") # rounds down on purpose: -1 per full DISDAIN_PER
 		value -= stronger / SunDaughter.DISDAIN_PER # a powerful faction needs her less
 	return clampi(value, -SunDaughter.TRADE_MAX_PRICE, SunDaughter.TRADE_MAX_PRICE)
 

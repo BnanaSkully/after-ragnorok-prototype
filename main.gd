@@ -89,13 +89,13 @@ func _ready() -> void:
 	for i in state.ais.size():
 		var f: Faction = state.ais[i]
 		var y := BLOCK_Y + i * BLOCK_H + 46
-		var set := {
+		var buttons := {
 			"pact": add_button("", Vector2(PANEL_X, y), on_propose_pact.bind(f)),
 			"deal": add_button("Deal...", Vector2(PANEL_X + 120, y), on_open_deals.bind(f)),
 		}
-		for b in set.values():
+		for b in buttons.values():
 			b.add_theme_font_size_override("font_size", 13)
-		faction_buttons[f] = set
+		faction_buttons[f] = buttons
 	play_again_button = add_button("Play Again", Vector2.ZERO, restart)
 	play_again_button.add_theme_font_size_override("font_size", 22)
 	play_again_button.visible = false
@@ -140,8 +140,8 @@ func refresh() -> void:
 
 func all_game_buttons() -> Array[Button]:
 	var list: Array[Button] = [end_turn_button, build_button, scout_button, outpost_button, walls_button, trade_button]
-	for set in faction_buttons.values():
-		for b in set.values():
+	for buttons in faction_buttons.values():
+		for b in buttons.values():
 			list.append(b)
 	return list
 
@@ -158,8 +158,8 @@ func update_buttons() -> void:
 	trade_button.disabled = not playing or not state.can_trade_daughter()
 	for f in state.ais:
 		var d: Diplomacy = state.relation(f)
-		var set: Dictionary = faction_buttons[f]
-		var pact: Button = set["pact"]
+		var buttons: Dictionary = faction_buttons[f]
+		var pact: Button = buttons["pact"]
 		var word: String = f.pact_word.capitalize()
 		# One button for war and alliance: at war it asks for peace; at peace it
 		# proposes the oath (a defensive alliance).
@@ -178,7 +178,7 @@ func update_buttons() -> void:
 				pact.text = "%s %d%%" % [word, roundi(d.accept_chance() * 100)]
 			pact.disabled = not playing or not d.can_propose() or d.is_oathbreaker()
 		pact.tooltip_text = "Ask for peace (uses your diplomatic action)." if d.at_war else "%s: a defensive alliance for %d turns. If anyone declares war on one of you, the other joins the war." % [word, Diplomacy.PACT_LENGTH]
-		var deal: Button = set["deal"]
+		var deal: Button = buttons["deal"]
 		deal.disabled = not playing or not d.can_deal()
 		deal.tooltip_text = "Demand, trade, give gifts, or pay for peace (uses your diplomatic action)."
 
@@ -356,11 +356,11 @@ func on_open_deals(f: Faction) -> void:
 		else:
 			add_deal("Ask for open borders for %d turns, both ways (%d%% chance)" % [Diplomacy.BORDERS_LENGTH, roundi(d.borders_chance() * 100)], d.can_ask_borders(), on_deal.bind(func(): state.player_ask_borders(f)))
 		for give in ["food", "industry"]:
-			var get := d.other_resource(give)
+			var back := d.other_resource(give)
 			var amount: int = d.trade_quote(give)
-			var label := "Trade %d %s for %d %s" % [Diplomacy.TRADE_AMOUNT, give.capitalize(), amount, get.capitalize()]
+			var label := "Trade %d %s for %d %s" % [Diplomacy.TRADE_AMOUNT, give.capitalize(), amount, back.capitalize()]
 			if amount <= 0:
-				label = "Trade %d %s for %s  (they have none)" % [Diplomacy.TRADE_AMOUNT, give.capitalize(), get.capitalize()]
+				label = "Trade %d %s for %s  (they have none)" % [Diplomacy.TRADE_AMOUNT, give.capitalize(), back.capitalize()]
 			elif p.get(give) < Diplomacy.TRADE_AMOUNT:
 				label += "  (you don't have %d)" % Diplomacy.TRADE_AMOUNT
 			add_deal(label, amount > 0 and p.get(give) >= Diplomacy.TRADE_AMOUNT, on_deal.bind(func(): state.player_trade(f, give)))
@@ -708,9 +708,9 @@ func _draw() -> void:
 			var fill: Color = TERRAIN_COLOURS[land]
 			var explored := landing or s.player_has_explored(c)
 			if not landing:
-				var owner := s.territory_owner(c)
-				if owner != null:
-					fill = fill.lerp(territory_colour(owner), 0.55) # territory tints the land
+				var land_owner := s.territory_owner(c)
+				if land_owner != null:
+					fill = fill.lerp(territory_colour(land_owner), 0.55) # territory tints the land
 			if dark:
 				fill = fill.darkened(0.7)
 			if not explored:

@@ -117,6 +117,7 @@ Keep game rules separate from drawing. The game state and rules (map data, terra
 - For refactors: seeded before/after comparison must be identical
 - For balance changes: measure over hundreds of games and report the numbers
 - Always run Godot with `timeout`: a script error in a test stops it before quit() and it hangs
+- Check for editor warnings too (Nathan sees them in the Debugger): `godot --headless --debug --quit-after 5` prints them as "WARNING:" lines; --check-only does NOT show them. Keep it at 0. Don't name locals get/set (Object methods) or owner/name (Node properties in main.gd); mark a deliberate whole-number division with @warning_ignore("integer_division")
 - Keep rounds fast: the full suite (12 scripts, most play 300 games) takes 12-15 minutes. While building, run only the tests the change touches, with fewer games (e.g. 50); run the full suite once before pushing, in the background, and don't edit game scripts while it runs (each test loads them when it starts). tests/run_all.sh runs them 4 at a time; GAMES=50 makes every simulation play 50 games (quick mode). Not done yet: profiling the AI's pathfinding
 - Before blaming the game for a failed check, make sure the test checks at the moment the rule promises (e.g. end of turn), has answered every pop-up, and didn't land on water
 - NOTES.md has the history, Nathan's decisions and the bugs we learnt from
