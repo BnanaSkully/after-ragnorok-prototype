@@ -26,6 +26,7 @@ const PANEL_X := 820.0
 const BLOCK_Y := 100.0 # top of the first faction's block
 const BLOCK_H := 100.0 # height of each block
 
+const ASH_COLOUR := Color(0.36, 0.34, 0.33) # land Sköll turned to ash
 # How each kind of land looks (index = Terrain.Type)
 const TERRAIN_COLOURS := [Color(0.42, 0.58, 0.32), Color(0.2, 0.4, 0.22), Color(0.58, 0.5, 0.32), Color(0.5, 0.5, 0.53), Color(0.2, 0.36, 0.62)]
 
@@ -709,7 +710,7 @@ func _draw() -> void:
 			var c := Vector2i(col, row)
 			var pts := HexView2D.hex_points(HexView2D.hex_center(c))
 			var land: int = s.terrain_at(c)
-			var fill: Color = TERRAIN_COLOURS[land]
+			var fill: Color = ASH_COLOUR if s.is_ash(c) else TERRAIN_COLOURS[land]
 			var explored := landing or s.player_has_explored(c)
 			if not landing:
 				var land_owner := s.territory_owner(c)
@@ -743,7 +744,9 @@ func _draw() -> void:
 					else:
 						fill = Color(0.9, 0.75, 0.3) # free to move
 			draw_colored_polygon(pts, fill)
-			if explored:
+			if explored and s.is_ash(c):
+				draw_ash_mark(HexView2D.hex_center(c))
+			elif explored:
 				draw_terrain_mark(HexView2D.hex_center(c), land, fill)
 			pts.append(pts[0])
 			draw_polyline(pts, Color(0.1, 0.1, 0.1), 2.0)
@@ -833,15 +836,24 @@ func _draw() -> void:
 	var line2: Array[String] = [] # second line: tribute you pay, and where Sköll is
 	if player.overlord != "":
 		line2.append("TRIBUTARY of the %s: %d Industry a turn to them (attack them to rise up)" % [player.overlord, s.tribute_amount(player)])
-	if skoll.active and player.city_pos != NO_CELL:
+	if skoll.slain:
+		line2.append("Sköll is dead.")
+	elif skoll.active and player.city_pos != NO_CELL:
 		var where := "%d hexes from yours" % HexMap.hex_distance(skoll.pos, player.city_pos) if s.player_can_see(skoll.pos) else "out of sight"
-		line2.append("Sköll hunts %s (%s)   Your defence: %d" % [skoll.target_text(), where, s.city_defence(player)])
+		var hurt := " (wounded: %d of %d)" % [skoll.effective_strength(), skoll.strength] if skoll.wounds > 0 else ""
+		line2.append("Sköll%s, Strength %d%s, hunts %s (%s)   Your defence: %d" % [" (MORTAL)" if skoll.is_mortal() else "", skoll.effective_strength(), hurt, skoll.target_text(), where, s.city_defence(player)])
+	elif skoll.returns > 0:
+		line2.append("Sköll is in the void: he returns on turn %d, stronger (Strength %d)" % [skoll.away_until, skoll.strength + Skoll.STRENGTH_PER_RETURN])
 	draw_string(font, Vector2(20, 60), "   ".join(line2), HORIZONTAL_ALIGNMENT_LEFT, 780, 16, Color(1.0, 0.6, 0.2))
 	var daughter_info := ""
 	if daughter.is_swallowed():
-		daughter_info = "Sköll swallowed %s. He is the sun now (Strength %d)." % [SunDaughter.NAME, skoll.strength]
+		daughter_info = "Sköll swallowed %s. He is the sun now (Strength %d), but MORTAL: a combined force can kill him." % [SunDaughter.NAME, skoll.strength]
+	elif daughter.is_risen():
+		daughter_info = "%s has RISEN with %s. Sköll is mortal; the ash has stopped." % [SunDaughter.NAME, "you" if daughter.holder == player else "the " + daughter.holder.name]
 	elif daughter.holder != null:
-		var note := "(Sköll doesn't know which city)"
+		var note := "(Sköll knows: he hunts her city)" if skoll.knows_her else "(Sköll doesn't know which city)"
+		if daughter.holder == player and s.turn >= GameState.RISE_TURN:
+			note = "(she rises at Favour %d)" % SunDaughter.RISE_FAVOUR
 		if daughter.holder == player and player.favour <= SunDaughter.WARN_FAVOUR:
 			note = "(UNHAPPY: at Favour %d she leaves)" % SunDaughter.LEAVE_FAVOUR
 		elif daughter.holder == player and s.turn < Skoll.ARRIVAL_TURN:
@@ -936,21 +948,26 @@ func draw_terrain_mark(c: Vector2, land: int, fill: Color) -> void:
 				draw_arc(c + Vector2(-5, y), 5.0, 0.2, PI - 0.2, 8, fill.lightened(0.3), 1.5)
 				draw_arc(c + Vector2(5, y), 5.0, 0.2, PI - 0.2, 8, fill.lightened(0.3), 1.5)
 
-# What the hovered hex's land does, in a small box by the mouse.
+# Ash: grey flecks.
+func draw_ash_mark(c: Vector2) -> void:
+	for v in [Vector2(-8, -4), Vector2(5, -8), Vector2(9, 5), Vector2(-3, 7), Vector2(0, -1)]:
+		draw_circle(c + v, 1.8, Color(0.62, 0.6, 0.58))
+
+# A rift in the void: a dark swirl.
 # The top bar: each part is drawn separately so hovering it can explain it.
 func draw_top_bar(font: Font) -> void:
 	var s := state
 	var p := s.player
 	var industry_net: int = s.industry_change(p) - s.tribute_amount(p)
 	var parts := [
-		["Turn %d" % s.turn, "Turn %d. Sköll's howling starts on turn %d, he arrives on turn %d; the Doom is on turn %d." % [s.turn, Skoll.WARNING_TURN, Skoll.ARRIVAL_TURN, GameState.DOOM_TURN]],
+		["Turn %d/%d" % [s.turn, GameState.END_TURN], "Turn %d of %d. Sköll's howling starts on turn %d and he arrives on turn %d. From turn %d Sunna can rise.\nThe game ends on turn %d: Dawn if Sunna rose with you, otherwise Dominion for whoever holds the most land.\nIt ends sooner if you slay the wolf, if he devours your city, or if he devours %d%% of all peoples." % [s.turn, GameState.END_TURN, Skoll.WARNING_TURN, Skoll.ARRIVAL_TURN, GameState.RISE_TURN, GameState.END_TURN, roundi(GameState.DEVOURED_SHARE * 100)]],
 		["Pop %d" % p.population, "Population %d (your city's size). Every point above 1 gives +1 Food, +1 Industry and +%d city defence a turn.\nThe city grows by 1 when stored Food reaches %d and Food isn't falling." % [p.population, GameState.POP_DEFENCE, s.growth_cost(p)]],
 		["Food %d/%d (%+d)" % [p.food, s.growth_cost(p), s.food_change(p)], "Food: %d stored; at %d your city grows. Each army unit eats %d a turn (scouts nothing); if it runs out, a unit deserts.\nThis turn: %s" % [p.food, s.growth_cost(p), GameState.UNIT_FOOD_UPKEEP, parts_text(s.food_parts(p))]],
 		["Industry %d (%+d)" % [p.industry, industry_net], "Industry: %d stored, spent on units, outposts and city buildings (Build...).\nThis turn: %s%s" % [p.industry, parts_text(s.industry_parts(p)), ", tribute %+d" % -s.tribute_amount(p) if s.tribute_amount(p) > 0 else ""]],
 		["Units %d" % p.units.size(), "Units: %d armies (supply %d/%d: %d + population, +%d with a Barracks) and %d scouts.\nEach army eats %d Food a turn and costs rising Industry upkeep: the first %d are free, then 1, 1, 2, 2, 3, 3... (now %d a turn). Scouts are free." % [s.army_count(p), s.army_count(p), s.supply_cap(p), GameState.SUPPLY_BASE, GameState.Buildings.BARRACKS_SUPPLY, p.scout_count(), GameState.UNIT_FOOD_UPKEEP, GameState.FREE_ARMIES, s.army_upkeep(p)]],
 		["Outposts %d" % p.outposts.size(), "Outposts: each earns by its land (plains +2 Food, forest +1/+1, hills +2 Industry), sees 2 hexes and claims the hexes around it. An enemy at war can take an unguarded one."],
 		["Army %d" % s.army_power(p), "Army: the total Strength of your units. The AIs compare armies before demanding or declaring war; %s wants %d+ by turn %d." % [SunDaughter.NAME, SunDaughter.READY_ARMY, Skoll.ARRIVAL_TURN]],
-		["Doom in %d" % (GameState.DOOM_TURN - s.turn), "Turns until the Doom (turn %d)." % GameState.DOOM_TURN],
+		["Land %d" % s.land_count(p), "Land: hexes of your territory that aren't ash (%s). On turn %d, Dominion goes to whoever holds the most." % [", ".join(s.ais.filter(func(f): return f.is_alive()).map(func(f): return "%s %d" % [f.name, s.land_count(f)])), GameState.END_TURN]],
 	]
 	top_bar_tips.clear()
 	var x := 20.0
@@ -1012,7 +1029,13 @@ func hex_tooltip(c: Vector2i) -> Array[String]:
 		return lines
 	var seen := s.player_can_see(c)
 	if seen and s.skoll.is_at(c):
-		lines.append("Sköll, the wolf who swallowed the sun: Strength %d. He can't be killed, only driven back. Hunting %s." % [s.skoll.strength, s.skoll.target_text()])
+		var sk := s.skoll
+		var hurt := " (%d with his wounds; they heal %d a turn)" % [sk.effective_strength(), Skoll.WOUND_HEAL] if sk.wounds > 0 else ""
+		lines.append("Sköll, the wolf who swallowed the sun: Strength %d%s. Hunting %s." % [sk.strength, hurt, sk.target_text()])
+		if sk.is_mortal():
+			lines.append("   MORTAL: an attack that beats him kills him. Each other army of yours or your allies next to him adds +%d." % GameState.WOLF_SUPPORT)
+		else:
+			lines.append("   Can't be killed while %s is hidden: an attacker dies but wounds him; wounds of half his Strength drive him back." % SunDaughter.NAME)
 	var u := s.unit_at(c)
 	if u != null and (seen or u.faction == s.player):
 		var who := "Your" if u.faction == s.player else "The %s" % u.faction.name
@@ -1063,6 +1086,8 @@ func hex_tooltip(c: Vector2i) -> Array[String]:
 		var land_owner := s.territory_owner(c)
 		if land_owner != null and land_owner != s.player:
 			lines.append("%s land%s" % [land_owner.name, " (borders CLOSED to you: entering declares war)" if s.closed_border(c) else ""])
+	if s.is_ash(c):
+		lines.append("Ash: dead land. No outposts, no income, counts as nobody's land.")
 	var land: int = s.terrain_at(c)
 	var text: String = Terrain.NAMES[land]
 	if not Terrain.passable(land):

@@ -20,7 +20,7 @@ extends RefCounted
 
 const WARNING_TURN := 10 # howling warnings start on this turn
 const ARRIVAL_TURN := 14 # he arrives on this turn
-const STRENGTH := 12 # his starting Strength
+const STRENGTH := 10 # his starting Strength
 const SWALLOW_BONUS := 8 # Strength he gains by swallowing Sunna (much stronger, but mortal)
 const RETURN_TURNS := 3 # turns in the void after being driven back
 const STRENGTH_PER_RETURN := 2 # he comes back stronger each time
@@ -143,6 +143,10 @@ func attack_city(f: Faction) -> void:
 		if she_is_here:
 			swallow_daughter()
 		game.devour(f) # (your city: you lose; enough factions: Sköll wins)
+		if not game.game_over:
+			# Sated, he goes back into the void to feed, and returns stronger.
+			game.add_message("Gorged, Sköll sinks back into the void to feed.")
+			drive_back()
 	else:
 		game.add_message("%s's city (defence %d) drove Sköll back! (He had a %s.)" % [f.name, defence, game.odds_text(chance)])
 		if she_is_here and not knows_her:
