@@ -38,6 +38,8 @@ func _initialize() -> void:
 		if s.next_to_a_city(c): bad_ash += 1
 	print("   ash next to a city: %d (expect 0)" % bad_ash)
 	# 2. immortal: the attacker dies, he's wounded; enough wounds drive him back
+	H.answer_choices(s) # (a waiting pop-up blocks every action)
+	if s.has_pending_offer(): s.pending_relation().answer(false)
 	sk.active = true; sk.wounds = 0; sk.pos = Vector2i(9, 7)
 	var u = s.player.add_unit(Vector2i(8, 7)); u.moves = 1
 	var st0 = sk.strength
@@ -78,7 +80,7 @@ func _initialize() -> void:
 	m.queue_free()
 	# 5. Sunna's requests and her rising
 	m = new_game(); s = m.state; sk = s.skoll
-	s.daughter.join(s.player); s.player.favour = 5; s.player.food = 50; s.player.industry = 50
+	s.daughter.join(s.player); s.player.favour = 7; s.player.food = 50; s.player.industry = 50
 	var asked := []
 	while s.turn < 19:
 		for c in s.pending_choices:
@@ -86,8 +88,10 @@ func _initialize() -> void:
 		var fav_before = s.player.favour
 		var was_request = s.has_pending_choice() and s.pending_choices[0]["title"].begins_with("SUNNA")
 		if was_request:
-			s.answer_choice(1) # refuse
-			if s.player.favour != max(0, fav_before + SunDaughter.REQUEST_REFUSED): print("   BAD: refusing didn't cost Favour")
+			var refuse := asked.size() == 1 # refuse the first, grant the rest (refusing twice would drive her out)
+			s.answer_choice(1 if refuse else 0)
+			var expect = clampi(fav_before + (SunDaughter.REQUEST_REFUSED if refuse else SunDaughter.REQUEST_GRANTED), 0, SunDaughter.MAX_FAVOUR)
+			if s.player.favour != expect: print("   BAD: answering the request changed her Favour %d -> %d, expected %d" % [fav_before, s.player.favour, expect])
 		H.answer_choices(s)
 		s.end_turn()
 		if s.has_pending_offer(): s.pending_relation().answer(false)

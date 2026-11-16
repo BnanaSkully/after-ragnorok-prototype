@@ -326,7 +326,7 @@ func final_ending() -> void:
 # its own faction (or the player's allies) standing next to him: the "large
 # combined force" it takes to bring him down.
 func wolf_attack(u: Unit) -> int:
-	var attack := u.strength
+	var attack := u.fighting_strength() # (a wounded unit attacks weaker)
 	for f in factions:
 		var with_us: bool = f == u.faction or (u.faction == player and f != player and relation(f).pact_active())
 		if not with_us:
@@ -337,7 +337,9 @@ func wolf_attack(u: Unit) -> int:
 	return attack
 
 func wolf_slain(f: Faction) -> void:
-	if f == player:
+	if f == null:
+		end_game("The wolf is dead", "Sköll fell on turn %d." % turn)
+	elif f == player:
 		end_game("Slay the wolf", "On turn %d your people brought down Sköll.\nThe wolf is dead." % turn)
 	else:
 		end_game("The %s slew the wolf" % f.name, "Sköll is dead, but the glory is theirs.")

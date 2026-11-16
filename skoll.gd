@@ -210,40 +210,58 @@ func swallow_daughter() -> void:
 	strength += SWALLOW_BONUS
 	game.add_message("Sköll swallowed %s! He is the sun now (Strength %d), and the world goes dark. But the sun inside him makes him MORTAL: a large combined force can kill him." % [SunDaughter.NAME, strength])
 
-# A unit stands in his way. If he loses, it wounds him (and may drive him back).
+# A unit stands in his way: both take damage, like any fight between units
+# (GameState.combat_damage). The unit loses HP (and may die: then he steps
+# in); the damage it deals back becomes his wounds.
 func attack_unit(u: Unit) -> void:
-	var chance: float = game.win_chance(effective_strength(), game.defender_strength(u)) # forest and hills help
-	if randf() < chance:
-		game.add_message("Sköll attacked %s's unit and destroyed it (%s)." % [u.faction.name, game.odds_text(chance)])
-		pos = u.pos
+	var defence: int = game.defender_strength(u) # (wounds weaken it; forest and hills help)
+	var dealt: int = game.combat_damage(effective_strength(), defence)
+	var taken: int = game.combat_damage(defence, effective_strength())
+	u.hp -= dealt
+	u.acted = true
+	if u.hp <= 0:
+		game.add_message("Sköll attacked %s's unit and destroyed it (dealt %d, took %d)." % [u.faction.name, dealt, taken])
+		var cell := u.pos
 		u.faction.remove_unit(u)
+		pos = cell
 	else:
-		game.add_message("%s's unit held against Sköll and wounded him! (He had a %s.)" % [u.faction.name, game.odds_text(chance)])
-		wound(game.defender_strength(u))
+		game.add_message("%s's unit held against Sköll: it lost %d HP and wounded him by %d." % [u.faction.name, dealt, taken])
+	wound(taken, u.faction)
 
 # A unit (the player's) attacks him, helped by every other army of its own or
-# its allies next to him (GameState.wolf_attack). Hidden Sunna: he can't die,
-# the unit dies but wounds him. Mortal: an attack that beats him kills him.
+# its allies next to him (GameState.wolf_attack). The damage it deals becomes
+# his wounds. Hidden Sunna: he can't die and the attacker dies (Nathan's rule).
+# Mortal: a normal two-way fight; he dies when his wounds reach his Strength.
 func attacked_by(u: Unit) -> void:
 	var attack: int = game.wolf_attack(u)
+	var dealt: int = game.combat_damage(attack, effective_strength())
 	if is_mortal():
-		var chance: float = game.win_chance(attack, effective_strength())
-		if randf() < chance:
-			game.add_message("Your attack (%d against %d) brought Sköll down (%s)!" % [attack, effective_strength(), game.odds_text(chance)])
+		var taken: int = game.combat_damage(effective_strength(), attack)
+		u.hp -= taken
+		game.add_message("Your attack (%d against %d) wounded Sköll by %d; your unit lost %d HP." % [attack, effective_strength(), dealt, taken])
+		if u.hp <= 0:
+			game.add_message("Your unit died.")
+			u.faction.remove_unit(u)
+	else:
+		game.add_message("Sköll can't be killed while %s is hidden. Your unit died, but its attack of %d wounded him by %d." % [SunDaughter.NAME, attack, dealt])
+		u.faction.remove_unit(u)
+	wound(dealt, u.faction)
+
+# Wounds lower his Strength until they heal (WOUND_HEAL a turn). Immortal:
+# wounds of half his Strength drive him back. Mortal: wounds equal to his
+# Strength kill him ("by" is whoever dealt the last blow).
+func wound(amount: int, by: Faction = null) -> void:
+	wounds += amount
+	if is_mortal():
+		if wounds >= strength:
+			game.add_message("Sköll falls! The wolf is dead.")
 			slain = true
 			active = false
 			pos = HexMap.NO_CELL
-			game.wolf_slain(u.faction)
-			return
-		game.add_message("Your attack (%d against %d) failed (%s): the unit died, but he is wounded." % [attack, effective_strength(), game.odds_text(chance)])
-	else:
-		game.add_message("Sköll can't be killed while %s is hidden. Your unit died, but its attack of %d wounded him." % [SunDaughter.NAME, attack])
-	u.faction.remove_unit(u)
-	wound(attack)
-
-# Wounds lower his Strength until they heal; wounds of half his Strength drive him back.
-func wound(amount: int) -> void:
-	wounds += amount
+			game.wolf_slain(by)
+		else:
+			game.add_message("Sköll is wounded: %d of his %d Strength left." % [effective_strength(), strength])
+		return
 	if wounds * 2 >= strength:
 		game.add_message("Badly wounded (%d of his %d Strength), Sköll flees into the void." % [mini(wounds, strength), strength])
 		drive_back()
