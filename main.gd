@@ -800,6 +800,7 @@ func _draw() -> void:
 			else:
 				draw_circle(uc, HexView2D.HEX_SIZE * 0.55, ring)
 				draw_circle(uc, HexView2D.HEX_SIZE * 0.45, col)
+			draw_hp_bar(uc + Vector2(0, HexView2D.HEX_SIZE * 0.62), u.hp)
 
 	# The Sun's Daughter alone in the open: a bright sun on her hex.
 	if daughter.is_rogue() and s.player_can_see(daughter.pos):
@@ -968,7 +969,8 @@ func draw_tooltip() -> void:
 	var at := hover_pos + Vector2(14, 22)
 	if lines.is_empty():
 		lines = hex_tooltip(hover_cell)
-		at = HexView2D.hex_center(hover_cell) + Vector2(18, -26)
+		# above the hovered hex, so the units around it stay visible
+		at = HexView2D.hex_center(hover_cell) + Vector2(18, -HexView2D.HEX_SIZE - lines.size() * 17 + 6)
 	if lines.is_empty():
 		return
 	var font := ThemeDB.fallback_font
@@ -995,15 +997,22 @@ func hex_tooltip(c: Vector2i) -> Array[String]:
 	if u != null and (seen or u.faction == s.player):
 		var who := "Your" if u.faction == s.player else "The %s" % u.faction.name
 		var kind := "scout" if u.is_scout() else "army"
-		var line := "%s %s: Strength %d" % [who, kind, u.strength]
-		if s.defender_strength(u) != u.strength:
-			line += " (defends at %d here)" % s.defender_strength(u)
+		var line := "%s %s: HP %d/%d, Strength %d" % [who, kind, u.hp, Unit.MAX_HP, u.strength]
+		if u.fighting_strength() != u.strength:
+			line += " (%d while wounded)" % u.fighting_strength()
+		if s.defender_strength(u) != u.fighting_strength():
+			line += ", defends at %d here" % s.defender_strength(u)
 		line += ", moves %d/%d" % [u.moves, u.max_moves()]
 		if u.busy_until > s.turn:
 			line += ", standing watch until turn %d" % u.busy_until
 		if u.faction != s.player:
 			line += "  [%s]" % ("AT WAR with you" if s.at_war(s.player, u.faction) else "at peace")
 		lines.append(line)
+		if u.hp < Unit.MAX_HP and u.faction == s.player:
+			lines.append("   Heals %d HP in a turn it doesn't move or fight (%d in your own land)." % [GameState.HEAL_REST, GameState.HEAL_HOME])
+		if selected != null and u.faction != s.player and HexMap.is_neighbour(selected.pos, c) and not s.is_city(c):
+			var e: Vector2i = s.expected_combat(selected, u)
+			lines.append("   If your selected unit attacks: it deals about %d and takes about %d (of %d HP)." % [e.x, e.y, selected.hp])
 	if seen and s.daughter.is_rogue() and s.daughter.pos == c:
 		lines.append("%s, alone in the open. Move a unit onto her to persuade her (%d%%)." % [SunDaughter.NAME.capitalize(), roundi(s.daughter.persuade_chance(s.player) * 100)])
 	var city := s.city_owner(c)
@@ -1048,6 +1057,14 @@ func hex_tooltip(c: Vector2i) -> Array[String]:
 		text += ": " + ", ".join(bits)
 	lines.append(text)
 	return lines
+
+# A small health bar under a unit: green when healthy, through yellow, to red.
+func draw_hp_bar(at: Vector2, hp: int) -> void:
+	var w := 26.0
+	var frac := clampf(float(hp) / Unit.MAX_HP, 0.0, 1.0)
+	draw_rect(Rect2(at - Vector2(w / 2 + 1, 1), Vector2(w + 2, 5)), Color(0.08, 0.08, 0.08))
+	var col := Color(0.85, 0.2, 0.15).lerp(Color(0.95, 0.85, 0.2), clampf(frac * 2.0, 0.0, 1.0)) if frac < 0.5 else Color(0.95, 0.85, 0.2).lerp(Color(0.3, 0.85, 0.3), (frac - 0.5) * 2.0)
+	draw_rect(Rect2(at - Vector2(w / 2, 0), Vector2(w * frac, 3)), col)
 
 # A rift in the void: a dark swirl.
 func draw_rift(rc: Vector2) -> void:

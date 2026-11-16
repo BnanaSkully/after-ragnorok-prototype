@@ -149,11 +149,19 @@ Claude's recommendation, waiting on Nathan's choice:
 2. Phase 3, build step 1 (the Long Night starts, the clock runs, Sköll charges her city), so a game actually ends instead of stopping at "Phase 3 is not built yet"
 3. Zone of control and healing (cheapest of the defaults still missing)
 
+## Unit health: built (Nathan's playtest after Part 1, from the backlog)
+
+- Every unit has 10 HP (Unit.MAX_HP). Unit against unit, both sides take damage: COMBAT_DAMAGE (10) is shared out by Strength (each side deals 10 x its Strength / both Strengths), varied by +/-25%. Equal fresh units deal about 5 each (two fights to kill); Strength 6 against 3 deals 6.6 and takes 3.4. A unit at 0 HP dies; if the defender dies and the attacker lives, it moves in (never into a city)
+- A wounded unit fights weaker: Strength x (0.5 + 0.5 x HP/10), never below 1 (Unit.fighting_strength); used attacking, defending, garrisoning a city and in sieges
+- Healing (standard 4X): a unit that neither moved nor fought in a turn heals HEAL_REST 2, or HEAL_HOME 4 in its own territory (Unit.acted). AI units at 4 HP or less rest instead of attacking
+- Not changed (yet): attacks on cities and fights with Sköll stay win-or-lose (Sköll is reworked in Part 2; city HP would be its own system)
+- On screen: an HP bar under every unit (green to yellow to red); the tooltip shows HP, Strength while wounded, healing, and, next to your selected unit, the damage an attack would deal and take. Map tooltips sit above the hovered hex so its neighbours stay visible
+- Measured (tests/health_test.gd): 1000-fight averages as above; 4 unit fights a game, half of them kill a unit; HP never out of range
+
 ## Missing 4X mechanics (backlog)
 
 Defaults from "How Nathan works" not built yet (build without asking):
 - Zone of control: a unit must stop when it moves next to an enemy (now enemies can walk past an army to an outpost or city)
-- Healing when resting, which needs unit health: today every fight kills one side outright; the standard is damage, so a winner comes out hurt. Resting heals, faster in your own territory
 - Production queue: today things are bought instantly with stored Industry; standard is the city working on one item until it's finished
 Other standard 4X mechanics (ask Nathan before building, they change the game's shape):
 - Territory that grows with the city (borders pushing against each other: friction and reasons for war, now that borders are closed)
