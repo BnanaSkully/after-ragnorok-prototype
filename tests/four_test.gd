@@ -7,7 +7,8 @@ func _initialize() -> void:
 	var ends := {}
 	var holders := {}
 	var stats := {"ai vs ai fights": 0, "offers": 0, "player diplomacy": 0, "ai betrayals": 0, "ai cities fallen": 0, "first attack on you": 0, "first attack on an ai": 0}
-	for g in 300:
+	var n_games: int = H.games(300)
+	for g in n_games:
 		var m = load("res://main.tscn").instantiate()
 		root.add_child(m)
 		var s = m.state

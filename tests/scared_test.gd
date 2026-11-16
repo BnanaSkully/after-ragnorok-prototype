@@ -4,7 +4,8 @@ func _initialize() -> void:
 	await process_frame
 	seed(31)
 	var games_ai_held := 0; var games_with_offer := 0; var offers := 0; var free := 0; var paid := 0; var taken := 0; var bad := 0
-	for g in 300:
+	var n_games: int = H.games(300)
+	for g in n_games:
 		var m = load("res://main.tscn").instantiate()
 		root.add_child(m)
 		var s = m.state

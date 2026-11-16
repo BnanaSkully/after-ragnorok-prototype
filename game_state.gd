@@ -16,8 +16,13 @@ extends RefCounted
 #   turn_events.gd      small events every few turns after the Landing
 #   discoveries.gd      ruins hidden in the fog (placing them, their rewards)
 #   terrain.gd          the land: plains, forest, hills, mountains, water
+#   buildings.gd        city buildings (Granary, Workshop, Watchtower, Forge)
 
-const DOOM_TURN := 20 # survive until this turn and Phase 3 (chaos) begins
+const RISE_TURN := 20 # from this turn Sunna can rise (it used to be "the Doom" and a dead end)
+const END_TURN := 40 # the game ends here: Dawn if Sunna rose with you, else Dominion (most land)
+const DEVOURED_SHARE := 0.45 # Sköll wins once he has devoured this share of all factions
+const ASH_PER_CYCLE := 8 # hexes that turn to ash each time Sköll comes through a rift
+const WOLF_SUPPORT := 2 # each other army of yours or your allies next to Sköll adds this to an attack on him
 const MIN_LANDING_DISTANCE := 4 # how many hexes away from every AI city you must land
 const LANDING_INDUSTRY := 5 # Industry everyone unloads from the ark at the Landing (enough to build something on turn 1)
 const UNIT_COST := 5 # Industry to build a new army unit
@@ -46,6 +51,9 @@ const AI_SIEGE_ODDS := 0.4 # an AI army attacks an enemy city when its chance is
 const AI_MARCH_ARMIES := 2 # an AI at war sends spare armies at enemy cities once it has this many
 const GROWTH_BASE := 10 # Food stored to grow from population 1 to 2...
 const GROWTH_STEP := 5 # ...and each later growth costs this much more
+# Population (city size): every point above 1 adds +1 Food, +1 Industry and
+# +1 city defence a turn (bigger cities hold out better: the usual 4X rule).
+const POP_DEFENCE := 1
 const WALL_COST := 10 # Industry per wall level
 const WALL_DEFENCE := 4 # city defence each wall level adds
 const MAX_WALLS := 2
@@ -54,6 +62,7 @@ const NO_CELL := HexMap.NO_CELL
 const Crossing := preload("res://crossing_events.gd")
 const TurnEvents := preload("res://turn_events.gd")
 const Discoveries := preload("res://discoveries.gd")
+const Buildings := preload("res://buildings.gd")
 
 # The stages of a game, in order:
 # CROSSING = journey events, LANDING = choosing where to found your city, PLAYING = the turns.
@@ -91,11 +100,13 @@ var ruins: Array[Dictionary] = []
 var pending_choices: Array[Dictionary] = []
 var next_event_turn := 0 # when the next small event happens
 var event_deck: Array = [] # small events not yet seen this game, shuffled
+var next_request_turn := SunDaughter.REQUEST_FROM # when Sunna next asks something of you (while you shelter her)
 # Wars between AI factions: "Celtic|Greek" -> the turn it started. Every pair
 # starts at peace. (The player's wars are in each Diplomacy, GameState.relations.)
 var ai_war_since := {}
 var ai_truce_until := {} # "Celtic|Greek" -> no new war between them before this turn
 var terrain := {} # hex -> Terrain.Type, a new map every game (made in _init)
+var ash := {} # hexes turned to ash by Sköll (hex -> true): dead land, see "Ash"
 
 func _init() -> void:
 	terrain = Terrain.generate(ais.map(func(f): return f.city_pos))
@@ -216,7 +227,7 @@ func end_turn() -> void:
 			if verdict != "":
 				add_message(verdict)
 		for u in f.units:
-			u.moves = u.max_moves()
+			u.moves = 0 if turn < u.busy_until else u.max_moves() # (standing watch: can't move)
 	judge_readiness()
 	check_daughter_leaving()
 	for f in ais:
@@ -224,7 +235,7 @@ func end_turn() -> void:
 	for r in relations:
 		r.new_turn()
 	diplomacy_action_used = false
-	if not game_over and turn < DOOM_TURN:
+	if not game_over and turn < END_TURN:
 		# at most one AI faction makes an offer each turn (the view shows a pop-up)
 		var order := relations.duplicate()
 		order.shuffle()
@@ -235,16 +246,120 @@ func end_turn() -> void:
 			if r.has_pending():
 				break
 		maybe_turn_event()
+		maybe_sunna_request()
+	maybe_rise()
 	eject_trespassers()
 	update_sight()
-	if turn >= DOOM_TURN:
-		end_game("You survived until the Doom",
-			"Sköll howls, and chaos pours out of the void.\nPHASE 3 BEGINS: chaos factions rise and rogues join Sköll.\n(Phase 3 is not built yet.)")
+	if turn >= END_TURN and not game_over:
+		final_ending()
 
 func end_game(title: String, detail: String) -> void:
 	game_over = true
 	end_title = title
 	end_detail = detail
+
+# --- Endings -------------------------------------------------------------------
+# Sköll devoured faction f (its last, and only, city fell to him). Your city:
+# you lose. Once he has devoured DEVOURED_SHARE of all factions, Sköll wins.
+var devoured: Array[String] = []
+
+func devour(f: Faction) -> void:
+	devoured.append(f.name)
+	if f == player:
+		end_game("Devoured", "Sköll tore down your city on turn %d.\nYour people are gone." % turn)
+	elif devoured.size() >= ceili(DEVOURED_SHARE * factions.size()):
+		end_game("Sköll wins", "He has devoured %s.\nThe wolf rules the long night." % " and ".join(devoured))
+
+# Land: every hex of a faction's territory (its city and outposts and the
+# hexes around them) that isn't ash.
+func land_count(f: Faction) -> int:
+	var n := 0
+	for row in HexMap.ROWS:
+		for col in HexMap.COLS:
+			var c := Vector2i(col, row)
+			if territory_owner(c) == f and not is_ash(c):
+				n += 1
+	return n
+
+# Turn END_TURN: Dawn if Sunna has risen (for whoever she chose), otherwise
+# Dominion for whoever holds the most land (a tie counts as yours).
+func final_ending() -> void:
+	if daughter.is_risen() and daughter.holder != null and daughter.holder.is_alive():
+		if daughter.holder == player:
+			end_game("Dawn", "Sunna has risen, and she stands with you.\nThe long night is over.")
+		else:
+			end_game("Dawn for the %s" % daughter.holder.name, "Sunna has risen, but she chose the %s.\nTheirs is the new world." % daughter.holder.name)
+		return
+	var best: Faction = player
+	for f in ais:
+		if f.is_alive() and land_count(f) > land_count(best):
+			best = f
+	var tally := ", ".join(factions.filter(func(f): return f.is_alive()).map(func(f): return "%s %d" % [f.name, land_count(f)]))
+	if best == player:
+		end_game("Dominion", "Turn %d: you hold the most land.\n(%s hexes)" % [turn, tally])
+	else:
+		end_game("The %s hold the most land" % best.name, "Turn %d: Dominion goes to the %s.\n(%s hexes)" % [turn, best.name, tally])
+
+# A unit's attack on Sköll: its Strength +WOLF_SUPPORT for every other army of
+# its own faction (or the player's allies) standing next to him: the "large
+# combined force" it takes to bring him down.
+func wolf_attack(u: Unit) -> int:
+	var attack := u.strength
+	for f in factions:
+		var with_us: bool = f == u.faction or (u.faction == player and f != player and relation(f).pact_active())
+		if not with_us:
+			continue
+		for other in f.units:
+			if other != u and not other.is_scout() and HexMap.is_neighbour(other.pos, skoll.pos):
+				attack += WOLF_SUPPORT
+	return attack
+
+func wolf_slain(f: Faction) -> void:
+	if f == player:
+		end_game("Slay the wolf", "On turn %d your people brought down Sköll.\nThe wolf is dead." % turn)
+	else:
+		end_game("The %s slew the wolf" % f.name, "Sköll is dead, but the glory is theirs.")
+
+# --- Ash ----------------------------------------------------------------------
+# Each time Sköll comes through a rift, ASH_PER_CYCLE hexes turn to ash,
+# spreading in from the map's edges, from ash already there, and around the
+# rift he used. Ash is dead land: no outposts (one standing there is lost),
+# no ruins, and it counts as nobody's land for Dominion. Units can still walk
+# on it. A city and the hexes next to it never turn to ash. It stops once
+# Sunna has risen.
+func spread_ash(origin: Vector2i) -> void:
+	if daughter.is_risen():
+		return
+	var options: Array[Vector2i] = []
+	for row in HexMap.ROWS:
+		for col in HexMap.COLS:
+			var c := Vector2i(col, row)
+			if is_ash(c) or not passable(c) or next_to_a_city(c):
+				continue
+			var edge := col == 0 or row == 0 or col == HexMap.COLS - 1 or row == HexMap.ROWS - 1
+			var near := HexMap.hex_distance(c, origin) <= 1 or HexMap.neighbours(c).any(func(n): return is_ash(n))
+			if edge or near:
+				options.append(c)
+	options.shuffle()
+	var lost_outposts := 0
+	for c in options.slice(0, ASH_PER_CYCLE):
+		ash[c] = true
+		var owner := outpost_owner(c)
+		if owner != null:
+			owner.outposts.erase(c)
+			if owner == player:
+				lost_outposts += 1
+		for r in ruins:
+			if r["cell"] == c:
+				r["taken"] = true # buried
+	if lost_outposts > 0:
+		add_message("Ash swallowed %d of your outposts." % lost_outposts)
+
+func next_to_a_city(c: Vector2i) -> bool:
+	for f in factions:
+		if f.is_alive() and HexMap.hex_distance(c, f.city_pos) <= 1:
+			return true
+	return false
 
 func add_message(text: String) -> void:
 	messages.append(text)
@@ -313,21 +428,57 @@ func judge_readiness() -> void:
 # --- Food -------------------------------------------------------------------
 # Food made by the city (and the Daughter's bonus) minus what the army eats.
 func food_change(f: Faction) -> int:
-	var made := CITY_FOOD + (f.population - 1) # each extra population works more fields
+	return sum_parts(food_parts(f))
+
+func industry_change(f: Faction) -> int:
+	return sum_parts(industry_parts(f))
+
+# Where a faction's Food comes from and goes, as [what, amount] pairs. The
+# totals above are made from these, so the view's breakdown can't disagree.
+func food_parts(f: Faction) -> Array:
+	var parts := [["city", CITY_FOOD]]
+	if f.population > 1:
+		parts.append(["population %d" % f.population, f.population - 1]) # each extra population works more fields
+	var outposts := 0
 	for o in f.outposts:
-		made += Terrain.OUTPOST_FOOD[terrain_at(o)] # an outpost's income depends on its land
+		outposts += Terrain.OUTPOST_FOOD[terrain_at(o)] # an outpost's income depends on its land
+	if outposts != 0:
+		parts.append(["outposts", outposts])
+	if f.buildings.has("granary"):
+		parts.append(["Granary", Buildings.GRANARY_FOOD])
 	if daughter.shelters_with(f):
-		made += SunDaughter.FOOD
+		parts.append([SunDaughter.NAME, SunDaughter.FOOD])
+	elif daughter.risen_with(f):
+		parts.append(["%s risen" % SunDaughter.NAME, SunDaughter.RISEN_FOOD])
 	var eaten := 0
 	for u in f.units:
 		eaten += u.upkeep(UNIT_FOOD_UPKEEP)
-	return made - eaten
+	if eaten != 0:
+		parts.append(["armies eat", -eaten])
+	return parts
 
-func industry_change(f: Faction) -> int:
-	var made := CITY_INDUSTRY + (f.population - 1)
+func industry_parts(f: Faction) -> Array:
+	var parts := [["city", CITY_INDUSTRY]]
+	if f.population > 1:
+		parts.append(["population %d" % f.population, f.population - 1])
+	var outposts := 0
 	for o in f.outposts:
-		made += Terrain.OUTPOST_INDUSTRY[terrain_at(o)]
-	return made + (SunDaughter.INDUSTRY if daughter.shelters_with(f) else 0)
+		outposts += Terrain.OUTPOST_INDUSTRY[terrain_at(o)]
+	if outposts != 0:
+		parts.append(["outposts", outposts])
+	if f.buildings.has("workshop"):
+		parts.append(["Workshop", Buildings.WORKSHOP_INDUSTRY])
+	if daughter.shelters_with(f):
+		parts.append([SunDaughter.NAME, SunDaughter.INDUSTRY])
+	elif daughter.risen_with(f):
+		parts.append(["%s risen" % SunDaughter.NAME, SunDaughter.RISEN_INDUSTRY])
+	return parts
+
+func sum_parts(parts: Array) -> int:
+	var total := 0
+	for p in parts:
+		total += p[1]
+	return total
 
 # City growth (the usual 4X rule): when stored Food reaches the growth cost and
 # the city isn't losing Food, the city grows by 1 and the cost is used up.
@@ -340,7 +491,7 @@ func grow(f: Faction) -> void:
 	f.food -= growth_cost(f)
 	f.population += 1
 	if f == player:
-		add_message("Your city grew to population %d: +1 Food and +1 Industry a turn." % f.population)
+		add_message("Your city grew to population %d: +1 Food, +1 Industry and +%d city defence." % [f.population, POP_DEFENCE])
 
 # Not enough Food: stores stay at 0 and one army unit deserts (the one farthest
 # from the city, so the garrison stays; scouts eat nothing so they stay).
@@ -526,6 +677,12 @@ func ai_build(f: Faction) -> void:
 		return
 	if f.industry >= UNIT_COST and food_change(f) - UNIT_FOOD_UPKEEP >= 0:
 		build_unit(f)
+		return
+	# It can't feed more armies: spare Industry goes into a city building.
+	for key in Buildings.LIST:
+		if not f.buildings.has(key) and f.industry >= Buildings.cost(key):
+			build_building(f, key)
+			return
 
 # --- Trading the Sun's Daughter ---------------------------------------------------
 # What she's worth to faction f, as a price in Industry (-10 to 10): positive,
@@ -767,7 +924,7 @@ func enter_hex(u: Unit, cell: Vector2i) -> void:
 		if r["cell"] == cell and not r["taken"]:
 			r["taken"] = true
 			if f == player:
-				pending_choices.append(Discoveries.ruin_choice())
+				pending_choices.append(Discoveries.ruin_choice(self))
 			else:
 				Discoveries.ai_take_ruin(self, f)
 				if player_can_see(cell):
@@ -1017,9 +1174,30 @@ func is_waiting() -> bool:
 func can_act() -> bool:
 	return can_play() and not is_waiting()
 
-# Can the player pay for these effects? (Only costs count: negative Food or Industry.)
+# Can the player pick an option with these effects? (See option_problem.)
 func can_afford(effects: Dictionary) -> bool:
-	return player.food + effects.get("food", 0) >= 0 and player.industry + effects.get("industry", 0) >= 0
+	return option_problem(effects) == ""
+
+# Why the player can't pick an option with these effects ("" = they can): a
+# cost they can't pay, or Favour they can't gain (already at the top).
+func option_problem(effects: Dictionary) -> String:
+	if player.food + effects.get("food", 0) < 0 or player.industry + effects.get("industry", 0) < 0:
+		return "you can't afford it"
+	if effects.get("favour", 0) > 0 and player.favour >= SunDaughter.MAX_FAVOUR:
+		return "her Favour is already at its highest"
+	if effects.has("guard_turns") and guard_unit() == null:
+		return "you have no army unit"
+	return ""
+
+# The army unit that stands watch for an event: the one in the city, or the nearest to it.
+func guard_unit() -> Unit:
+	var best: Unit = null
+	for u in player.units:
+		if u.is_scout():
+			continue
+		if best == null or HexMap.hex_distance(u.pos, player.city_pos) < HexMap.hex_distance(best.pos, player.city_pos):
+			best = u
+	return best
 
 # The player picks option i of the first waiting choice.
 func answer_choice(i: int) -> void:
@@ -1063,6 +1241,18 @@ func apply_effects(effects: Dictionary) -> void:
 		var r_ally := relation(faction_named(effects["abandon_ally"]))
 		if r_ally.pact_active():
 			r_ally.break_pact()
+	if effects.has("guard_turns"):
+		var g := guard_unit()
+		if g != null:
+			g.busy_until = turn + effects["guard_turns"]
+			g.moves = 0
+	if effects.has("her_favour"): # granting or refusing Sunna's request
+		daughter.change_favour(player, effects["her_favour"])
+	if effects.has("spoil"):
+		player.food = maxi(0, player.food - effects["spoil"])
+	if effects.has("trust_all"):
+		for r in relations:
+			r.change_trust(effects["trust_all"])
 	if effects.get("reveal", false):
 		var hidden := ais.filter(func(f): return f.is_alive() and not player.explored.has(f.city_pos))
 		if hidden.is_empty():
@@ -1071,6 +1261,35 @@ func apply_effects(effects: Dictionary) -> void:
 			var f: Faction = hidden.pick_random()
 			reveal_area(player, f.city_pos, 2)
 			add_message("He leads your mapmakers to where the %s landed." % f.name)
+
+# Sunna asks something of you every REQUEST_GAP turns while you shelter her.
+func maybe_sunna_request() -> void:
+	if not daughter.shelters_with(player):
+		next_request_turn = maxi(next_request_turn, turn + 1)
+		return
+	if turn < next_request_turn:
+		return
+	next_request_turn = turn + SunDaughter.REQUEST_GAP
+	var r: Dictionary = TurnEvents.SUNNA_REQUESTS.pick_random()
+	var grant: Dictionary = r["effects"].duplicate()
+	grant["her_favour"] = SunDaughter.REQUEST_GRANTED
+	pending_choices.append({"title": r["title"], "text": r["text"], "options": [
+		{"label": "%s: her Favour %+d" % [r["grant"], SunDaughter.REQUEST_GRANTED], "effects": grant, "result": "Sunna smiles."},
+		{"label": "Refuse: her Favour %+d" % SunDaughter.REQUEST_REFUSED, "effects": {"her_favour": SunDaughter.REQUEST_REFUSED}, "result": "Sunna turns away."},
+	]})
+
+# From RISE_TURN: if she shelters with a faction that has earned RISE_FAVOUR,
+# she rises as the new sun and stands with them.
+func maybe_rise() -> void:
+	if turn < RISE_TURN or daughter.state != SunDaughter.State.SHELTERED or daughter.holder == null or not daughter.holder.is_alive():
+		return
+	if daughter.holder.favour < SunDaughter.RISE_FAVOUR:
+		return
+	daughter.state = SunDaughter.State.RISEN
+	skoll.strength = Skoll.STRENGTH # mortal, and back to his normal Strength
+	skoll.wounds = 0
+	var who := "you" if daughter.holder == player else "the " + daughter.holder.name
+	remember("Turn %d: SUNNA HAS RISEN and stands with %s (+%d Food, +%d Industry a turn). Sköll is mortal now (Strength %d), and the ash stops." % [turn, who, SunDaughter.RISEN_FOOD, SunDaughter.RISEN_INDUSTRY, skoll.strength])
 
 # Every few turns after the Landing, a small event asks the player to choose.
 func maybe_turn_event() -> void:
@@ -1082,6 +1301,31 @@ func maybe_turn_event() -> void:
 
 # --- Walls ------------------------------------------------------------------
 # A city improvement: each level costs WALL_COST Industry and adds WALL_DEFENCE.
+func city_sight(f: Faction) -> int:
+	return CITY_SIGHT + (Buildings.WATCHTOWER_SIGHT if f.buildings.has("watchtower") else 0)
+
+# --- City buildings (buildings.gd) -------------------------------------------
+func can_build_building(f: Faction, key: String) -> bool:
+	return f.is_alive() and not f.buildings.has(key) and f.industry >= Buildings.cost(key)
+
+func build_building(f: Faction, key: String) -> bool:
+	if not can_build_building(f, key):
+		return false
+	f.industry -= Buildings.cost(key)
+	f.buildings[key] = true
+	if key == "forge":
+		f.strength += Buildings.FORGE_STRENGTH # new army units copy their faction's Strength
+	return true
+
+func player_build_building(key: String) -> void:
+	if not can_act():
+		return
+	if build_building(player, key):
+		messages = ["You built a %s (%d Industry): %s." % [Buildings.LIST[key]["name"], Buildings.cost(key), Buildings.LIST[key]["text"]]]
+		update_sight()
+	else:
+		messages = ["Can't build the %s." % Buildings.LIST[key]["name"]]
+
 func build_walls(f: Faction) -> bool:
 	if not f.is_alive() or f.walls >= MAX_WALLS or f.industry < WALL_COST:
 		return false
@@ -1138,7 +1382,7 @@ func outpost_spots(f: Faction) -> Array[Vector2i]:
 	return spots
 
 func can_place_outpost(f: Faction, c: Vector2i) -> bool:
-	if not HexMap.in_bounds(c) or not can_see(f, c) or not passable(c):
+	if not HexMap.in_bounds(c) or not can_see(f, c) or not passable(c) or is_ash(c):
 		return false
 	if HexMap.hex_distance(c, f.city_pos) > OUTPOST_RANGE:
 		return false
@@ -1204,18 +1448,22 @@ func resolve_combat(attacker: Unit, defender: Unit) -> void:
 		attacker.faction.remove_unit(attacker)
 		add_message("%s attacked %s and lost (%s)." % [attacker.faction.name, defender.faction.name, odds_text(chance)])
 
-# A city's defence (the usual 4X rule): the Strength of its own unit standing
-# in it (the garrison), plus its walls, plus the Daughter's bonus if it shelters her.
 # A unit's Strength when attacked: forest and hills help the defender.
 func defender_strength(u: Unit) -> int:
 	return u.strength + Terrain.DEFENCE[terrain_at(u.pos)]
 
+# A city's defence (the usual 4X rule): the Strength of its own unit standing
+# in it (the garrison), plus its walls, its land, its population above 1, plus
+# the Daughter's bonus if it shelters her.
 func city_defence(f: Faction) -> int:
 	var defence: int = f.walls * WALL_DEFENCE + Terrain.DEFENCE[terrain_at(f.city_pos)] # a city on hills is harder to take
+	defence += (f.population - 1) * POP_DEFENCE # bigger cities hold out better
+	if f.buildings.has("watchtower"):
+		defence += Buildings.WATCHTOWER_DEFENCE
 	var garrison := unit_at(f.city_pos)
 	if garrison and garrison.faction == f:
 		defence += garrison.strength
-	if daughter.shelters_with(f):
+	if daughter.shelters_with(f) or daughter.risen_with(f):
 		defence += SunDaughter.DEFENCE
 	return defence
 
@@ -1227,7 +1475,7 @@ func city_defence(f: Faction) -> int:
 # them are only seen while in sight. The AI plays by the same fog for
 # exploring, ruins and outposts.
 func can_see(f: Faction, cell: Vector2i) -> bool:
-	if f.is_alive() and HexMap.hex_distance(cell, f.city_pos) <= CITY_SIGHT:
+	if f.is_alive() and HexMap.hex_distance(cell, f.city_pos) <= city_sight(f):
 		return true
 	for o in f.outposts:
 		if HexMap.hex_distance(cell, o) <= OUTPOST_SIGHT:
@@ -1306,6 +1554,9 @@ func is_blocked(cell: Vector2i) -> bool:
 # --- Terrain ------------------------------------------------------------------
 func terrain_at(cell: Vector2i) -> int:
 	return terrain.get(cell, Terrain.Type.PLAINS)
+
+func is_ash(cell: Vector2i) -> bool:
+	return ash.has(cell)
 
 func passable(cell: Vector2i) -> bool:
 	return HexMap.in_bounds(cell) and Terrain.passable(terrain_at(cell))

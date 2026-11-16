@@ -44,15 +44,20 @@ static func place_ruins(game: GameState) -> Array[Dictionary]:
 			ruins.append({"cell": c, "taken": false})
 	return ruins
 
-# The pop-up when one of the player's units searches ruins.
-static func ruin_choice() -> Dictionary:
+# The pop-up when one of the player's units searches ruins. The third
+# option is a shrine (her Favour), unless her Favour is already at its
+# highest: then old maps (reveal where another people landed) instead.
+static func ruin_choice(game: GameState) -> Dictionary:
+	var third := {"label": "Leave it as a shrine to the dead (her Favour +%d)" % RUIN_FAVOUR, "effects": {"favour": RUIN_FAVOUR}, "result": "You leave the dead in peace. %s hears of it." % SunDaughter.NAME.capitalize()}
+	if game.player.favour >= SunDaughter.MAX_FAVOUR:
+		third = {"label": "Read the old maps (reveals where another people landed)", "effects": {"reveal": true}, "result": ""}
 	return {
 		"title": "RUINS",
 		"text": FLAVOUR.pick_random() + "\nYour people can carry away one thing.",
 		"options": [
 			{"label": "Take the grain stores (Food +%d)" % RUIN_FOOD, "effects": {"food": RUIN_FOOD}, "result": "Your people haul the grain home."},
 			{"label": "Take the tools and iron (Industry +%d)" % RUIN_INDUSTRY, "effects": {"industry": RUIN_INDUSTRY}, "result": "Your people haul the tools home."},
-			{"label": "Leave it as a shrine to the dead (her Favour +%d)" % RUIN_FAVOUR, "effects": {"favour": RUIN_FAVOUR}, "result": "You leave the dead in peace. The Sun's Daughter hears of it."},
+			third,
 		],
 	}
 

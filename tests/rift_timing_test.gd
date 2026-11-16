@@ -4,7 +4,8 @@ func _initialize() -> void:
 	await process_frame
 	var bad := {}
 	var rerolled := 0; var drives := 0
-	for g in 200:
+	var n_games: int = H.games(200)
+	for g in n_games:
 		var m = load("res://main.tscn").instantiate()
 		root.add_child(m)
 		var s = m.state
@@ -16,10 +17,10 @@ func _initialize() -> void:
 		if g == 0: print("valid landing hexes now that rifts don't block: %d" % spots.size())
 		s.end_turn()
 		if s.has_pending_offer(): s.pending_relation().answer(false)
-		if s.turn != 2 or s.skoll.rifts.size() != 6: bad["not 6 rifts on turn 2"] = bad.get("not 6 rifts on turn 2", 0) + 1
+		if s.turn != 2 or s.skoll.rifts.size() != 4: bad["not 1 rift per city (4) on turn 2"] = bad.get("not 1 rift per city (4) on turn 2", 0) + 1
 		for r in s.skoll.rifts:
 			for f in s.factions:
-				if HexMap.hex_distance(r, f.city_pos) < 3: bad["rift near a city"] = bad.get("rift near a city", 0) + 1
+				if HexMap.hex_distance(r, f.city_pos) < Skoll.RIFT_MIN_CITY_DISTANCE: bad["rift near a city"] = bad.get("rift near a city", 0) + 1
 		if s.skoll.revealed_rift != HexMap.NO_CELL: bad["revealed before 14"] = 1
 		var turn2 = s.skoll.rifts.duplicate()
 		while s.turn < 14 and not s.game_over:

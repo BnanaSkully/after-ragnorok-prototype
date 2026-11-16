@@ -6,7 +6,7 @@ extends RefCounted
 # behaves. Her Favour toward a faction (0 to 10) is stored on the Faction itself.
 # At the Landing she chooses to shelter with whoever she trusts most.
 
-const NAME := "the Sun's Daughter" # change her name here
+const NAME := "Sunna" # the Sun's Daughter (Nathan named her in the middle-game playtest)
 const PLAYER_START_FAVOUR := 3
 const RIVAL_FAVOUR_MIN := 3 # each AI faction's Favour is hidden and random in this range
 const RIVAL_FAVOUR_MAX := 6
@@ -44,7 +44,24 @@ const TRADE_MAX_PRICE := 10
 const TRADE_REFUSE_BELOW := -8
 const TRADED_FAVOUR := -2 # being traded costs Favour toward whoever gave her away
 
-enum State { SHELTERED, ROGUE, SWALLOWED }
+# Requests (only the player is asked): every REQUEST_GAP turns from
+# REQUEST_FROM, while she shelters with you, she asks for something
+# (turn_events.gd SUNNA_REQUESTS). Granting costs it and raises her Favour;
+# refusing lowers it.
+const REQUEST_FROM := 8
+const REQUEST_GAP := 4
+const REQUEST_GRANTED := 1
+const REQUEST_REFUSED := -2
+
+# Rising: from GameState.RISE_TURN, if she shelters with a faction whose
+# Favour is RISE_FAVOUR or more, she rises as the new sun and stands with
+# them: they get RISEN_FOOD and RISEN_INDUSTRY a turn (and her defence), Sköll
+# becomes mortal at his normal Strength, and the ash stops.
+const RISE_FAVOUR := 8
+const RISEN_FOOD := 3
+const RISEN_INDUSTRY := 3
+
+enum State { SHELTERED, ROGUE, SWALLOWED, RISEN }
 
 var state := State.SHELTERED
 var holder: Faction = null # who shelters her (she chooses at the Landing)
@@ -78,6 +95,13 @@ func shelters_with(f: Faction) -> bool:
 
 func is_swallowed() -> bool:
 	return state == State.SWALLOWED
+
+# She has risen as the new sun, standing with the faction she chose ("holder").
+func is_risen() -> bool:
+	return state == State.RISEN
+
+func risen_with(f: Faction) -> bool:
+	return state == State.RISEN and holder == f
 
 func is_rogue() -> bool:
 	return state == State.ROGUE

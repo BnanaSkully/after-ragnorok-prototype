@@ -9,11 +9,27 @@
 #   "population"        added to your city (never below 1)
 #   "favour"            the Sun's Daughter's Favour toward you
 #   "reveal": true      uncovers the land around an AI city you haven't found
+#   "guard_turns": N    one of your army units stands watch: it can't move for N turns
+#                       (greyed out if you have no army unit)
+#   "trust_all": N      added to every AI faction's Trust toward you
+#   "spoil": N          you lose up to N Food (a loss, not a payment: always possible)
 #   "gamble": {"chance": 0.5, "good": {...}, "good_text": "...",
 #              "bad": {...}, "bad_text": "..."}  a coin flip after the costs;
 #              losses can't take anything below 0
-# Every event needs at least one option that's always affordable.
+# Every option must cost something (tests/choices_test.gd checks), and every
+# event needs at least one option that's always possible.
 # Each event happens at most once a game.
+
+# Sunna's requests to whoever shelters her (the player only; see
+# sun_daughter.gd REQUEST_*). The game adds the two options itself: grant
+# ("grant" effects, her Favour +1) or refuse (her Favour -2). Placeholder text.
+const SUNNA_REQUESTS := [
+	{"title": "SUNNA ASKS: LIGHT", "text": "\"Your people huddle in the dark. Light the hearths in every house.\"", "grant": "Light them (Industry -5)", "effects": {"industry": -5}},
+	{"title": "SUNNA ASKS: BREAD", "text": "\"There are hungry children at the gate who are not yours. Feed them.\"", "grant": "Feed them (Food -5)", "effects": {"food": -5}},
+	{"title": "SUNNA ASKS: A GUARD", "text": "\"I hear him at night. Let soldiers stand at my door.\"", "grant": "Post a guard (an army unit can't move for 3 turns)", "effects": {"guard_turns": 3}},
+	{"title": "SUNNA ASKS: A SHRINE", "text": "\"Raise a shrine to my mother, so your people remember what was lost.\"", "grant": "Build it (Industry -6)", "effects": {"industry": -6}},
+	{"title": "SUNNA ASKS: KINDNESS", "text": "\"Send grain to your neighbours. The night is long for all of us.\"", "grant": "Send it (Food -4, every AI's Trust +1)", "effects": {"food": -4, "trust_all": 1}},
+]
 
 const MIN_GAP := 2 # turns between events (random, inclusive)
 const MAX_GAP := 3
@@ -23,8 +39,8 @@ const EVENTS := [
 		"title": "REFUGEES",
 		"text": "Stragglers from the Crossing stumble out of the dark: a dozen families, starving.",
 		"options": [
-			{"label": "Take them in (Food -4, population +1)", "effects": {"food": -4, "population": 1}, "result": "The newcomers are fed and set to work."},
-			{"label": "Turn them away (her Favour -1)", "effects": {"favour": -1}, "result": "They walk back into the dark. The Sun's Daughter watches them go."},
+			{"label": "Take them in (Food -4, population +1: +1 Food, +1 Industry, +1 defence a turn)", "effects": {"food": -4, "population": 1}, "result": "The newcomers are fed and set to work."},
+			{"label": "Turn them away (her Favour -1)", "effects": {"favour": -1}, "result": "They walk back into the dark. Sunna watches them go."},
 		],
 	},
 	{
@@ -55,8 +71,8 @@ const EVENTS := [
 		"title": "GIANT ELK",
 		"text": "Hunters report a herd of giant elk in the hills.",
 		"options": [
-			{"label": "Arm a hunting party (Industry -2, Food +6)", "effects": {"industry": -2, "food": 6}, "result": "The hunters return heavy with meat."},
-			{"label": "Leave them be (Food +1 from foraging)", "effects": {"food": 1}, "result": "The elk move on."},
+			{"label": "Arm a hunting party (Industry -3: 60% Food +8)", "effects": {"industry": -3, "gamble": {"chance": 0.6, "good": {"food": 8}, "good_text": "The hunters return heavy with meat: Food +8.", "bad": {}, "bad_text": "The herd scatters. The hunters come back empty-handed."}}, "result": ""},
+			{"label": "Leave them be (they trample a field: Food -1)", "effects": {"spoil": 1}, "result": "The elk move on, leaving a flattened field."},
 		],
 	},
 	{
@@ -64,7 +80,7 @@ const EVENTS := [
 		"text": "A ragged traveller says he has seen where another people landed, and will tell you for a meal.",
 		"options": [
 			{"label": "Feed him (Food -2, reveals an AI city)", "effects": {"food": -2, "reveal": true}, "result": ""},
-			{"label": "Send him away (nothing)", "effects": {}, "result": "He shrugs and walks off into the dark."},
+			{"label": "Send him away (he'll tell the others about you: every AI's Trust -1)", "effects": {"trust_all": -1}, "result": "He walks off into the dark, muttering. Your neighbours will hear his version."},
 		],
 	},
 	{
@@ -79,7 +95,8 @@ const EVENTS := [
 		"title": "WOLF TRACKS",
 		"text": "Huge tracks circle the city at night. Not Sköll, not yet. Something smaller, and hungry.",
 		"options": [
-			{"label": "Post guards (Industry -2)", "effects": {"industry": -2}, "result": "The guards see nothing, and the tracks stop."},
+			{"label": "Post guards (an army unit stands watch: can't move for 2 turns)", "effects": {"guard_turns": 2}, "result": "The guards keep watch, and the tracks stop."},
+			{"label": "Build a palisade (Industry -3)", "effects": {"industry": -3}, "result": "A palisade goes up around the stores."},
 			{"label": "Ignore them (50%: lose 4 Food)", "effects": {"gamble": {"chance": 0.5, "good": {}, "good_text": "The tracks vanish.", "bad": {"food": -4}, "bad_text": "Something got into the stores: Food -4."}}, "result": ""},
 		],
 	},
@@ -89,7 +106,7 @@ const EVENTS := [
 		"options": [
 			{"label": "Trade grain for tools (Food -3, Industry +3)", "effects": {"food": -3, "industry": 3}, "result": "A fair trade."},
 			{"label": "Trade tools for grain (Industry -3, Food +4)", "effects": {"industry": -3, "food": 4}, "result": "A fair trade."},
-			{"label": "Send them on (nothing)", "effects": {}, "result": "They roll on into the dark."},
+			{"label": "Rob them (Food +3, Industry +3; every AI's Trust -1, her Favour -1)", "effects": {"food": 3, "industry": 3, "trust_all": -1, "favour": -1}, "result": "You take the cart. The story travels fast."},
 		],
 	},
 ]
