@@ -26,6 +26,7 @@ func _initialize() -> void:
 	clear_city(s, greek); greek.walls = 1
 	var u = s.player.units[0]; u.pos = greek.city_pos + Vector2i(-1, 0); u.moves = 1; u.strength = 100
 	print("1. Greek city defence %d; your unit attacks it (Strength 100)" % s.city_defence(greek))
+	greek.city_hp = 1 # (worn down: this attack takes it)
 	s.player_unit_act(u, greek.city_pos)
 	print("   Greek tributary of %s=%s, at war=%s, walls 1 -> %d, your unit still outside=%s" % [greek.overlord, greek.overlord == "Norse", s.at_war(s.player, greek), greek.walls, u.pos != greek.city_pos])
 	var gi = s.industry_change(greek)
@@ -52,6 +53,7 @@ func _initialize() -> void:
 	s.relation(jp).rival_declare_war("test")
 	clear_city(s, s.player)
 	var ju = jp.units[0]; ju.pos = s.player.city_pos + Vector2i(1, 0); ju.strength = 100
+	s.player.city_hp = 1
 	s.attack_city(ju, s.player)
 	print("5. Japanese take your city: you are tributary of %s, game over=%s, at war=%s" % [s.player.overlord, s.game_over, s.at_war(s.player, jp)])
 	var mine = s.player.units[0]; mine.pos = ju.pos + Vector2i(1, 0); mine.moves = 1
@@ -59,8 +61,9 @@ func _initialize() -> void:
 	s.player_unit_act(mine, ju.pos)
 	print("   you rose up: free=%s, at war=%s; log: %s" % [s.player.overlord == "", s.at_war(s.player, jp), s.diplomacy_log[-1].left(60)])
 	m.queue_free()
-	# 6. odds against a city, alone and with support; a lost attack kills the attacker
-	var won := [0, 0]; var died := [0, 0]
+	# 6. a siege: damage per attack alone and with support; the attacker's
+	# losses; the city heals between attacks
+	var dealt := [0.0, 0.0]; var lost := [0.0, 0.0]
 	for helpers in [0, 2]:
 		for i in 200:
 			m = new_game(); s = m.state; greek = s.ais[2]
@@ -71,15 +74,21 @@ func _initialize() -> void:
 			u = s.player.units[0]; u.pos = spots[0]; u.moves = 1
 			for k in helpers: s.player.add_unit(spots[k + 1])
 			s.player_unit_act(u, greek.city_pos)
-			if greek.overlord != "": won[helpers / 2] += 1
-			if not u in s.player.units: died[helpers / 2] += 1
+			dealt[helpers / 2] += (GameState.CITY_MAX_HP - greek.city_hp) / 200.0
+			lost[helpers / 2] += (Unit.MAX_HP - (u.hp if u in s.player.units else 0)) / 200.0
 			m.queue_free()
-	print("6. Strength 3 against defence 7, 200 tries: alone won %d%% (expect 30%%), lost the unit %d%%; with 2 armies beside it (attack 7) won %d%% (expect 50%%)" % [won[0] / 2, died[0] / 2, won[1] / 2])
+	print("6. Strength 3 against defence 7 (city %d HP), 200 attacks: alone the city loses %.1f HP, the attacker %.1f (expect 3, 7); with 2 armies beside it (attack 7) the city loses %.1f (expect 5)" % [GameState.CITY_MAX_HP, dealt[0], lost[0], dealt[1]])
+	m = new_game(); s = m.state; greek = s.ais[2]
+	greek.city_hp = 5
+	H.answer_choices(s); s.end_turn()
+	print("   a city at 5 HP heals to %d next turn (expect %d)" % [greek.city_hp, 5 + GameState.CITY_HEAL])
+	m.queue_free()
 	# 7. Sköll destroys an overlord: its tributary goes free
 	m = new_game(); s = m.state; greek = s.ais[2]; jp = s.ais[0]
 	s.make_tributary(greek, jp)
 	clear_city(s, jp)
 	s.skoll.active = true; s.skoll.strength = 100; s.skoll.pos = jp.city_pos + Vector2i(-1, 0)
+	jp.city_hp = 1
 	s.skoll.attack_city(jp)
 	print("7. Sköll destroys the Japanese city: Greek free=%s" % (greek.overlord == ""))
 	m.queue_free()

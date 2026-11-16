@@ -36,7 +36,7 @@ const EVENTS := [
 		],
 	},
 	{
-		"text": "A girl made of light walks among the survivors: the Sun's Daughter, born just before the wolf swallowed her mother. She is weighing which people to trust. Whatever hunts her will hunt whoever she shelters with.",
+		"text": "A girl made of light walks among the survivors: Sunna, the Sun's Daughter, born just before the wolf swallowed her mother. She is weighing which people to trust. Whatever hunts her will hunt whoever she shelters with.",
 		"choices": [
 			{"label": "Share your food with her", "effects": {"food": -2, "favour": 2}},
 			{"label": "Leave her be", "effects": {}},

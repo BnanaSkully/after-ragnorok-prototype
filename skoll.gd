@@ -2,18 +2,30 @@ class_name Skoll
 extends RefCounted
 
 # Sköll, the wolf who swallowed the sun at Ragnarök. He followed the survivors
-# through the void. He warns from WARNING_TURN, arrives at the map edge on
-# ARRIVAL_TURN through one of the rifts (chosen at random), hunts the city
-# nearest that rift, walks one hex a turn toward it and attacks it.
-# He can't be killed, only driven back to the edge of the map.
+# through the void. He warns from WARNING_TURN, arrives on ARRIVAL_TURN through
+# one of the rifts (chosen at random), hunts the city that rift belongs to,
+# walks one hex a turn toward it and attacks it. Once he has found Sunna's
+# city he hunts whoever shelters her.
+# Cycles: driven back, he vanishes into the void and returns RETURN_TURNS
+# later through a new rift, STRENGTH_PER_RETURN stronger; each time he comes
+# through, ash spreads (GameState.spread_ash).
+# While Sunna is hidden (sheltered or rogue) he can't be killed: a unit that
+# attacks him dies but WOUNDS him (his Strength is lowered by his wounds,
+# which heal WOUND_HEAL a turn); wounds of half his Strength drive him back.
+# Once she has risen, or he has swallowed her, he is MORTAL: an attack that
+# beats him kills him (GameState.wolf_slain).
 #
 # "game" is the GameState (game_state.gd): Sköll uses it to see the factions, post messages and end
 # the game.
 
 const WARNING_TURN := 10 # howling warnings start on this turn
 const ARRIVAL_TURN := 14 # he arrives on this turn
-const STRENGTH := 12 # his starting Strength
-const SWALLOWED_STRENGTH := 20 # his Strength after swallowing the Sun's Daughter
+const STRENGTH := 10 # his starting Strength
+const SWALLOW_BONUS := 8 # Strength he gains by swallowing Sunna (much stronger, but mortal)
+const RETURN_TURNS := 3 # turns in the void after being driven back
+const STRENGTH_PER_RETURN := 2 # he comes back stronger each time
+const WOUND_HEAL := 2 # wounds heal this much a turn
+const CITY_DAMAGE := 2.0 # he tears at a city's HP this many times as hard as an army would (a siege beast)
 
 # Rifts in the void: the hexes Sköll can come through. Every standing city
 # gets one rift 4-7 hexes away that is nearer to it than to any other city
@@ -40,6 +52,11 @@ var target: Faction = null # the city he is hunting right now
 var rifts: Array[Vector2i] = [] # the current rifts (hidden from the player)
 var rift_city := {} # rift hex -> name of the faction whose city that rift opened toward
 var revealed_rift := HexMap.NO_CELL # the rift he last came through (the only one shown)
+var knows_her := false # he has found Sunna's city: from now on he hunts whoever shelters her
+var wounds := 0 # lowers his Strength until healed (see effective_strength)
+var away_until := 0 # driven back: he returns on this turn
+var returns := 0 # how many times he has come back
+var slain := false
 
 func _init(p_game: GameState) -> void:
 	_game = weakref(p_game)
@@ -51,18 +68,30 @@ func can_see(cell: Vector2i) -> bool:
 func is_at(cell: Vector2i) -> bool:
 	return active and cell == pos
 
+# His Strength right now: lowered by his wounds (never below 1).
+func effective_strength() -> int:
+	return maxi(1, strength - wounds)
+
+# Can he die? Only once Sunna has risen, or he has swallowed her.
+func is_mortal() -> bool:
+	return game.daughter.is_risen() or game.daughter.is_swallowed()
+
 func take_turn() -> void:
-	if game.turn < WARNING_TURN:
+	if game.turn < WARNING_TURN or slain:
 		return
 	if game.turn < ARRIVAL_TURN:
 		var left: int = ARRIVAL_TURN - game.turn
 		game.add_message("Howling in the void... Sköll arrives %s." % ("next turn" if left == 1 else "in %d turns" % left))
 		return
 	if not active:
-		active = true
-		come_through_rift()
-		game.add_message("Sköll, the wolf who swallowed the sun, tears through a rift! He is hunting %s." % target_text())
+		if game.turn < away_until:
+			return # prowling the void
+		arrive()
 		return
+	wounds = maxi(0, wounds - WOUND_HEAL)
+	var hunted := her_city()
+	if hunted != null:
+		target = hunted
 	# The Daughter out in the open: if he can smell her, he goes for her.
 	var daughter: SunDaughter = game.daughter
 	if daughter.is_rogue() and can_see(daughter.pos):
@@ -97,10 +126,16 @@ func take_turn() -> void:
 # the battle, if she turns out to be in the city he attacked.
 func attack_city(f: Faction) -> void:
 	var defence: int = game.city_defence(f)
-	var chance: float = game.win_chance(strength, defence)
+	var dealt: int = roundi(game.combat_damage(effective_strength(), defence) * CITY_DAMAGE)
+	var taken: int = game.combat_damage(defence, effective_strength())
 	var she_is_here: bool = game.daughter.shelters_with(f)
-	if randf() < chance:
-		game.add_message("Sköll attacked %s's city (defence %d) and destroyed it (%s)." % [f.name, defence, game.odds_text(chance)])
+	f.city_hp -= dealt
+	if she_is_here and not knows_her:
+		knows_her = true
+		var where := "your city" if f == game.player else "the %s city" % f.name
+		game.add_message("Sköll has found %s: she hides in %s. From now on he hunts whoever shelters her." % [SunDaughter.NAME, where])
+	if f.city_hp <= 0:
+		game.add_message("Sköll attacked %s's city (defence %d) and tore it down." % [f.name, defence])
 		pos = f.city_pos
 		var inside: Unit = game.unit_at(f.city_pos) # whoever is in the city dies, even an enemy
 		if inside:
@@ -114,16 +149,14 @@ func attack_city(f: Faction) -> void:
 				g.overlord = "" # its tributaries are free
 		if she_is_here:
 			swallow_daughter()
-		if f == game.player:
-			var how := "and swallowed %s. The world goes dark." % SunDaughter.NAME if she_is_here else "on turn %d." % game.turn
-			game.end_game("Your city has fallen", "Sköll devoured your people %s" % how)
+		game.devour(f) # (your city: you lose; enough factions: Sköll wins)
+		if not game.game_over:
+			# Sated, he goes back into the void to feed, and returns stronger.
+			game.add_message("Gorged, Sköll sinks back into the void to feed.")
+			drive_back()
 	else:
-		game.add_message("%s's city (defence %d) drove Sköll back! (He had a %s.)" % [f.name, defence, game.odds_text(chance)])
-		drive_back()
-		if she_is_here:
-			var whose := "your city" if f == game.player else "%s's city" % f.name
-			game.end_game("Sköll has found %s" % SunDaughter.NAME,
-				"He lost the battle, but now he knows she hides in %s.\nPHASE 3 BEGINS EARLY on turn %d: he will charge there again.\n(Phase 3 is not built yet.)" % [whose, game.turn])
+		game.add_message("%s's city (defence %d) held: it lost %d HP (%d left) and wounded Sköll by %d." % [f.name, defence, dealt, f.city_hp, taken])
+		wound(taken, f)
 
 # She's out in the open: he sprints toward her (SPRINT hexes a turn), and if
 # he reaches her he swallows her with no battle.
@@ -148,40 +181,109 @@ func hunt_daughter(d: SunDaughter) -> void:
 		pos = best
 	game.add_message("Sköll has spotted %s in the open and sprints after her!" % SunDaughter.NAME)
 
-# Sköll becomes the sun: much stronger, and the whole map goes dark.
+# He comes through a rift: the first time on ARRIVAL_TURN, then again
+# RETURN_TURNS after each time he's driven back, stronger each time.
+func arrive() -> void:
+	active = true
+	wounds = 0
+	if returns > 0:
+		strength += STRENGTH_PER_RETURN
+	come_through_rift()
+	var hunted := her_city()
+	if hunted != null:
+		target = hunted
+	game.spread_ash(pos)
+	if returns == 0:
+		game.add_message("Sköll, the wolf who swallowed the sun, tears through a rift! He is hunting %s. Ash spreads where he walks." % target_text())
+	else:
+		game.add_message("Sköll returns through a new rift, stronger (Strength %d). He is hunting %s. More of the land turns to ash." % [strength, target_text()])
+
+# Once he has found her, the city sheltering Sunna (or the one she rose for).
+func her_city() -> Faction:
+	var d: SunDaughter = game.daughter
+	if knows_her and (d.state == SunDaughter.State.SHELTERED or d.is_risen()) and d.holder != null and d.holder.is_alive():
+		return d.holder
+	return null
+
+# Sköll becomes the sun: much stronger, the whole map goes dark, but he can die.
 func swallow_daughter() -> void:
 	game.daughter.state = SunDaughter.State.SWALLOWED
 	game.daughter.holder = null
 	game.daughter.pos = HexMap.NO_CELL
-	strength = SWALLOWED_STRENGTH
-	game.add_message("Sköll swallowed %s! He is the sun now (Strength %d), and the world goes dark." % [SunDaughter.NAME, strength])
+	strength += SWALLOW_BONUS
+	game.add_message("Sköll swallowed %s! He is the sun now (Strength %d), and the world goes dark. But the sun inside him makes him MORTAL: a large combined force can kill him." % [SunDaughter.NAME, strength])
 
+# A unit stands in his way: both take damage, like any fight between units
+# (GameState.combat_damage). The unit loses HP (and may die: then he steps
+# in); the damage it deals back becomes his wounds.
 func attack_unit(u: Unit) -> void:
-	var chance: float = game.win_chance(strength, game.defender_strength(u)) # forest and hills help
-	if randf() < chance:
-		game.add_message("Sköll attacked %s's unit and destroyed it (%s)." % [u.faction.name, game.odds_text(chance)])
-		pos = u.pos
+	var defence: int = game.defender_strength(u) # (wounds weaken it; forest and hills help)
+	var dealt: int = game.combat_damage(effective_strength(), defence)
+	var taken: int = game.combat_damage(defence, effective_strength())
+	u.hp -= dealt
+	u.acted = true
+	if u.hp <= 0:
+		game.add_message("Sköll attacked %s's unit and destroyed it (dealt %d, took %d)." % [u.faction.name, dealt, taken])
+		var cell := u.pos
 		u.faction.remove_unit(u)
+		pos = cell
 	else:
-		game.add_message("%s's unit drove Sköll back! (He had a %s.)" % [u.faction.name, game.odds_text(chance)])
-		drive_back()
+		game.add_message("%s's unit held against Sköll: it lost %d HP and wounded him by %d." % [u.faction.name, dealt, taken])
+	wound(taken, u.faction)
 
-# A unit (the player's) attacks Sköll.
+# A unit (the player's) attacks him, helped by every other army of its own or
+# its allies next to him (GameState.wolf_attack). The damage it deals becomes
+# his wounds. Hidden Sunna: he can't die and the attacker dies (Nathan's rule).
+# Mortal: a normal two-way fight; he dies when his wounds reach his Strength.
 func attacked_by(u: Unit) -> void:
-	var chance: float = game.win_chance(u.fighting_strength(), strength)
-	if randf() < chance:
-		game.add_message("You drove Sköll back (%s)!" % game.odds_text(chance))
+	var attack: int = game.wolf_attack(u)
+	var dealt: int = game.combat_damage(attack, effective_strength())
+	if is_mortal():
+		var taken: int = game.combat_damage(effective_strength(), attack)
+		u.hp -= taken
+		game.add_message("Your attack (%d against %d) wounded Sköll by %d; your unit lost %d HP." % [attack, effective_strength(), dealt, taken])
+		if u.hp <= 0:
+			game.add_message("Your unit died.")
+			u.faction.remove_unit(u)
+	else:
+		game.add_message("Sköll can't be killed while %s is hidden. Your unit died, but its attack of %d wounded him by %d." % [SunDaughter.NAME, attack, dealt])
+		u.faction.remove_unit(u)
+	wound(dealt, u.faction, true)
+
+# Wounds lower his Strength until they heal (WOUND_HEAL a turn). Wounds of half
+# his Strength drive him back into the void. Only an ATTACK on him ("hunted")
+# can kill him, once he's mortal: then he stands and fights, and wounds equal
+# to his Strength kill him ("by" is whoever struck the last blow). Damage from
+# cities and units he attacks only drives him off: slaying the wolf takes a
+# deliberate (combined) attack, not his own recklessness.
+func wound(amount: int, by: Faction = null, hunted := false) -> void:
+	wounds += amount
+	if is_mortal() and hunted:
+		if wounds >= strength:
+			game.add_message("Sköll falls! The wolf is dead.")
+			slain = true
+			active = false
+			pos = HexMap.NO_CELL
+			game.wolf_slain(by)
+		else:
+			game.add_message("Sköll is wounded: %d of his %d Strength left." % [effective_strength(), strength])
+		return
+	if wounds * 2 >= strength:
+		game.add_message("Badly wounded (%d of his %d Strength), Sköll flees into the void." % [mini(wounds, strength), strength])
 		drive_back()
 	else:
-		game.add_message("You attacked Sköll and your unit was destroyed (%s)." % game.odds_text(chance))
-		u.faction.remove_unit(u)
+		game.add_message("Sköll is wounded: Strength %d for now (heals %d a turn)." % [effective_strength(), WOUND_HEAL])
 
-# Sköll can't be killed: losing a fight sends him back to the edge of the map.
+# Driven back: he vanishes into the void and returns RETURN_TURNS later
+# through a new rift, stronger. The rifts are rolled again now (hidden).
 func drive_back() -> void:
+	active = false
+	pos = HexMap.NO_CELL
+	wounds = 0
+	returns += 1
+	away_until = game.turn + RETURN_TURNS
 	place_rifts() # new rifts every time he's driven back
-	come_through_rift()
-	if target:
-		game.add_message("Sköll slinks back into the void... and bursts out of another rift, hunting %s." % target_text())
+	game.add_message("Sköll slinks back into the void. He will return in %d turns, stronger." % RETURN_TURNS)
 
 # One rift per standing city: a random hex RIFT_MIN_CITY_DISTANCE to
 # RIFT_MAX_CITY_DISTANCE from that city and at least RIFT_MIN_CITY_DISTANCE
