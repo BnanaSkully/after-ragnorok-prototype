@@ -36,6 +36,14 @@ const DAMAGE_SPREAD := 0.25
 const HEAL_REST := 2 # HP a unit heals in a turn it didn't move or fight...
 const HEAL_HOME := 4 # ...or this much in its own territory
 const AI_REST_HP := 4 # an AI unit this hurt stays put to heal instead of attacking
+# Army limits (standard 4X; Nathan's playtest: 17 units, Strength 100 by turn
+# 20 made Sköll and diplomacy meaningless). Scouts don't count.
+#  - Supply: at most SUPPLY_BASE + population armies (+2 with a Barracks)
+#  - Rising Industry upkeep: the first FREE_ARMIES armies cost nothing; after
+#    that each pair costs 1 more per army than the pair before (armies 3-4: 1
+#    each, 5-6: 2 each, 7-8: 3 each...). Can't pay: the farthest army disbands.
+const SUPPLY_BASE := 2
+const FREE_ARMIES := 2
 # Outposts (standard 4X): a small settlement that claims the hexes around it.
 const OUTPOST_COST := 6 # Industry
 const OUTPOST_RANGE := 5 # an outpost must be within this many hexes of your city...
@@ -220,6 +228,8 @@ func end_turn() -> void:
 		f.food += food_change(f)
 		f.industry += industry_change(f)
 		pay_tribute(f)
+		if f.industry < 0:
+			disband_for_upkeep(f)
 		var starved := f.food < 0
 		if starved:
 			starve(f)
@@ -357,6 +367,41 @@ func food_parts(f: Faction) -> Array:
 		parts.append(["armies eat", -eaten])
 	return parts
 
+# --- Army limits ---------------------------------------------------------------
+func army_count(f: Faction) -> int:
+	return f.units.filter(func(u): return not u.is_scout()).size()
+
+func supply_cap(f: Faction) -> int:
+	return SUPPLY_BASE + f.population + (Buildings.BARRACKS_SUPPLY if f.buildings.has("barracks") else 0)
+
+# Industry a turn to keep n armies (see FREE_ARMIES).
+func army_upkeep_for(n: int) -> int:
+	var total := 0
+	for k in range(FREE_ARMIES, n):
+		@warning_ignore("integer_division") # pairs: armies 3-4 cost 1, 5-6 cost 2...
+		total += (k - FREE_ARMIES) / 2 + 1
+	return total
+
+func army_upkeep(f: Faction) -> int:
+	return army_upkeep_for(army_count(f))
+
+# What one more army would add to the Industry upkeep.
+func next_army_upkeep(f: Faction) -> int:
+	return army_upkeep_for(army_count(f) + 1) - army_upkeep(f)
+
+# Industry ran out paying upkeep: the army farthest from the city disbands.
+func disband_for_upkeep(f: Faction) -> void:
+	f.industry = 0
+	var farthest: Unit = null
+	for u in f.units:
+		if not u.is_scout() and (farthest == null or HexMap.hex_distance(u.pos, f.city_pos) > HexMap.hex_distance(farthest.pos, f.city_pos)):
+			farthest = u
+	if farthest == null:
+		return
+	f.remove_unit(farthest)
+	if f == player:
+		add_message("You couldn't pay your armies' upkeep: a unit disbanded. (Armies cost more Industry the more you have.)")
+
 func industry_parts(f: Faction) -> Array:
 	var parts := [["city", CITY_INDUSTRY]]
 	if f.population > 1:
@@ -370,6 +415,8 @@ func industry_parts(f: Faction) -> Array:
 		parts.append(["Workshop", Buildings.WORKSHOP_INDUSTRY])
 	if daughter.shelters_with(f):
 		parts.append([SunDaughter.NAME, SunDaughter.INDUSTRY])
+	if army_upkeep(f) > 0:
+		parts.append(["army upkeep", -army_upkeep(f)])
 	return parts
 
 func sum_parts(parts: Array) -> int:
@@ -575,9 +622,9 @@ func ai_build(f: Faction) -> void:
 	if f.scout_count() == 0 and turn < Skoll.WARNING_TURN and f.industry >= SCOUT_COST:
 		build_scout(f)
 		return
-	if f.industry >= UNIT_COST and food_change(f) - UNIT_FOOD_UPKEEP >= 0:
-		build_unit(f)
-		return
+	if f.industry >= UNIT_COST and food_change(f) - UNIT_FOOD_UPKEEP >= 0 and industry_change(f) - next_army_upkeep(f) >= 1:
+		if build_unit(f):
+			return
 	# It can't feed more armies: spare Industry goes into a city building.
 	for key in Buildings.LIST:
 		if not f.buildings.has(key) and f.industry >= Buildings.cost(key):
@@ -726,12 +773,15 @@ func player_build_unit() -> void:
 	if not can_act():
 		return
 	if build_unit(player):
-		messages = ["You built a new army unit (%d Industry). It can move next turn." % UNIT_COST]
+		messages = ["You built a new army unit (%d Industry). It can move next turn. Armies: %d/%d, upkeep now %d Industry a turn." % [UNIT_COST, army_count(player), supply_cap(player), army_upkeep(player)]]
 		if food_change(player) < 0:
 			add_message("Warning: your army now eats more Food than you make (%+d a turn). If your stores run out, a unit will desert." % food_change(player))
 		player.units[-1].moves = 0 # a freshly built unit waits a turn, as is usual
 	else:
-		messages = ["Can't build: you need %d Industry and a free hex at your city." % UNIT_COST]
+		if army_count(player) >= supply_cap(player):
+			messages = ["Can't build: your supply is full (%d armies: %d + population, +%d with a Barracks)." % [supply_cap(player), SUPPLY_BASE, Buildings.BARRACKS_SUPPLY]]
+		else:
+			messages = ["Can't build: you need %d Industry and a free hex at your city." % UNIT_COST]
 
 func player_build_scout() -> void:
 	if not can_act():
@@ -1209,7 +1259,7 @@ func build_walls(f: Faction) -> bool:
 # A new unit appears on the city, or on a free hex next to it if the city is occupied.
 # Returns false if there's no room or not enough Industry.
 func build_unit(f: Faction) -> bool:
-	if not f.is_alive() or f.industry < UNIT_COST:
+	if not f.is_alive() or f.industry < UNIT_COST or army_count(f) >= supply_cap(f):
 		return false
 	var spot := free_spot_near(f.city_pos)
 	if spot == NO_CELL:

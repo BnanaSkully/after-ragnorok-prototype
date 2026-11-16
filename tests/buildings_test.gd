@@ -18,7 +18,10 @@ func _initialize() -> void:
 	p.industry = 100
 	var before := {"food": s.food_change(p), "industry": s.industry_change(p), "defence": s.city_defence(p), "sight": s.city_sight(p), "strength": p.strength}
 	for key in Buildings.LIST: s.player_build_building(key)
-	print("1. built all four, Industry 100 -> %d (expect %d)" % [p.industry, 100 - 8 - 12 - 6 - 10])
+	var total := 0
+	for key in Buildings.LIST: total += Buildings.cost(key)
+	print("1. built all %d, Industry 100 -> %d (expect %d)" % [Buildings.LIST.size(), p.industry, 100 - total])
+	print("   supply %d (expect %d + population %d + Barracks %d)" % [s.supply_cap(p), GameState.SUPPLY_BASE, p.population, Buildings.BARRACKS_SUPPLY])
 	print("   Food a turn %+d (Granary, expect +2), Industry %+d (Workshop, expect +2), defence %+d and sight %+d (Watchtower, expect +1, +2), new army Strength %d -> %d (Forge)" % [s.food_change(p) - before["food"], s.industry_change(p) - before["industry"], s.city_defence(p) - before["defence"], s.city_sight(p) - before["sight"], before["strength"], p.strength])
 	s.player_build_unit()
 	print("   an army built after the Forge has Strength %d; the old one still %d" % [p.units[-1].strength, p.units[0].strength])

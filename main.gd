@@ -77,7 +77,7 @@ func _ready() -> void:
 	# Build options, each a different trade-off (costs are in Industry).
 	end_turn_button = add_button("End Turn", Vector2(PANEL_X, 20), on_end_turn)
 	build_button = add_button("Army (%d)" % GameState.UNIT_COST, Vector2(PANEL_X + 90, 20), on_build_unit)
-	scout_button = add_button("Scout (%d)" % GameState.SCOUT_COST, Vector2(PANEL_X + 180, 20), on_build_scout)
+	scout_button = add_button("Scout (%d)" % GameState.SCOUT_COST, Vector2(PANEL_X + 212, 20), on_build_scout)
 	outpost_button = add_button("", Vector2(PANEL_X, 58), on_outpost_button)
 	walls_button = add_button("Build...", Vector2(PANEL_X + 110, 58), on_open_city)
 	trade_button = add_button("Trade her", Vector2(PANEL_X + 240, 58), on_open_trade)
@@ -149,7 +149,11 @@ func update_buttons() -> void:
 	var playing: bool = state.can_act()
 	var p := state.player
 	end_turn_button.disabled = not playing
-	build_button.disabled = not playing or p.industry < GameState.UNIT_COST
+	var armies: int = state.army_count(p)
+	var cap: int = state.supply_cap(p)
+	build_button.text = "Army (%d) %d/%d" % [GameState.UNIT_COST, armies, cap]
+	build_button.disabled = not playing or p.industry < GameState.UNIT_COST or armies >= cap
+	build_button.tooltip_text = "An army unit: Strength %d, 1 move, eats %d Food a turn. Supply %d/%d (%d + population, +%d with a Barracks).\nUpkeep: your first %d armies are free; this one would add %d Industry a turn (now %d)." % [p.strength, GameState.UNIT_FOOD_UPKEEP, armies, cap, GameState.SUPPLY_BASE, GameState.Buildings.BARRACKS_SUPPLY, GameState.FREE_ARMIES, state.next_army_upkeep(p), state.army_upkeep(p)]
 	scout_button.disabled = not playing or not state.can_build_scout(p)
 	outpost_button.disabled = not playing or (not placing_outpost and (p.industry < GameState.OUTPOST_COST or state.outpost_spots(p).is_empty()))
 	outpost_button.text = "Cancel" if placing_outpost else "Outpost (%d)" % GameState.OUTPOST_COST
@@ -943,7 +947,7 @@ func draw_top_bar(font: Font) -> void:
 		["Pop %d" % p.population, "Population %d (your city's size). Every point above 1 gives +1 Food, +1 Industry and +%d city defence a turn.\nThe city grows by 1 when stored Food reaches %d and Food isn't falling." % [p.population, GameState.POP_DEFENCE, s.growth_cost(p)]],
 		["Food %d/%d (%+d)" % [p.food, s.growth_cost(p), s.food_change(p)], "Food: %d stored; at %d your city grows. Each army unit eats %d a turn (scouts nothing); if it runs out, a unit deserts.\nThis turn: %s" % [p.food, s.growth_cost(p), GameState.UNIT_FOOD_UPKEEP, parts_text(s.food_parts(p))]],
 		["Industry %d (%+d)" % [p.industry, industry_net], "Industry: %d stored, spent on units, outposts and city buildings (Build...).\nThis turn: %s%s" % [p.industry, parts_text(s.industry_parts(p)), ", tribute %+d" % -s.tribute_amount(p) if s.tribute_amount(p) > 0 else ""]],
-		["Units %d" % p.units.size(), "Units: %d army and %d scouts. Each army eats %d Food a turn." % [p.units.size() - p.scout_count(), p.scout_count(), GameState.UNIT_FOOD_UPKEEP]],
+		["Units %d" % p.units.size(), "Units: %d armies (supply %d/%d: %d + population, +%d with a Barracks) and %d scouts.\nEach army eats %d Food a turn and costs rising Industry upkeep: the first %d are free, then 1, 1, 2, 2, 3, 3... (now %d a turn). Scouts are free." % [s.army_count(p), s.army_count(p), s.supply_cap(p), GameState.SUPPLY_BASE, GameState.Buildings.BARRACKS_SUPPLY, p.scout_count(), GameState.UNIT_FOOD_UPKEEP, GameState.FREE_ARMIES, s.army_upkeep(p)]],
 		["Outposts %d" % p.outposts.size(), "Outposts: each earns by its land (plains +2 Food, forest +1/+1, hills +2 Industry), sees 2 hexes and claims the hexes around it. An enemy at war can take an unguarded one."],
 		["Army %d" % s.army_power(p), "Army: the total Strength of your units. The AIs compare armies before demanding or declaring war; %s wants %d+ by turn %d." % [SunDaughter.NAME, SunDaughter.READY_ARMY, Skoll.ARRIVAL_TURN]],
 		["Doom in %d" % (GameState.DOOM_TURN - s.turn), "Turns until the Doom (turn %d)." % GameState.DOOM_TURN],
@@ -974,6 +978,7 @@ func draw_tooltip() -> void:
 	if lines.is_empty():
 		return
 	var font := ThemeDB.fallback_font
+	lines = wrap_lines(lines, font, PANEL_X - 50) # long lines wrap so the box fits beside the panel
 	var w := 0.0
 	for line in lines:
 		w = maxf(w, font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x)
@@ -983,6 +988,21 @@ func draw_tooltip() -> void:
 	draw_rect(Rect2(at - Vector2(6, 14), Vector2(w + 12, lines.size() * 17 + 6)), Color(0.06, 0.06, 0.06, 0.9))
 	for i in lines.size():
 		draw_string(font, at + Vector2(0, i * 17), lines[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.95, 0.95, 0.85) if i == 0 else Color(0.8, 0.8, 0.75))
+
+# Breaks lines wider than max_w at spaces (continuations are indented).
+func wrap_lines(lines: Array[String], font: Font, max_w: float) -> Array[String]:
+	var out: Array[String] = []
+	for line in lines:
+		var current := ""
+		for word in line.split(" "):
+			var trial := word if current == "" else current + " " + word
+			if current != "" and font.get_string_size(trial, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x > max_w:
+				out.append(current)
+				current = "   " + word
+			else:
+				current = trial
+		out.append(current)
+	return out
 
 # Everything the player knows about a hex, one line each (empty if unexplored).
 func hex_tooltip(c: Vector2i) -> Array[String]:
