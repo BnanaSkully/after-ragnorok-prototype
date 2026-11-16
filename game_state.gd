@@ -27,6 +27,23 @@ const MAX_SCOUTS := 2 # scouts each faction may have at once
 const CITY_FOOD := 2 # Food a city produces each turn
 const CITY_INDUSTRY := 2 # Industry a city produces each turn
 const UNIT_FOOD_UPKEEP := 1 # Food each army unit eats each turn (scouts eat nothing)
+# Combat between units (standard 4X): both sides take damage. The damage
+# shared out is COMBAT_DAMAGE split by Strength (each side's share = the
+# other side's Strength / both together), then varied by up to DAMAGE_SPREAD.
+# Equal units deal about 5 each: it takes two fights to kill one.
+const COMBAT_DAMAGE := 10
+const DAMAGE_SPREAD := 0.25
+const HEAL_REST := 2 # HP a unit heals in a turn it didn't move or fight...
+const HEAL_HOME := 4 # ...or this much in its own territory
+const AI_REST_HP := 4 # an AI unit this hurt stays put to heal instead of attacking
+# Army limits (standard 4X; Nathan's playtest: 17 units, Strength 100 by turn
+# 20 made Sköll and diplomacy meaningless). Scouts don't count.
+#  - Supply: at most SUPPLY_BASE + population armies (+2 with a Barracks)
+#  - Rising Industry upkeep: the first FREE_ARMIES armies cost nothing; after
+#    that each pair costs 1 more per army than the pair before (armies 3-4: 1
+#    each, 5-6: 2 each, 7-8: 3 each...). Can't pay: the farthest army disbands.
+const SUPPLY_BASE := 2
+const FREE_ARMIES := 2
 # Outposts (standard 4X): a small settlement that claims the hexes around it.
 const OUTPOST_COST := 6 # Industry
 const OUTPOST_RANGE := 5 # an outpost must be within this many hexes of your city...
@@ -211,6 +228,8 @@ func end_turn() -> void:
 		f.food += food_change(f)
 		f.industry += industry_change(f)
 		pay_tribute(f)
+		if f.industry < 0:
+			disband_for_upkeep(f)
 		var starved := f.food < 0
 		if starved:
 			starve(f)
@@ -222,6 +241,9 @@ func end_turn() -> void:
 				add_message(verdict)
 		for u in f.units:
 			u.moves = 0 if turn < u.busy_until else u.max_moves() # (standing watch: can't move)
+			if not u.acted and u.hp < Unit.MAX_HP: # resting: heal (faster at home)
+				u.hp = mini(Unit.MAX_HP, u.hp + (HEAL_HOME if territory_owner(u.pos) == f else HEAL_REST))
+			u.acted = false
 	judge_readiness()
 	check_daughter_leaving()
 	for f in ais:
@@ -345,6 +367,41 @@ func food_parts(f: Faction) -> Array:
 		parts.append(["armies eat", -eaten])
 	return parts
 
+# --- Army limits ---------------------------------------------------------------
+func army_count(f: Faction) -> int:
+	return f.units.filter(func(u): return not u.is_scout()).size()
+
+func supply_cap(f: Faction) -> int:
+	return SUPPLY_BASE + f.population + (Buildings.BARRACKS_SUPPLY if f.buildings.has("barracks") else 0)
+
+# Industry a turn to keep n armies (see FREE_ARMIES).
+func army_upkeep_for(n: int) -> int:
+	var total := 0
+	for k in range(FREE_ARMIES, n):
+		@warning_ignore("integer_division") # pairs: armies 3-4 cost 1, 5-6 cost 2...
+		total += (k - FREE_ARMIES) / 2 + 1
+	return total
+
+func army_upkeep(f: Faction) -> int:
+	return army_upkeep_for(army_count(f))
+
+# What one more army would add to the Industry upkeep.
+func next_army_upkeep(f: Faction) -> int:
+	return army_upkeep_for(army_count(f) + 1) - army_upkeep(f)
+
+# Industry ran out paying upkeep: the army farthest from the city disbands.
+func disband_for_upkeep(f: Faction) -> void:
+	f.industry = 0
+	var farthest: Unit = null
+	for u in f.units:
+		if not u.is_scout() and (farthest == null or HexMap.hex_distance(u.pos, f.city_pos) > HexMap.hex_distance(farthest.pos, f.city_pos)):
+			farthest = u
+	if farthest == null:
+		return
+	f.remove_unit(farthest)
+	if f == player:
+		add_message("You couldn't pay your armies' upkeep: a unit disbanded. (Armies cost more Industry the more you have.)")
+
 func industry_parts(f: Faction) -> Array:
 	var parts := [["city", CITY_INDUSTRY]]
 	if f.population > 1:
@@ -358,6 +415,8 @@ func industry_parts(f: Faction) -> Array:
 		parts.append(["Workshop", Buildings.WORKSHOP_INDUSTRY])
 	if daughter.shelters_with(f):
 		parts.append([SunDaughter.NAME, SunDaughter.INDUSTRY])
+	if army_upkeep(f) > 0:
+		parts.append(["army upkeep", -army_upkeep(f)])
 	return parts
 
 func sum_parts(parts: Array) -> int:
@@ -410,6 +469,8 @@ func ai_take_turn(f: Faction) -> void:
 		if u.is_scout():
 			ai_scout(u)
 			continue
+		if u.hp <= AI_REST_HP and not (skoll.active and HexMap.hex_distance(u.pos, f.city_pos) > 1):
+			continue # badly hurt: stays put to heal
 		var target: Unit = null
 		for c in HexMap.neighbours(u.pos):
 			var other := unit_at(c)
@@ -561,9 +622,9 @@ func ai_build(f: Faction) -> void:
 	if f.scout_count() == 0 and turn < Skoll.WARNING_TURN and f.industry >= SCOUT_COST:
 		build_scout(f)
 		return
-	if f.industry >= UNIT_COST and food_change(f) - UNIT_FOOD_UPKEEP >= 0:
-		build_unit(f)
-		return
+	if f.industry >= UNIT_COST and food_change(f) - UNIT_FOOD_UPKEEP >= 0 and industry_change(f) - next_army_upkeep(f) >= 1:
+		if build_unit(f):
+			return
 	# It can't feed more armies: spare Industry goes into a city building.
 	for key in Buildings.LIST:
 		if not f.buildings.has(key) and f.industry >= Buildings.cost(key):
@@ -584,6 +645,7 @@ func daughter_value(f: Faction) -> int:
 	var giver: Faction = daughter.holder if daughter.holder != null else player
 	var stronger := army_power(f) - army_power(giver)
 	if stronger > 0:
+		@warning_ignore("integer_division") # rounds down on purpose: -1 per full DISDAIN_PER
 		value -= stronger / SunDaughter.DISDAIN_PER # a powerful faction needs her less
 	return clampi(value, -SunDaughter.TRADE_MAX_PRICE, SunDaughter.TRADE_MAX_PRICE)
 
@@ -711,12 +773,15 @@ func player_build_unit() -> void:
 	if not can_act():
 		return
 	if build_unit(player):
-		messages = ["You built a new army unit (%d Industry). It can move next turn." % UNIT_COST]
+		messages = ["You built a new army unit (%d Industry). It can move next turn. Armies: %d/%d, upkeep now %d Industry a turn." % [UNIT_COST, army_count(player), supply_cap(player), army_upkeep(player)]]
 		if food_change(player) < 0:
 			add_message("Warning: your army now eats more Food than you make (%+d a turn). If your stores run out, a unit will desert." % food_change(player))
 		player.units[-1].moves = 0 # a freshly built unit waits a turn, as is usual
 	else:
-		messages = ["Can't build: you need %d Industry and a free hex at your city." % UNIT_COST]
+		if army_count(player) >= supply_cap(player):
+			messages = ["Can't build: your supply is full (%d armies: %d + population, +%d with a Barracks)." % [supply_cap(player), SUPPLY_BASE, Buildings.BARRACKS_SUPPLY]]
+		else:
+			messages = ["Can't build: you need %d Industry and a free hex at your city." % UNIT_COST]
 
 func player_build_scout() -> void:
 	if not can_act():
@@ -772,6 +837,7 @@ func player_unit_act(u: Unit, cell: Vector2i) -> bool:
 	if other and other.faction == player:
 		return false # can't move onto your own unit
 	messages.clear()
+	u.acted = true # (moving or fighting: no healing this turn)
 	if skoll.is_at(cell):
 		skoll.attacked_by(u)
 	elif daughter.is_rogue() and cell == daughter.pos:
@@ -795,6 +861,7 @@ func player_unit_act(u: Unit, cell: Vector2i) -> bool:
 # outpost with nobody standing on it. Every move on the map goes through here.
 func enter_hex(u: Unit, cell: Vector2i) -> void:
 	u.pos = cell
+	u.acted = true
 	var f := u.faction
 	var owner := outpost_owner(cell)
 	if owner != null and owner != f and at_war(f, owner): # (at peace you just pass through)
@@ -980,7 +1047,7 @@ func make_tributary(f: Faction, conqueror: Faction) -> void:
 # army of its faction next to that city (the usual 4X flanking bonus), so
 # taking a city takes several units.
 func siege_strength(u: Unit, f: Faction) -> int:
-	var attack := u.strength
+	var attack := u.fighting_strength()
 	for other in u.faction.units:
 		if other != u and not other.is_scout() and HexMap.is_neighbour(other.pos, f.city_pos):
 			attack += SIEGE_SUPPORT
@@ -1192,7 +1259,7 @@ func build_walls(f: Faction) -> bool:
 # A new unit appears on the city, or on a free hex next to it if the city is occupied.
 # Returns false if there's no room or not enough Industry.
 func build_unit(f: Faction) -> bool:
-	if not f.is_alive() or f.industry < UNIT_COST:
+	if not f.is_alive() or f.industry < UNIT_COST or army_count(f) >= supply_cap(f):
 		return false
 	var spot := free_spot_near(f.city_pos)
 	if spot == NO_CELL:
@@ -1291,21 +1358,42 @@ func odds_text(chance: float) -> String:
 	return "%d%% chance" % roundi(chance * 100)
 
 # Unit against unit. The loser is destroyed; a winning attacker moves into the hex.
+# Unit against unit: both take damage (see COMBAT_DAMAGE); a unit at 0 HP
+# dies. If the defender dies and the attacker lives, the attacker moves in
+# (never into a city).
 func resolve_combat(attacker: Unit, defender: Unit) -> void:
-	var chance := win_chance(attacker.strength, defender_strength(defender))
-	if randf() < chance:
-		var cell := defender.pos
+	var dealt := combat_damage(attacker.fighting_strength(), defender_strength(defender))
+	var taken := combat_damage(defender_strength(defender), attacker.fighting_strength())
+	var cell := defender.pos
+	attacker.acted = true
+	defender.acted = true
+	defender.hp -= dealt
+	attacker.hp -= taken
+	var what := "%s attacked %s: dealt %d, took %d" % [attacker.faction.name, defender.faction.name, dealt, taken]
+	if defender.hp <= 0:
 		defender.faction.remove_unit(defender)
-		if not is_city(cell): # beating a city's garrison doesn't put you inside the city
-			enter_hex(attacker, cell)
-		add_message("%s attacked %s and won (%s)." % [attacker.faction.name, defender.faction.name, odds_text(chance)])
-	else:
+		what += ". The %s unit was destroyed" % defender.faction.name
+	if attacker.hp <= 0:
 		attacker.faction.remove_unit(attacker)
-		add_message("%s attacked %s and lost (%s)." % [attacker.faction.name, defender.faction.name, odds_text(chance)])
+		what += ". The %s attacker was destroyed" % attacker.faction.name
+	elif defender.hp <= 0 and not is_city(cell):
+		enter_hex(attacker, cell)
+	add_message(what + ".")
 
-# A unit's Strength when attacked: forest and hills help the defender.
+# The damage one side deals the other: its share of COMBAT_DAMAGE, varied.
+func combat_damage(mine: int, theirs: int) -> int:
+	var share := float(mine) / (mine + theirs)
+	return maxi(1, roundi(COMBAT_DAMAGE * share * randf_range(1.0 - DAMAGE_SPREAD, 1.0 + DAMAGE_SPREAD)))
+
+# Expected damage both ways if attacker attacks defender (for the view).
+func expected_combat(attacker: Unit, defender: Unit) -> Vector2i:
+	var a := attacker.fighting_strength()
+	var d := defender_strength(defender)
+	return Vector2i(roundi(COMBAT_DAMAGE * float(a) / (a + d)), roundi(COMBAT_DAMAGE * float(d) / (a + d)))
+
+# A unit's Strength when attacked: weakened by its wounds; forest and hills help.
 func defender_strength(u: Unit) -> int:
-	return u.strength + Terrain.DEFENCE[terrain_at(u.pos)]
+	return u.fighting_strength() + Terrain.DEFENCE[terrain_at(u.pos)]
 
 # A city's defence (the usual 4X rule): the Strength of its own unit standing
 # in it (the garrison), plus its walls, its land, its population above 1, plus
@@ -1317,7 +1405,7 @@ func city_defence(f: Faction) -> int:
 		defence += Buildings.WATCHTOWER_DEFENCE
 	var garrison := unit_at(f.city_pos)
 	if garrison and garrison.faction == f:
-		defence += garrison.strength
+		defence += garrison.fighting_strength() # (a wounded garrison defends weaker)
 	if daughter.shelters_with(f):
 		defence += SunDaughter.DEFENCE
 	return defence

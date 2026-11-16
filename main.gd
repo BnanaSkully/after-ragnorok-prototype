@@ -77,7 +77,7 @@ func _ready() -> void:
 	# Build options, each a different trade-off (costs are in Industry).
 	end_turn_button = add_button("End Turn", Vector2(PANEL_X, 20), on_end_turn)
 	build_button = add_button("Army (%d)" % GameState.UNIT_COST, Vector2(PANEL_X + 90, 20), on_build_unit)
-	scout_button = add_button("Scout (%d)" % GameState.SCOUT_COST, Vector2(PANEL_X + 180, 20), on_build_scout)
+	scout_button = add_button("Scout (%d)" % GameState.SCOUT_COST, Vector2(PANEL_X + 212, 20), on_build_scout)
 	outpost_button = add_button("", Vector2(PANEL_X, 58), on_outpost_button)
 	walls_button = add_button("Build...", Vector2(PANEL_X + 110, 58), on_open_city)
 	trade_button = add_button("Trade her", Vector2(PANEL_X + 240, 58), on_open_trade)
@@ -89,13 +89,13 @@ func _ready() -> void:
 	for i in state.ais.size():
 		var f: Faction = state.ais[i]
 		var y := BLOCK_Y + i * BLOCK_H + 46
-		var set := {
+		var buttons := {
 			"pact": add_button("", Vector2(PANEL_X, y), on_propose_pact.bind(f)),
 			"deal": add_button("Deal...", Vector2(PANEL_X + 120, y), on_open_deals.bind(f)),
 		}
-		for b in set.values():
+		for b in buttons.values():
 			b.add_theme_font_size_override("font_size", 13)
-		faction_buttons[f] = set
+		faction_buttons[f] = buttons
 	play_again_button = add_button("Play Again", Vector2.ZERO, restart)
 	play_again_button.add_theme_font_size_override("font_size", 22)
 	play_again_button.visible = false
@@ -140,8 +140,8 @@ func refresh() -> void:
 
 func all_game_buttons() -> Array[Button]:
 	var list: Array[Button] = [end_turn_button, build_button, scout_button, outpost_button, walls_button, trade_button]
-	for set in faction_buttons.values():
-		for b in set.values():
+	for buttons in faction_buttons.values():
+		for b in buttons.values():
 			list.append(b)
 	return list
 
@@ -149,7 +149,11 @@ func update_buttons() -> void:
 	var playing: bool = state.can_act()
 	var p := state.player
 	end_turn_button.disabled = not playing
-	build_button.disabled = not playing or p.industry < GameState.UNIT_COST
+	var armies: int = state.army_count(p)
+	var cap: int = state.supply_cap(p)
+	build_button.text = "Army (%d) %d/%d" % [GameState.UNIT_COST, armies, cap]
+	build_button.disabled = not playing or p.industry < GameState.UNIT_COST or armies >= cap
+	build_button.tooltip_text = "An army unit: Strength %d, 1 move, eats %d Food a turn. Supply %d/%d (%d + population, +%d with a Barracks).\nUpkeep: your first %d armies are free; this one would add %d Industry a turn (now %d)." % [p.strength, GameState.UNIT_FOOD_UPKEEP, armies, cap, GameState.SUPPLY_BASE, GameState.Buildings.BARRACKS_SUPPLY, GameState.FREE_ARMIES, state.next_army_upkeep(p), state.army_upkeep(p)]
 	scout_button.disabled = not playing or not state.can_build_scout(p)
 	outpost_button.disabled = not playing or (not placing_outpost and (p.industry < GameState.OUTPOST_COST or state.outpost_spots(p).is_empty()))
 	outpost_button.text = "Cancel" if placing_outpost else "Outpost (%d)" % GameState.OUTPOST_COST
@@ -158,8 +162,8 @@ func update_buttons() -> void:
 	trade_button.disabled = not playing or not state.can_trade_daughter()
 	for f in state.ais:
 		var d: Diplomacy = state.relation(f)
-		var set: Dictionary = faction_buttons[f]
-		var pact: Button = set["pact"]
+		var buttons: Dictionary = faction_buttons[f]
+		var pact: Button = buttons["pact"]
 		var word: String = f.pact_word.capitalize()
 		# One button for war and alliance: at war it asks for peace; at peace it
 		# proposes the oath (a defensive alliance).
@@ -178,7 +182,7 @@ func update_buttons() -> void:
 				pact.text = "%s %d%%" % [word, roundi(d.accept_chance() * 100)]
 			pact.disabled = not playing or not d.can_propose() or d.is_oathbreaker()
 		pact.tooltip_text = "Ask for peace (uses your diplomatic action)." if d.at_war else "%s: a defensive alliance for %d turns. If anyone declares war on one of you, the other joins the war." % [word, Diplomacy.PACT_LENGTH]
-		var deal: Button = set["deal"]
+		var deal: Button = buttons["deal"]
 		deal.disabled = not playing or not d.can_deal()
 		deal.tooltip_text = "Demand, trade, give gifts, or pay for peace (uses your diplomatic action)."
 
@@ -356,11 +360,11 @@ func on_open_deals(f: Faction) -> void:
 		else:
 			add_deal("Ask for open borders for %d turns, both ways (%d%% chance)" % [Diplomacy.BORDERS_LENGTH, roundi(d.borders_chance() * 100)], d.can_ask_borders(), on_deal.bind(func(): state.player_ask_borders(f)))
 		for give in ["food", "industry"]:
-			var get := d.other_resource(give)
+			var back := d.other_resource(give)
 			var amount: int = d.trade_quote(give)
-			var label := "Trade %d %s for %d %s" % [Diplomacy.TRADE_AMOUNT, give.capitalize(), amount, get.capitalize()]
+			var label := "Trade %d %s for %d %s" % [Diplomacy.TRADE_AMOUNT, give.capitalize(), amount, back.capitalize()]
 			if amount <= 0:
-				label = "Trade %d %s for %s  (they have none)" % [Diplomacy.TRADE_AMOUNT, give.capitalize(), get.capitalize()]
+				label = "Trade %d %s for %s  (they have none)" % [Diplomacy.TRADE_AMOUNT, give.capitalize(), back.capitalize()]
 			elif p.get(give) < Diplomacy.TRADE_AMOUNT:
 				label += "  (you don't have %d)" % Diplomacy.TRADE_AMOUNT
 			add_deal(label, amount > 0 and p.get(give) >= Diplomacy.TRADE_AMOUNT, on_deal.bind(func(): state.player_trade(f, give)))
@@ -708,9 +712,9 @@ func _draw() -> void:
 			var fill: Color = TERRAIN_COLOURS[land]
 			var explored := landing or s.player_has_explored(c)
 			if not landing:
-				var owner := s.territory_owner(c)
-				if owner != null:
-					fill = fill.lerp(territory_colour(owner), 0.55) # territory tints the land
+				var land_owner := s.territory_owner(c)
+				if land_owner != null:
+					fill = fill.lerp(territory_colour(land_owner), 0.55) # territory tints the land
 			if dark:
 				fill = fill.darkened(0.7)
 			if not explored:
@@ -800,6 +804,7 @@ func _draw() -> void:
 			else:
 				draw_circle(uc, HexView2D.HEX_SIZE * 0.55, ring)
 				draw_circle(uc, HexView2D.HEX_SIZE * 0.45, col)
+			draw_hp_bar(uc + Vector2(0, HexView2D.HEX_SIZE * 0.62), u.hp)
 
 	# The Sun's Daughter alone in the open: a bright sun on her hex.
 	if daughter.is_rogue() and s.player_can_see(daughter.pos):
@@ -942,7 +947,7 @@ func draw_top_bar(font: Font) -> void:
 		["Pop %d" % p.population, "Population %d (your city's size). Every point above 1 gives +1 Food, +1 Industry and +%d city defence a turn.\nThe city grows by 1 when stored Food reaches %d and Food isn't falling." % [p.population, GameState.POP_DEFENCE, s.growth_cost(p)]],
 		["Food %d/%d (%+d)" % [p.food, s.growth_cost(p), s.food_change(p)], "Food: %d stored; at %d your city grows. Each army unit eats %d a turn (scouts nothing); if it runs out, a unit deserts.\nThis turn: %s" % [p.food, s.growth_cost(p), GameState.UNIT_FOOD_UPKEEP, parts_text(s.food_parts(p))]],
 		["Industry %d (%+d)" % [p.industry, industry_net], "Industry: %d stored, spent on units, outposts and city buildings (Build...).\nThis turn: %s%s" % [p.industry, parts_text(s.industry_parts(p)), ", tribute %+d" % -s.tribute_amount(p) if s.tribute_amount(p) > 0 else ""]],
-		["Units %d" % p.units.size(), "Units: %d army and %d scouts. Each army eats %d Food a turn." % [p.units.size() - p.scout_count(), p.scout_count(), GameState.UNIT_FOOD_UPKEEP]],
+		["Units %d" % p.units.size(), "Units: %d armies (supply %d/%d: %d + population, +%d with a Barracks) and %d scouts.\nEach army eats %d Food a turn and costs rising Industry upkeep: the first %d are free, then 1, 1, 2, 2, 3, 3... (now %d a turn). Scouts are free." % [s.army_count(p), s.army_count(p), s.supply_cap(p), GameState.SUPPLY_BASE, GameState.Buildings.BARRACKS_SUPPLY, p.scout_count(), GameState.UNIT_FOOD_UPKEEP, GameState.FREE_ARMIES, s.army_upkeep(p)]],
 		["Outposts %d" % p.outposts.size(), "Outposts: each earns by its land (plains +2 Food, forest +1/+1, hills +2 Industry), sees 2 hexes and claims the hexes around it. An enemy at war can take an unguarded one."],
 		["Army %d" % s.army_power(p), "Army: the total Strength of your units. The AIs compare armies before demanding or declaring war; %s wants %d+ by turn %d." % [SunDaughter.NAME, SunDaughter.READY_ARMY, Skoll.ARRIVAL_TURN]],
 		["Doom in %d" % (GameState.DOOM_TURN - s.turn), "Turns until the Doom (turn %d)." % GameState.DOOM_TURN],
@@ -968,10 +973,12 @@ func draw_tooltip() -> void:
 	var at := hover_pos + Vector2(14, 22)
 	if lines.is_empty():
 		lines = hex_tooltip(hover_cell)
-		at = HexView2D.hex_center(hover_cell) + Vector2(18, -26)
+		# above the hovered hex, so the units around it stay visible
+		at = HexView2D.hex_center(hover_cell) + Vector2(18, -HexView2D.HEX_SIZE - lines.size() * 17 + 6)
 	if lines.is_empty():
 		return
 	var font := ThemeDB.fallback_font
+	lines = wrap_lines(lines, font, PANEL_X - 50) # long lines wrap so the box fits beside the panel
 	var w := 0.0
 	for line in lines:
 		w = maxf(w, font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x)
@@ -981,6 +988,21 @@ func draw_tooltip() -> void:
 	draw_rect(Rect2(at - Vector2(6, 14), Vector2(w + 12, lines.size() * 17 + 6)), Color(0.06, 0.06, 0.06, 0.9))
 	for i in lines.size():
 		draw_string(font, at + Vector2(0, i * 17), lines[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.95, 0.95, 0.85) if i == 0 else Color(0.8, 0.8, 0.75))
+
+# Breaks lines wider than max_w at spaces (continuations are indented).
+func wrap_lines(lines: Array[String], font: Font, max_w: float) -> Array[String]:
+	var out: Array[String] = []
+	for line in lines:
+		var current := ""
+		for word in line.split(" "):
+			var trial := word if current == "" else current + " " + word
+			if current != "" and font.get_string_size(trial, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x > max_w:
+				out.append(current)
+				current = "   " + word
+			else:
+				current = trial
+		out.append(current)
+	return out
 
 # Everything the player knows about a hex, one line each (empty if unexplored).
 func hex_tooltip(c: Vector2i) -> Array[String]:
@@ -995,15 +1017,22 @@ func hex_tooltip(c: Vector2i) -> Array[String]:
 	if u != null and (seen or u.faction == s.player):
 		var who := "Your" if u.faction == s.player else "The %s" % u.faction.name
 		var kind := "scout" if u.is_scout() else "army"
-		var line := "%s %s: Strength %d" % [who, kind, u.strength]
-		if s.defender_strength(u) != u.strength:
-			line += " (defends at %d here)" % s.defender_strength(u)
+		var line := "%s %s: HP %d/%d, Strength %d" % [who, kind, u.hp, Unit.MAX_HP, u.strength]
+		if u.fighting_strength() != u.strength:
+			line += " (%d while wounded)" % u.fighting_strength()
+		if s.defender_strength(u) != u.fighting_strength():
+			line += ", defends at %d here" % s.defender_strength(u)
 		line += ", moves %d/%d" % [u.moves, u.max_moves()]
 		if u.busy_until > s.turn:
 			line += ", standing watch until turn %d" % u.busy_until
 		if u.faction != s.player:
 			line += "  [%s]" % ("AT WAR with you" if s.at_war(s.player, u.faction) else "at peace")
 		lines.append(line)
+		if u.hp < Unit.MAX_HP and u.faction == s.player:
+			lines.append("   Heals %d HP in a turn it doesn't move or fight (%d in your own land)." % [GameState.HEAL_REST, GameState.HEAL_HOME])
+		if selected != null and u.faction != s.player and HexMap.is_neighbour(selected.pos, c) and not s.is_city(c):
+			var e: Vector2i = s.expected_combat(selected, u)
+			lines.append("   If your selected unit attacks: it deals about %d and takes about %d (of %d HP)." % [e.x, e.y, selected.hp])
 	if seen and s.daughter.is_rogue() and s.daughter.pos == c:
 		lines.append("%s, alone in the open. Move a unit onto her to persuade her (%d%%)." % [SunDaughter.NAME.capitalize(), roundi(s.daughter.persuade_chance(s.player) * 100)])
 	var city := s.city_owner(c)
@@ -1048,6 +1077,14 @@ func hex_tooltip(c: Vector2i) -> Array[String]:
 		text += ": " + ", ".join(bits)
 	lines.append(text)
 	return lines
+
+# A small health bar under a unit: green when healthy, through yellow, to red.
+func draw_hp_bar(at: Vector2, hp: int) -> void:
+	var w := 26.0
+	var frac := clampf(float(hp) / Unit.MAX_HP, 0.0, 1.0)
+	draw_rect(Rect2(at - Vector2(w / 2 + 1, 1), Vector2(w + 2, 5)), Color(0.08, 0.08, 0.08))
+	var col := Color(0.85, 0.2, 0.15).lerp(Color(0.95, 0.85, 0.2), clampf(frac * 2.0, 0.0, 1.0)) if frac < 0.5 else Color(0.95, 0.85, 0.2).lerp(Color(0.3, 0.85, 0.3), (frac - 0.5) * 2.0)
+	draw_rect(Rect2(at - Vector2(w / 2, 0), Vector2(w * frac, 3)), col)
 
 # A rift in the void: a dark swirl.
 func draw_rift(rc: Vector2) -> void:

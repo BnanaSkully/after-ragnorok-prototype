@@ -46,6 +46,9 @@ CLAUDE.md holds the rules for working; this file holds the history.
 
 ## Things learnt (bugs found and fixed)
 
+- Godot's editor warnings (integer division, names shadowing get/set/owner) don't show with --check-only; run the game with --debug --quit-after 5 to see them. Nathan saw 11 in his Debugger; now 0.
+- The army snowball only showed with a test player that plays like a person (outposts on plains, a Granary, armies while Food allows): a naive one starved at 2 armies and hid the problem.
+
 - A pop-up that blocks end_turn makes every headless test loop forever (the turn never advances). Tests must answer pop-ups (tests/helpers.gd answer_choices), and early_game_test checks the turn always advances.
 - Beating a city's garrison used to move the attacker INTO the city (an old bug, found by the new "unit in someone else's city" check).
 - Two tests (balance_state, rift_timing_test) still used the two-faction names (s.rival, s.diplomacy) and had silently stopped working. Run every test after big changes, not only the new one.

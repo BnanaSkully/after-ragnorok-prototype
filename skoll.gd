@@ -168,7 +168,7 @@ func attack_unit(u: Unit) -> void:
 
 # A unit (the player's) attacks Sköll.
 func attacked_by(u: Unit) -> void:
-	var chance: float = game.win_chance(u.strength, strength)
+	var chance: float = game.win_chance(u.fighting_strength(), strength)
 	if randf() < chance:
 		game.add_message("You drove Sköll back (%s)!" % game.odds_text(chance))
 		drive_back()

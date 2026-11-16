@@ -17,10 +17,13 @@ static func in_bounds(cell: Vector2i) -> bool:
 # How many steps apart two hexes are. Converts our offset rows into
 # "cube" hex coordinates, where distance is easy to work out.
 static func hex_distance(a: Vector2i, b: Vector2i) -> int:
+	@warning_ignore("integer_division") # (always even: exact)
 	var aq := a.x - (a.y - (a.y & 1)) / 2
+	@warning_ignore("integer_division")
 	var bq := b.x - (b.y - (b.y & 1)) / 2
 	var dq := aq - bq
 	var dr := a.y - b.y
+	@warning_ignore("integer_division") # (always even: exact)
 	return (absi(dq) + absi(dr) + absi(dq + dr)) / 2
 
 # Two different hexes on the map that share an edge.
