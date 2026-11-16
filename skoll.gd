@@ -25,6 +25,7 @@ const SWALLOW_BONUS := 8 # Strength he gains by swallowing Sunna (much stronger,
 const RETURN_TURNS := 3 # turns in the void after being driven back
 const STRENGTH_PER_RETURN := 2 # he comes back stronger each time
 const WOUND_HEAL := 2 # wounds heal this much a turn
+const CITY_DAMAGE := 2.0 # he tears at a city's HP this many times as hard as an army would (a siege beast)
 
 # Rifts in the void: the hexes Sköll can come through. Every standing city
 # gets one rift 4-7 hexes away that is nearer to it than to any other city
@@ -125,10 +126,16 @@ func take_turn() -> void:
 # the battle, if she turns out to be in the city he attacked.
 func attack_city(f: Faction) -> void:
 	var defence: int = game.city_defence(f)
-	var chance: float = game.win_chance(effective_strength(), defence)
+	var dealt: int = roundi(game.combat_damage(effective_strength(), defence) * CITY_DAMAGE)
+	var taken: int = game.combat_damage(defence, effective_strength())
 	var she_is_here: bool = game.daughter.shelters_with(f)
-	if randf() < chance:
-		game.add_message("Sköll attacked %s's city (defence %d) and destroyed it (%s)." % [f.name, defence, game.odds_text(chance)])
+	f.city_hp -= dealt
+	if she_is_here and not knows_her:
+		knows_her = true
+		var where := "your city" if f == game.player else "the %s city" % f.name
+		game.add_message("Sköll has found %s: she hides in %s. From now on he hunts whoever shelters her." % [SunDaughter.NAME, where])
+	if f.city_hp <= 0:
+		game.add_message("Sköll attacked %s's city (defence %d) and tore it down." % [f.name, defence])
 		pos = f.city_pos
 		var inside: Unit = game.unit_at(f.city_pos) # whoever is in the city dies, even an enemy
 		if inside:
@@ -148,12 +155,8 @@ func attack_city(f: Faction) -> void:
 			game.add_message("Gorged, Sköll sinks back into the void to feed.")
 			drive_back()
 	else:
-		game.add_message("%s's city (defence %d) drove Sköll back! (He had a %s.)" % [f.name, defence, game.odds_text(chance)])
-		if she_is_here and not knows_her:
-			knows_her = true
-			var whose := "your city" if f == game.player else "the %s city" % f.name
-			game.add_message("But now he knows %s hides in %s. From now on he hunts whoever shelters her." % [SunDaughter.NAME, whose])
-		drive_back()
+		game.add_message("%s's city (defence %d) held: it lost %d HP (%d left) and wounded Sköll by %d." % [f.name, defence, dealt, f.city_hp, taken])
+		wound(taken, f)
 
 # She's out in the open: he sprints toward her (SPRINT hexes a turn), and if
 # he reaches her he swallows her with no battle.
@@ -245,14 +248,17 @@ func attacked_by(u: Unit) -> void:
 	else:
 		game.add_message("Sköll can't be killed while %s is hidden. Your unit died, but its attack of %d wounded him by %d." % [SunDaughter.NAME, attack, dealt])
 		u.faction.remove_unit(u)
-	wound(dealt, u.faction)
+	wound(dealt, u.faction, true)
 
-# Wounds lower his Strength until they heal (WOUND_HEAL a turn). Immortal:
-# wounds of half his Strength drive him back. Mortal: wounds equal to his
-# Strength kill him ("by" is whoever dealt the last blow).
-func wound(amount: int, by: Faction = null) -> void:
+# Wounds lower his Strength until they heal (WOUND_HEAL a turn). Wounds of half
+# his Strength drive him back into the void. Only an ATTACK on him ("hunted")
+# can kill him, once he's mortal: then he stands and fights, and wounds equal
+# to his Strength kill him ("by" is whoever struck the last blow). Damage from
+# cities and units he attacks only drives him off: slaying the wolf takes a
+# deliberate (combined) attack, not his own recklessness.
+func wound(amount: int, by: Faction = null, hunted := false) -> void:
 	wounds += amount
-	if is_mortal():
+	if is_mortal() and hunted:
 		if wounds >= strength:
 			game.add_message("Sköll falls! The wolf is dead.")
 			slain = true

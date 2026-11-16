@@ -21,6 +21,7 @@ extends RefCounted
 const RISE_TURN := 20 # from this turn Sunna can rise (it used to be "the Doom" and a dead end)
 const END_TURN := 40 # the game ends here: Dawn if Sunna rose with you, else Dominion (most land)
 const DEVOURED_SHARE := 0.45 # Sköll wins once he has devoured this share of all factions
+const AI_REQUEST_COST := 5 # Industry an AI pays to grant one of Sunna's requests
 const ASH_PER_CYCLE := 8 # hexes that turn to ash each time Sköll comes through a rift
 const WOLF_SUPPORT := 2 # each other army of yours or your allies next to Sköll adds this to an attack on him
 const MIN_LANDING_DISTANCE := 4 # how many hexes away from every AI city you must land
@@ -64,7 +65,12 @@ const AI_PEACE_CHANCE := 0.2 # ...with this chance each turn (twice as likely on
 const TRIBUTE_SHARE := 0.5 # a tributary pays this share of its Industry income to its overlord
 const REBEL_CHANCE := 0.2 # each turn, a tributary AI whose army is stronger than its overlord's may rise up
 const SIEGE_SUPPORT := 2 # each other army of the attacker's next to the city adds this to the attack
-const AI_SIEGE_ODDS := 0.4 # an AI army attacks an enemy city when its chance is at least this
+# City HP (standard 4X sieges): a city has CITY_MAX_HP and heals CITY_HEAL a
+# turn. An attack damages it (the attack against the city's defence) and the
+# attacker takes damage back. At 0 an army takes it (tributary; it restarts at
+# half) and Sköll devours it.
+const CITY_MAX_HP := 20
+const CITY_HEAL := 3
 const AI_MARCH_ARMIES := 2 # an AI at war sends spare armies at enemy cities once it has this many
 const GROWTH_BASE := 10 # Food stored to grow from population 1 to 2...
 const GROWTH_STEP := 5 # ...and each later growth costs this much more
@@ -232,6 +238,7 @@ func end_turn() -> void:
 		if f.city_pos == NO_CELL:
 			continue # this faction's city has fallen; it's out of the game
 		f.food += food_change(f)
+		f.city_hp = mini(CITY_MAX_HP, f.city_hp + CITY_HEAL) # the city repairs itself
 		f.industry += industry_change(f)
 		pay_tribute(f)
 		if f.industry < 0:
@@ -592,7 +599,7 @@ func ai_take_turn(f: Faction) -> void:
 			var other := unit_at(c)
 			if other == null or not at_war(f, other.faction):
 				continue # only enemies it is at war with
-			if c == other.faction.city_pos and win_chance(siege_strength(u, other.faction), city_defence(other.faction)) < AI_SIEGE_ODDS:
+			if c == other.faction.city_pos and not ai_dares_siege(u, other.faction):
 				continue # a garrison behind walls: too strong to attack
 			target = other
 			break
@@ -620,7 +627,7 @@ func ai_take_turn(f: Faction) -> void:
 		var siege := ai_siege_target(f)
 		if siege != null and u.pos != f.city_pos:
 			if HexMap.is_neighbour(u.pos, siege.city_pos):
-				if win_chance(siege_strength(u, siege), city_defence(siege)) >= AI_SIEGE_ODDS:
+				if ai_dares_siege(u, siege):
 					attack_hex(u, siege.city_pos)
 				continue # (otherwise it waits outside for help)
 			var march := step_toward(u.pos, siege.city_pos, f)
@@ -1131,20 +1138,39 @@ func attack_hex(u: Unit, cell: Vector2i) -> void:
 # attacker stays outside). Losing: the attacking unit is destroyed.
 func attack_city(u: Unit, f: Faction) -> void:
 	var conqueror := u.faction
+	var attack := siege_strength(u, f)
 	var defence := city_defence(f)
-	var chance := win_chance(siege_strength(u, f), defence)
+	var dealt := combat_damage(attack, defence)
+	var taken := combat_damage(defence, attack)
 	var whose := "your city" if f == player else "the %s city" % f.name
 	var who := "You" if conqueror == player else "The " + conqueror.name
-	if randf() >= chance:
+	u.acted = true
+	f.city_hp -= dealt
+	u.hp -= taken
+	add_message("%s attacked %s (attack %d against defence %d): the city lost %d HP (%d left), the attacker %d." % [who, whose, attack, defence, dealt, maxi(0, f.city_hp), taken])
+	if u.hp <= 0:
 		conqueror.remove_unit(u)
-		add_message("%s attacked %s (defence %d) and lost the unit (%s)." % [who, whose, defence, odds_text(chance)])
+		add_message("The attacking unit died.")
+	if f.city_hp > 0:
 		return
 	var garrison := unit_at(f.city_pos)
 	if garrison and garrison.faction == f:
 		f.remove_unit(garrison)
 	f.walls = maxi(0, f.walls - 1)
+	@warning_ignore("integer_division")
+	f.city_hp = CITY_MAX_HP / 2 # it restarts at half
 	make_tributary(f, conqueror)
-	remember("Turn %d: %s took %s (defence %d, %s). It pays them tribute now." % [turn, who, whose, defence, odds_text(chance)])
+	remember("Turn %d: %s took %s. It pays them tribute now." % [turn, who, whose])
+
+# An AI unit attacks a city only if it expects to survive the hit.
+func ai_dares_siege(u: Unit, f: Faction) -> bool:
+	return roundi(COMBAT_DAMAGE * float(city_defence(f)) / (siege_strength(u, f) + city_defence(f))) < u.hp
+
+# What attacking city f with unit u would do (for the view): damage to the city, to the unit.
+func expected_siege(u: Unit, f: Faction) -> Vector2i:
+	var a := siege_strength(u, f)
+	var d := city_defence(f)
+	return Vector2i(roundi(COMBAT_DAMAGE * float(a) / (a + d)), roundi(COMBAT_DAMAGE * float(d) / (a + d)))
 
 # f becomes conqueror's tributary: their war ends and f pays tribute. If the
 # conqueror was f's own tributary, it is free again.
@@ -1333,6 +1359,16 @@ func apply_effects(effects: Dictionary) -> void:
 
 # Sunna asks something of you every REQUEST_GAP turns while you shelter her.
 func maybe_sunna_request() -> void:
+	if turn >= next_request_turn and daughter.state == SunDaughter.State.SHELTERED and daughter.holder != null and daughter.holder != player:
+		# An AI sheltering her is asked too: it grants if it has the Industry, else refuses.
+		next_request_turn = turn + SunDaughter.REQUEST_GAP
+		var ai := daughter.holder
+		if ai.industry >= AI_REQUEST_COST:
+			ai.industry -= AI_REQUEST_COST
+			daughter.change_favour(ai, SunDaughter.REQUEST_GRANTED)
+		else:
+			daughter.change_favour(ai, SunDaughter.REQUEST_REFUSED)
+		return
 	if not daughter.shelters_with(player):
 		next_request_turn = maxi(next_request_turn, turn + 1)
 		return

@@ -19,7 +19,8 @@ const DEFENCE := 3 # extra city defence
 
 # How she judges whoever shelters her: is the kingdom fed, and is it ready
 # when Sköll arrives?
-const FED_TURNS_PER_FAVOUR := 3 # every 3 turns in a row without starving: Favour +1
+const FED_TURNS_PER_FAVOUR := 3 # every 3 turns in a row without starving: Favour +1...
+const FED_FAVOUR_CAP := 7 # ...but only up to this: to reach RISE_FAVOUR you must grant her requests
 const STARVING_FAVOUR := -2 # a turn in which the kingdom starves (a unit deserts)
 const READY_DEFENCE := 10 # what she wants by the time Sköll arrives:
 const READY_ARMY := 6 #   city defence and total army Strength
@@ -138,7 +139,7 @@ func judge_feeding(starved: bool) -> String:
 		change_favour(holder, STARVING_FAVOUR)
 		return "%s saw %s people starve. Her Favour %+d." % [NAME.capitalize(), whose(holder), STARVING_FAVOUR]
 	fed_turns += 1
-	if fed_turns % FED_TURNS_PER_FAVOUR == 0:
+	if fed_turns % FED_TURNS_PER_FAVOUR == 0 and holder.favour < FED_FAVOUR_CAP:
 		change_favour(holder, 1)
 		return "%s is content: %s people have been fed for %d turns. Her Favour +1." % [NAME.capitalize(), whose(holder), fed_turns]
 	return ""

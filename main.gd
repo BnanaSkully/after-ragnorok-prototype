@@ -788,6 +788,8 @@ func _draw() -> void:
 		draw_string(ThemeDB.fallback_font, cc + Vector2(-half - 9, half + 5), str(f.population), HORIZONTAL_ALIGNMENT_CENTER, 18, 13, Color.WHITE)
 		if daughter.shelters_with(f):
 			draw_sun(cc + Vector2(half, -half), 6.0) # a little sun on the city sheltering her
+		if f.city_hp < GameState.CITY_MAX_HP: # (a city at full health shows no bar)
+			draw_hp_bar(cc + Vector2(0, half + 6), roundi(float(f.city_hp) / GameState.CITY_MAX_HP * Unit.MAX_HP))
 
 	for f in s.factions:
 		for u in f.units:
@@ -1061,7 +1063,10 @@ func hex_tooltip(c: Vector2i) -> Array[String]:
 	var city := s.city_owner(c)
 	if city != null:
 		var who := "Your city" if city == s.player else "The %s city" % city.name
-		lines.append("%s: population %d, %+d Food and %+d Industry a turn, defence %d" % [who, city.population, s.food_change(city), s.industry_change(city), s.city_defence(city)])
+		lines.append("%s: HP %d/%d, population %d, %+d Food and %+d Industry a turn, defence %d" % [who, city.city_hp, GameState.CITY_MAX_HP, city.population, s.food_change(city), s.industry_change(city), s.city_defence(city)])
+		if selected != null and city != s.player and HexMap.is_neighbour(selected.pos, c):
+			var e: Vector2i = s.expected_siege(selected, city)
+			lines.append("   If your selected unit attacks: the city loses about %d HP, your unit about %d (of %d). At 0 HP it becomes your tributary." % [e.x, e.y, selected.hp])
 		var extra: Array[String] = []
 		if city.walls > 0:
 			extra.append("walls %d" % city.walls)
