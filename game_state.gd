@@ -18,11 +18,7 @@ extends RefCounted
 #   terrain.gd          the land: plains, forest, hills, mountains, water
 #   buildings.gd        city buildings (Granary, Workshop, Watchtower, Forge)
 
-const RISE_TURN := 20 # from this turn Sunna can rise (it used to be "the Doom" and a dead end)
-const END_TURN := 40 # the game ends here: Dawn if Sunna rose with you, else Dominion (most land)
-const DEVOURED_SHARE := 0.45 # Sköll wins once he has devoured this share of all factions
-const ASH_PER_CYCLE := 8 # hexes that turn to ash each time Sköll comes through a rift
-const WOLF_SUPPORT := 2 # each other army of yours or your allies next to Sköll adds this to an attack on him
+const DOOM_TURN := 20 # survive until this turn and Phase 3 (chaos) begins
 const MIN_LANDING_DISTANCE := 4 # how many hexes away from every AI city you must land
 const LANDING_INDUSTRY := 5 # Industry everyone unloads from the ark at the Landing (enough to build something on turn 1)
 const UNIT_COST := 5 # Industry to build a new army unit
@@ -100,13 +96,11 @@ var ruins: Array[Dictionary] = []
 var pending_choices: Array[Dictionary] = []
 var next_event_turn := 0 # when the next small event happens
 var event_deck: Array = [] # small events not yet seen this game, shuffled
-var next_request_turn := SunDaughter.REQUEST_FROM # when Sunna next asks something of you (while you shelter her)
 # Wars between AI factions: "Celtic|Greek" -> the turn it started. Every pair
 # starts at peace. (The player's wars are in each Diplomacy, GameState.relations.)
 var ai_war_since := {}
 var ai_truce_until := {} # "Celtic|Greek" -> no new war between them before this turn
 var terrain := {} # hex -> Terrain.Type, a new map every game (made in _init)
-var ash := {} # hexes turned to ash by Sköll (hex -> true): dead land, see "Ash"
 
 func _init() -> void:
 	terrain = Terrain.generate(ais.map(func(f): return f.city_pos))
@@ -235,7 +229,7 @@ func end_turn() -> void:
 	for r in relations:
 		r.new_turn()
 	diplomacy_action_used = false
-	if not game_over and turn < END_TURN:
+	if not game_over and turn < DOOM_TURN:
 		# at most one AI faction makes an offer each turn (the view shows a pop-up)
 		var order := relations.duplicate()
 		order.shuffle()
@@ -246,120 +240,16 @@ func end_turn() -> void:
 			if r.has_pending():
 				break
 		maybe_turn_event()
-		maybe_sunna_request()
-	maybe_rise()
 	eject_trespassers()
 	update_sight()
-	if turn >= END_TURN and not game_over:
-		final_ending()
+	if turn >= DOOM_TURN:
+		end_game("You survived until the Doom",
+			"Sköll howls, and chaos pours out of the void.\nPHASE 3 BEGINS: chaos factions rise and rogues join Sköll.\n(Phase 3 is not built yet.)")
 
 func end_game(title: String, detail: String) -> void:
 	game_over = true
 	end_title = title
 	end_detail = detail
-
-# --- Endings -------------------------------------------------------------------
-# Sköll devoured faction f (its last, and only, city fell to him). Your city:
-# you lose. Once he has devoured DEVOURED_SHARE of all factions, Sköll wins.
-var devoured: Array[String] = []
-
-func devour(f: Faction) -> void:
-	devoured.append(f.name)
-	if f == player:
-		end_game("Devoured", "Sköll tore down your city on turn %d.\nYour people are gone." % turn)
-	elif devoured.size() >= ceili(DEVOURED_SHARE * factions.size()):
-		end_game("Sköll wins", "He has devoured %s.\nThe wolf rules the long night." % " and ".join(devoured))
-
-# Land: every hex of a faction's territory (its city and outposts and the
-# hexes around them) that isn't ash.
-func land_count(f: Faction) -> int:
-	var n := 0
-	for row in HexMap.ROWS:
-		for col in HexMap.COLS:
-			var c := Vector2i(col, row)
-			if territory_owner(c) == f and not is_ash(c):
-				n += 1
-	return n
-
-# Turn END_TURN: Dawn if Sunna has risen (for whoever she chose), otherwise
-# Dominion for whoever holds the most land (a tie counts as yours).
-func final_ending() -> void:
-	if daughter.is_risen() and daughter.holder != null and daughter.holder.is_alive():
-		if daughter.holder == player:
-			end_game("Dawn", "Sunna has risen, and she stands with you.\nThe long night is over.")
-		else:
-			end_game("Dawn for the %s" % daughter.holder.name, "Sunna has risen, but she chose the %s.\nTheirs is the new world." % daughter.holder.name)
-		return
-	var best: Faction = player
-	for f in ais:
-		if f.is_alive() and land_count(f) > land_count(best):
-			best = f
-	var tally := ", ".join(factions.filter(func(f): return f.is_alive()).map(func(f): return "%s %d" % [f.name, land_count(f)]))
-	if best == player:
-		end_game("Dominion", "Turn %d: you hold the most land.\n(%s hexes)" % [turn, tally])
-	else:
-		end_game("The %s hold the most land" % best.name, "Turn %d: Dominion goes to the %s.\n(%s hexes)" % [turn, best.name, tally])
-
-# A unit's attack on Sköll: its Strength +WOLF_SUPPORT for every other army of
-# its own faction (or the player's allies) standing next to him: the "large
-# combined force" it takes to bring him down.
-func wolf_attack(u: Unit) -> int:
-	var attack := u.strength
-	for f in factions:
-		var with_us: bool = f == u.faction or (u.faction == player and f != player and relation(f).pact_active())
-		if not with_us:
-			continue
-		for other in f.units:
-			if other != u and not other.is_scout() and HexMap.is_neighbour(other.pos, skoll.pos):
-				attack += WOLF_SUPPORT
-	return attack
-
-func wolf_slain(f: Faction) -> void:
-	if f == player:
-		end_game("Slay the wolf", "On turn %d your people brought down Sköll.\nThe wolf is dead." % turn)
-	else:
-		end_game("The %s slew the wolf" % f.name, "Sköll is dead, but the glory is theirs.")
-
-# --- Ash ----------------------------------------------------------------------
-# Each time Sköll comes through a rift, ASH_PER_CYCLE hexes turn to ash,
-# spreading in from the map's edges, from ash already there, and around the
-# rift he used. Ash is dead land: no outposts (one standing there is lost),
-# no ruins, and it counts as nobody's land for Dominion. Units can still walk
-# on it. A city and the hexes next to it never turn to ash. It stops once
-# Sunna has risen.
-func spread_ash(origin: Vector2i) -> void:
-	if daughter.is_risen():
-		return
-	var options: Array[Vector2i] = []
-	for row in HexMap.ROWS:
-		for col in HexMap.COLS:
-			var c := Vector2i(col, row)
-			if is_ash(c) or not passable(c) or next_to_a_city(c):
-				continue
-			var edge := col == 0 or row == 0 or col == HexMap.COLS - 1 or row == HexMap.ROWS - 1
-			var near := HexMap.hex_distance(c, origin) <= 1 or HexMap.neighbours(c).any(func(n): return is_ash(n))
-			if edge or near:
-				options.append(c)
-	options.shuffle()
-	var lost_outposts := 0
-	for c in options.slice(0, ASH_PER_CYCLE):
-		ash[c] = true
-		var owner := outpost_owner(c)
-		if owner != null:
-			owner.outposts.erase(c)
-			if owner == player:
-				lost_outposts += 1
-		for r in ruins:
-			if r["cell"] == c:
-				r["taken"] = true # buried
-	if lost_outposts > 0:
-		add_message("Ash swallowed %d of your outposts." % lost_outposts)
-
-func next_to_a_city(c: Vector2i) -> bool:
-	for f in factions:
-		if f.is_alive() and HexMap.hex_distance(c, f.city_pos) <= 1:
-			return true
-	return false
 
 func add_message(text: String) -> void:
 	messages.append(text)
@@ -448,8 +338,6 @@ func food_parts(f: Faction) -> Array:
 		parts.append(["Granary", Buildings.GRANARY_FOOD])
 	if daughter.shelters_with(f):
 		parts.append([SunDaughter.NAME, SunDaughter.FOOD])
-	elif daughter.risen_with(f):
-		parts.append(["%s risen" % SunDaughter.NAME, SunDaughter.RISEN_FOOD])
 	var eaten := 0
 	for u in f.units:
 		eaten += u.upkeep(UNIT_FOOD_UPKEEP)
@@ -470,8 +358,6 @@ func industry_parts(f: Faction) -> Array:
 		parts.append(["Workshop", Buildings.WORKSHOP_INDUSTRY])
 	if daughter.shelters_with(f):
 		parts.append([SunDaughter.NAME, SunDaughter.INDUSTRY])
-	elif daughter.risen_with(f):
-		parts.append(["%s risen" % SunDaughter.NAME, SunDaughter.RISEN_INDUSTRY])
 	return parts
 
 func sum_parts(parts: Array) -> int:
@@ -1246,8 +1132,6 @@ func apply_effects(effects: Dictionary) -> void:
 		if g != null:
 			g.busy_until = turn + effects["guard_turns"]
 			g.moves = 0
-	if effects.has("her_favour"): # granting or refusing Sunna's request
-		daughter.change_favour(player, effects["her_favour"])
 	if effects.has("spoil"):
 		player.food = maxi(0, player.food - effects["spoil"])
 	if effects.has("trust_all"):
@@ -1261,35 +1145,6 @@ func apply_effects(effects: Dictionary) -> void:
 			var f: Faction = hidden.pick_random()
 			reveal_area(player, f.city_pos, 2)
 			add_message("He leads your mapmakers to where the %s landed." % f.name)
-
-# Sunna asks something of you every REQUEST_GAP turns while you shelter her.
-func maybe_sunna_request() -> void:
-	if not daughter.shelters_with(player):
-		next_request_turn = maxi(next_request_turn, turn + 1)
-		return
-	if turn < next_request_turn:
-		return
-	next_request_turn = turn + SunDaughter.REQUEST_GAP
-	var r: Dictionary = TurnEvents.SUNNA_REQUESTS.pick_random()
-	var grant: Dictionary = r["effects"].duplicate()
-	grant["her_favour"] = SunDaughter.REQUEST_GRANTED
-	pending_choices.append({"title": r["title"], "text": r["text"], "options": [
-		{"label": "%s: her Favour %+d" % [r["grant"], SunDaughter.REQUEST_GRANTED], "effects": grant, "result": "Sunna smiles."},
-		{"label": "Refuse: her Favour %+d" % SunDaughter.REQUEST_REFUSED, "effects": {"her_favour": SunDaughter.REQUEST_REFUSED}, "result": "Sunna turns away."},
-	]})
-
-# From RISE_TURN: if she shelters with a faction that has earned RISE_FAVOUR,
-# she rises as the new sun and stands with them.
-func maybe_rise() -> void:
-	if turn < RISE_TURN or daughter.state != SunDaughter.State.SHELTERED or daughter.holder == null or not daughter.holder.is_alive():
-		return
-	if daughter.holder.favour < SunDaughter.RISE_FAVOUR:
-		return
-	daughter.state = SunDaughter.State.RISEN
-	skoll.strength = Skoll.STRENGTH # mortal, and back to his normal Strength
-	skoll.wounds = 0
-	var who := "you" if daughter.holder == player else "the " + daughter.holder.name
-	remember("Turn %d: SUNNA HAS RISEN and stands with %s (+%d Food, +%d Industry a turn). Sköll is mortal now (Strength %d), and the ash stops." % [turn, who, SunDaughter.RISEN_FOOD, SunDaughter.RISEN_INDUSTRY, skoll.strength])
 
 # Every few turns after the Landing, a small event asks the player to choose.
 func maybe_turn_event() -> void:
@@ -1382,7 +1237,7 @@ func outpost_spots(f: Faction) -> Array[Vector2i]:
 	return spots
 
 func can_place_outpost(f: Faction, c: Vector2i) -> bool:
-	if not HexMap.in_bounds(c) or not can_see(f, c) or not passable(c) or is_ash(c):
+	if not HexMap.in_bounds(c) or not can_see(f, c) or not passable(c):
 		return false
 	if HexMap.hex_distance(c, f.city_pos) > OUTPOST_RANGE:
 		return false
@@ -1463,7 +1318,7 @@ func city_defence(f: Faction) -> int:
 	var garrison := unit_at(f.city_pos)
 	if garrison and garrison.faction == f:
 		defence += garrison.strength
-	if daughter.shelters_with(f) or daughter.risen_with(f):
+	if daughter.shelters_with(f):
 		defence += SunDaughter.DEFENCE
 	return defence
 
@@ -1554,9 +1409,6 @@ func is_blocked(cell: Vector2i) -> bool:
 # --- Terrain ------------------------------------------------------------------
 func terrain_at(cell: Vector2i) -> int:
 	return terrain.get(cell, Terrain.Type.PLAINS)
-
-func is_ash(cell: Vector2i) -> bool:
-	return ash.has(cell)
 
 func passable(cell: Vector2i) -> bool:
 	return HexMap.in_bounds(cell) and Terrain.passable(terrain_at(cell))
