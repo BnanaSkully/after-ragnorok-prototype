@@ -638,7 +638,7 @@ func ai_take_turn(f: Faction) -> void:
 		var grab := NO_CELL
 		for c in HexMap.neighbours(u.pos):
 			var owner := outpost_owner(c)
-			if owner != null and at_war(f, owner) and not is_blocked(c):
+			if owner != null and at_war(f, owner) and not is_blocked(c) and not zoc_blocks(f, u.pos, c):
 				grab = c
 				break
 		if grab != NO_CELL:
@@ -647,7 +647,7 @@ func ai_take_turn(f: Faction) -> void:
 		var options: Array[Vector2i] = []
 		for c in HexMap.neighbours(u.pos):
 			var o := outpost_owner(c)
-			if not is_blocked(c) and not (is_city(c) and c != f.city_pos) and (o == null or o == f) and may_enter(f, c):
+			if not is_blocked(c) and not (is_city(c) and c != f.city_pos) and (o == null or o == f) and may_enter(f, c) and not zoc_blocks(f, u.pos, c):
 				options.append(c)
 		if not options.is_empty():
 			enter_hex(u, options.pick_random())
@@ -671,7 +671,7 @@ func ai_scout(u: Unit) -> void:
 		if step == NO_CELL:
 			var options: Array[Vector2i] = []
 			for c in HexMap.neighbours(u.pos):
-				if not is_blocked(c) and not is_city(c) and may_enter(f, c):
+				if not is_blocked(c) and not is_city(c) and may_enter(f, c) and not zoc_blocks(f, u.pos, c):
 					options.append(c)
 			if options.is_empty():
 				return
@@ -718,6 +718,8 @@ func step_toward(from: Vector2i, goal: Vector2i, f: Faction = null) -> Vector2i:
 				break
 			if is_blocked(n) or is_city(n) or (f != null and not may_enter(f, n)):
 				continue
+			if c == from and zoc_blocks(f, from, n):
+				continue # zone of control: can't slip past an enemy army this turn
 			came_from[n] = c
 			queue.append(n)
 	if not reached:
@@ -725,8 +727,8 @@ func step_toward(from: Vector2i, goal: Vector2i, f: Faction = null) -> Vector2i:
 	var step := goal
 	while came_from[step] != from:
 		step = came_from[step]
-	if step == goal and (is_blocked(goal) or (f != null and not may_enter(f, goal))):
-		return NO_CELL # already next to it
+	if step == goal and (is_blocked(goal) or (f != null and not may_enter(f, goal)) or zoc_blocks(f, from, goal)):
+		return NO_CELL # already next to it (or held there by an enemy's zone of control)
 	return step
 
 # Once the howling starts it builds walls first; otherwise a unit,
@@ -959,6 +961,11 @@ func player_unit_act(u: Unit, cell: Vector2i) -> bool:
 	var other := unit_at(cell)
 	if other and other.faction == player:
 		return false # can't move onto your own unit
+	var attacking := skoll.is_at(cell) or other != null or (is_city(cell) and cell != player.city_pos)
+	if not attacking and not (daughter.is_rogue() and cell == daughter.pos) and zoc_blocks(player, u.pos, cell):
+		var holder := zoc_holder(player, u.pos)
+		messages = ["Zone of control: your unit is next to a %s army and can't slip past it." % holder.faction.name, "Attack it, step away from it, or stay."]
+		return false
 	messages.clear()
 	u.acted = true # (moving or fighting: no healing this turn)
 	if skoll.is_at(cell):
@@ -986,6 +993,8 @@ func enter_hex(u: Unit, cell: Vector2i) -> void:
 	u.pos = cell
 	u.acted = true
 	var f := u.faction
+	if in_enemy_zoc(f, cell):
+		u.moves = 0 # zone of control: stepping next to an enemy army ends its move
 	var owner := outpost_owner(cell)
 	if owner != null and owner != f and at_war(f, owner): # (at peace you just pass through)
 		owner.outposts.erase(cell)
@@ -1094,6 +1103,39 @@ func may_enter(f: Faction, cell: Vector2i) -> bool:
 # Is this hex behind a border the player may not cross right now?
 func closed_border(cell: Vector2i) -> bool:
 	return not may_enter(player, cell)
+
+# --- Zone of control (standard 4X) ---------------------------------------------
+# Every army holds the 6 hexes around it against the factions at war with it
+# (scouts are too weak to hold anything; Sköll and the Daughter ignore it).
+# Two rules, as in classic 4X games:
+#   1. a unit that steps into an enemy's zone stops there (its moves end), and
+#   2. a unit already in an enemy's zone can't step to another hex in an enemy
+#      zone: it can attack, step back out, or stay. So an army can't slip past
+#      an enemy army to an outpost or city behind it.
+# Stepping into your own city is always allowed. Attacking isn't a move, so
+# it isn't limited. (Armies have 1 move, so rule 1 only slows scouts; rule 2
+# is what stops armies walking past each other.)
+
+var zoc_on := true # always on in the game; tests switch it off to measure what it changes
+
+# The enemy army (at war with f) whose zone covers this hex, or null.
+func zoc_holder(f: Faction, cell: Vector2i) -> Unit:
+	if not zoc_on:
+		return null
+	for n in HexMap.neighbours(cell):
+		var other := unit_at(n)
+		if other != null and not other.is_scout() and at_war(f, other.faction):
+			return other
+	return null
+
+func in_enemy_zoc(f: Faction, cell: Vector2i) -> bool:
+	return zoc_holder(f, cell) != null
+
+# Would rule 2 stop faction f stepping from "from" to the neighbouring hex "to"?
+func zoc_blocks(f: Faction, from: Vector2i, to: Vector2i) -> bool:
+	if f == null or to == f.city_pos:
+		return false
+	return in_enemy_zoc(f, from) and in_enemy_zoc(f, to)
 
 # Units standing where they may no longer be (peace was made, an agreement
 # ran out, a city became a tributary) walk out to the nearest hex they may use.

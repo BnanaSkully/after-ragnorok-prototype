@@ -146,7 +146,17 @@ Keep game rules separate from drawing. The game state and rules (map data, terra
 Claude's recommendation, waiting on Nathan's choice:
 1. Nathan plays Part 2 to turn 40 (Sköll returning, ash, Sunna's requests and rising, the endings). All its numbers are placeholders tuned only by simulation
 2. Tune from that playtest (Sunna rises with the player only ~23% when passive; devoured ~32%)
-3. Zone of control (the cheapest default still missing; healing is built)
+3. Production queue (the last default still missing; zone of control and healing are built)
+
+## Zone of control: built (standard 4X, the classic rule)
+
+- Every army holds the 6 hexes around it against factions at war with it (GameState.zoc_holder, in_enemy_zoc, zoc_blocks). Scouts hold nothing; Sköll and Sunna ignore it; at peace there is none
+- Rule 1: stepping into an enemy army's zone ends the unit's move (enter_hex sets moves to 0). Armies have only 1 move, so this only slows scouts
+- Rule 2: a unit already in an enemy zone can't step to another hex in an enemy zone: it can attack, step back out, or stay. This is what stops an army walking past an enemy army to the outpost or city behind it. Stepping into your own city is always allowed; attacking isn't limited
+- Why both: the "stop when you move next to an enemy" rule alone (Civ 5/6 style) does nothing for 1-move armies, so the older Civ 1-3 rule 2 is added
+- The AI obeys it: step_toward never picks a forbidden first step, and its outpost grabs, random steps and scouts skip forbidden hexes
+- On screen: forbidden hexes next to your selected unit aren't highlighted; hovering one says why; an enemy army at war says it holds its zone; hovering a hex where a scout would stop says so. GameState.zoc_on is only for tests (to measure with the rule off)
+- Measured (tests/zoc_test.gd): every rule on a set-up game; 300 games with the rule off -> on (same seeds, a player who wanders and sometimes attacks): your outposts lost 0.62 -> 0.53 a game, unit fights 7.8 -> 6.7, endings about the same (devoured 104 -> 103, Dawn 33 -> 34), no impossible states. A small change, as expected: armies rarely try to slip past each other today
 
 ## Unit health: built (Nathan's playtest after Part 1, from the backlog)
 
@@ -168,7 +178,6 @@ Claude's recommendation, waiting on Nathan's choice:
 ## Missing 4X mechanics (backlog)
 
 Defaults from "How Nathan works" not built yet (build without asking):
-- Zone of control: a unit must stop when it moves next to an enemy (now enemies can walk past an army to an outpost or city)
 - Production queue: today things are bought instantly with stored Industry; standard is the city working on one item until it's finished
 Other standard 4X mechanics (ask Nathan before building, they change the game's shape):
 - Territory that grows with the city (borders pushing against each other: friction and reasons for war, now that borders are closed)
