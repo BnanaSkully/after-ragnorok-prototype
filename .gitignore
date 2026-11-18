@@ -1,3 +1,9 @@
 # Godot 4+ specific ignores
 .godot/
 /android/
+
+# Art source files (too big for GitHub, and Godot should not import them)
+concept_art/*.blend
+concept_art/*.blend1
+concept_art/*.mp4
+concept_art/*.gif

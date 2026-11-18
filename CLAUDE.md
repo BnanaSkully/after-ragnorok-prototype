@@ -141,6 +141,7 @@ Keep game rules separate from drawing. The game state and rules (map data, terra
 - Code phases in order: CROSSING, LANDING, PLAYING (PLAYING covers game Phase 2), in GameState.Phase; Phase 3 will add CHAOS
 - Sköll's numbers (ARRIVAL_TURN, STRENGTH, ...) are constants at the top of skoll.gd; the Daughter's (NAME, FOOD, DEFENCE, Favour ranges) at the top of sun_daughter.gd
 - Pointy-top hexes, offset rows, drawn with code in _draw()
+- 3D assets are .glb files in assets/models/ (tiles/, props/, units/), exported from Blender by Claude chat. Godot must never import .blend files. concept_art/ is reference art only: its .gdignore keeps Godot out of it
 
 ## What's next (agreed order, as of the session that added borders)
 
