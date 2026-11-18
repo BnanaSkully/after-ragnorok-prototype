@@ -34,7 +34,12 @@ func _initialize() -> void:
 		s.skoll.drive_back()
 		drives += 1
 		if s.skoll.rifts != before: rerolled += 1
-		if s.skoll.revealed_rift != s.skoll.pos: bad["return not at revealed rift"] = 1
+		if s.skoll.active or s.skoll.away_until != s.turn + Skoll.RETURN_TURNS: bad["not away for RETURN_TURNS after being driven back"] = 1
+		while s.turn < s.skoll.away_until and not s.game_over:
+			H.answer_choices(s)
+			s.end_turn()
+			if s.has_pending_offer(): s.pending_relation().answer(false)
+		if not s.game_over and not s.skoll.slain and (not s.skoll.active or s.skoll.revealed_rift != s.skoll.pos or not s.skoll.pos in s.skoll.rifts): bad["return not at revealed rift"] = bad.get("return not at revealed rift", 0) + 1
 		m.queue_free()
 	print("200 games: problems %s; after being driven back the rifts changed in %d/%d cases" % [bad if bad.size() > 0 else "none", rerolled, drives])
 	quit()

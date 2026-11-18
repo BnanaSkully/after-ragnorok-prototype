@@ -88,6 +88,14 @@ CLAUDE.md holds the rules for working; this file holds the history.
 - Nathan asked what other mechanics are missing: the list is in CLAUDE.md "Missing 4X mechanics". Claude's honest pushback: the biggest gap is the end of the game (Phase 3 isn't built), and nothing since the early-game fix has been played by a human. Recommended order: Nathan plays, then Phase 3 step 1, then zone of control and healing. Nathan hasn't chosen yet
 - Open questions for Nathan (also in CLAUDE.md "Later"): should declaring war cost the Daughter's Favour; tribute by diplomacy without a war; a choice when finding a rift (sealing it changes Sköll)
 
+## Part 2 (middle and late game), finished
+
+- Nathan merged the Part 2 branch into main himself (with his concept art) before it was finished; the last commit on top fixed the stale tests and the docs
+- The old "Phase 3: the Long Night" design was replaced by Nathan's Part 2 spec: 40 turns, Sköll returning stronger, ash, Sunna's requests and rising, four endings. Parked in CLAUDE.md "Later"
+- Balance lessons from simulations: once mortal, Sköll died to AI cities ~90% of the time (now only an ATTACK can kill him; a city that holds just drives him back). He never devoured anyone until he hit cities twice as hard (CITY_DAMAGE 2.0). Sunna rose 92% because AIs' Favour climbed by itself (now feeding stops at 7 and the AIs pay for her requests): 51%
+- Tests that read message text break when the text changes: four_test, balance_state and army_test counted Sköll's attacks by old messages; rift_timing_test expected him back the moment he was driven off (now he's away 3 turns)
+- The memory list ("They remember") shows 2 lines per entry: keep remembered lines short and put the detail in the message
+
 ## Ideas parked (see CLAUDE.md "Later")
 
-Faction names, the Daughter's name, Crossing text, small-event and ruin text, a choice when you find a rift (e.g. seal it: changes Sköll, ask first), AIs using fog of war to chase a rogue Daughter, AI landing choice, AI-to-AI diplomacy and trading, combat defence bonus, paying an AI to join your war, mini-games, full rifts (Doom-creatures, seasons, underground travel). Phase 3 is designed (CLAUDE.md), not built.
+Faction names, the Daughter's name, Crossing text, small-event and ruin text, a choice when you find a rift (e.g. seal it: changes Sköll, ask first), AIs using fog of war to chase a rogue Daughter, AI landing choice, AI-to-AI diplomacy and trading, combat defence bonus, paying an AI to join your war, mini-games, full rifts (Doom-creatures, seasons, underground travel). The old Long Night design (chain, rogues, warbands) is parked in CLAUDE.md "Later".
