@@ -84,9 +84,9 @@ func _initialize() -> void:
 				threat["games"] += 1
 			for msg in s.messages:
 				if msg.begins_with("Sköll attacked Norse's city") or msg.begins_with("Norse's city (defence"): st["Sköll attacks on your city"] += 1
-				if msg.begins_with("Sköll attacked Norse's unit") or msg.begins_with("Norse's unit drove"): st["Sköll attacks on your armies"] += 1
-				if "drove Sköll back" in msg or "drove him back" in msg or "flees into the void" in msg: st["Sköll driven back"] += 1
-				if msg.begins_with("Sköll attacked Norse") and "destroyed it" in msg: st["units lost to Sköll"] += 1
+				if msg.begins_with("Sköll attacked Norse's unit") or msg.begins_with("Norse's unit held"): st["Sköll attacks on your armies"] += 1
+				if "slinks back into the void" in msg: st["Sköll driven back"] += 1
+				if msg.begins_with("Sköll attacked Norse") and ("destroyed it" in msg or "killed" in msg): st["units lost to Sköll"] += 1
 			for f in s.factions:
 				if f.food < 0 or f.industry < 0: bad["negative stores"] = 1
 				for u in f.units:
@@ -100,7 +100,7 @@ func _initialize() -> void:
 		ends[s.end_title] = ends.get(s.end_title, 0) + 1
 		m.queue_free()
 	var keys = dist.keys(); keys.sort()
-	print("Strong player, %d games, at the end (turn 20 or when it fell), per game: %s" % [n_games, ", ".join(st.keys().map(func(k): return "%s %.1f" % [k, st[k] / n_games]))])
+	print("Strong player, %d games, at the end of the game (turn 40 or when it ended), per game: %s" % [n_games, ", ".join(st.keys().map(func(k): return "%s %.1f" % [k, st[k] / n_games]))])
 	print("If Sköll came on turn 19 (%d games): his odds against your city %d%%; your armies, each attacking once, drive him off %d%%" % [threat["games"], roundi(100 * threat["his odds against your city"] / threat["games"]), roundi(100 * threat["your armies drive him off"] / threat["games"])])
 	print("Armies at the end: %s" % ", ".join(keys.map(func(k): return "%d: %d" % [k, dist[k]])))
 	print("Endings: %s" % ends)

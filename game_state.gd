@@ -1394,7 +1394,10 @@ func maybe_rise() -> void:
 	skoll.strength = Skoll.STRENGTH # mortal, and back to his normal Strength
 	skoll.wounds = 0
 	var who := "you" if daughter.holder == player else "the " + daughter.holder.name
-	remember("Turn %d: SUNNA HAS RISEN and stands with %s (+%d Food, +%d Industry a turn). Sköll is mortal now (Strength %d), and the ash stops." % [turn, who, SunDaughter.RISEN_FOOD, SunDaughter.RISEN_INDUSTRY, skoll.strength])
+	diplomacy_log.append("Turn %d: SUNNA HAS RISEN with %s. Sköll is mortal." % [turn, who])
+	if diplomacy_log.size() > DIPLOMACY_LOG_SIZE:
+		diplomacy_log.pop_front()
+	add_message("Turn %d: SUNNA HAS RISEN and stands with %s (+%d Food, +%d Industry a turn). Sköll is mortal now (Strength %d), and the ash stops." % [turn, who, SunDaughter.RISEN_FOOD, SunDaughter.RISEN_INDUSTRY, skoll.strength])
 
 # Every few turns after the Landing, a small event asks the player to choose.
 func maybe_turn_event() -> void:

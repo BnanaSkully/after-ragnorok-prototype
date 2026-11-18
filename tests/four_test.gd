@@ -41,7 +41,7 @@ func _initialize() -> void:
 				if "BROKE THEIR" in msg: stats["ai betrayals"] += 1
 				if first == "" and msg.begins_with("Sköll attacked") and "city" in msg:
 					first = "you" if msg.contains("Norse's city") else "ai"
-				if first == "" and msg.contains("city (defence") and msg.contains("drove Sköll back"):
+				if first == "" and msg.contains("city (defence") and msg.contains("held"):
 					first = "you" if msg.begins_with("Norse's city") else "ai"
 			var seen := {}
 			for f in s.factions:
