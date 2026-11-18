@@ -9,6 +9,7 @@ extends Node2D
 # write a new view like this one; game_state.gd and the rule files stay as they are.
 
 const Crossing := preload("res://crossing_events.gd")
+const View3DScene := preload("res://view_3d.tscn")
 const NO_CELL := HexMap.NO_CELL
 
 var state := GameState.new()
@@ -43,6 +44,8 @@ var top_bar_tips: Array = [] # [Rect2, tooltip text] for each part of the top ba
 var selected: Unit = null # the player's unit chosen to move (null = none)
 var break_warning_cell := NO_CELL # first click on a unit you've sworn an agreement with only warns
 var placing_outpost := false # after clicking "Outpost": the next click on a hex founds it there
+var view_3d: Node3D = null # the 3D view (view_3d.tscn), made the first time V is pressed
+var showing_3d := false # V switches; the 2D map is the default. Buttons and pop-ups stay in both
 
 # Buttons and panels
 var crossing_panel: VBoxContainer
@@ -629,6 +632,11 @@ func close_trade() -> void:
 
 # --- Mouse clicks: turn screen positions into hexes, then ask the state ---------
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_V:
+		toggle_3d()
+		return
+	if showing_3d:
+		return # in the 3D view the mouse moves the camera (view_3d.gd); clicking hexes is 2D only for now
 	if state.game_over or state.phase == GameState.Phase.CROSSING or state.is_waiting() or trade_panel.visible or deal_panel.visible or city_panel.visible:
 		return
 	if event is InputEventMouseMotion:
@@ -685,11 +693,43 @@ func _unhandled_input(event: InputEvent) -> void:
 			selected = null
 		refresh()
 
+# --- Switching between the 2D and 3D views (V) ------------------------------------
+func toggle_3d() -> void:
+	if state.phase == GameState.Phase.CROSSING:
+		return # no map yet
+	showing_3d = not showing_3d
+	if view_3d == null:
+		view_3d = View3DScene.instantiate()
+		view_3d.state = state
+		view_3d.terrain_colours = TERRAIN_COLOURS
+		view_3d.colour_of = unit_colour
+		view_3d.territory_colour_of = territory_colour
+	if showing_3d:
+		add_child(view_3d)
+		move_child(view_3d, 0) # behind the buttons
+		hover_cell = NO_CELL
+		selected = null
+		placing_outpost = false
+	else:
+		remove_child(view_3d) # kept, so the camera stays where you left it
+	refresh()
+
+# The 3D view is kept out of the tree while the 2D view shows: free it ourselves on quit.
+func _exit_tree() -> void:
+	if view_3d != null and not view_3d.is_inside_tree():
+		view_3d.free()
+
 # --- Drawing: only reads the state ----------------------------------------------
 func _draw() -> void:
-	var s := state
-	if s.phase == GameState.Phase.CROSSING:
+	if state.phase == GameState.Phase.CROSSING:
 		return # the Crossing panel is shown instead of the map
+	if not showing_3d:
+		draw_map() # in the 3D view, view_3d.gd shows the map instead
+	draw_overlay()
+
+# The hex map and everything on it.
+func draw_map() -> void:
+	var s := state
 	var player := s.player
 	var k := HexView2D.HEX_SIZE / 32.0 # city drawings were designed for 32-pixel hexes
 	var daughter := s.daughter
@@ -833,6 +873,13 @@ func _draw() -> void:
 			draw_circle(sc, r * 0.6, Color(0.95, 0.4, 0.05))
 			draw_circle(sc, r * 0.28, Color(1.0, 0.9, 0.3))
 
+# The text over the map: top bar, Sköll and the Daughter, the diplomacy panel,
+# messages, tooltips and the end screen (the same in both views).
+func draw_overlay() -> void:
+	var s := state
+	var player := s.player
+	var daughter := s.daughter
+	var skoll := s.skoll
 	var font := ThemeDB.fallback_font
 	draw_top_bar(font)
 	var line2: Array[String] = [] # second line: tribute you pay, and where Sköll is

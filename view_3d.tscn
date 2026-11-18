@@ -1,0 +1,23 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://view_3d.gd" id="1_view3d"]
+
+[sub_resource type="Environment" id="Environment_dark"]
+background_mode = 1
+background_color = Color(0.04, 0.04, 0.06, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.45, 0.47, 0.55, 1)
+ambient_light_energy = 0.6
+
+[node name="View3D" type="Node3D"]
+script = ExtResource("1_view3d")
+
+[node name="Camera" type="Camera3D" parent="."]
+fov = 50.0
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+light_energy = 1.2
+shadow_enabled = true
+
+[node name="Environment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_dark")
