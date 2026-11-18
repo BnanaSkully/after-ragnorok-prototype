@@ -12,26 +12,24 @@ Survivors of Ragnarök cross the void on Yggdrasil (the Crossing), then land on 
 - Sheltering her gives +2 Food and +2 Industry a turn and +3 city defence, but she is what Sköll hunts
 - Economy (standard 4X): a city starts at population 1 making 2 Food and 2 Industry a turn; each extra population adds +1 Food, +1 Industry and +1 city defence (POP_DEFENCE; Nathan's playtest: population's effect was unclear, so it now also defends and every message about it says what it gives; the top bar shows "Pop"). Everyone unloads 5 Industry from the ark at the Landing (LANDING_INDUSTRY), enough to build something on turn 1. City growth: when stored Food reaches the growth cost (10, then 15, 20...) and Food isn't falling, the city grows and the Food is used up. Build options, each a trade-off: army unit 5 Industry (eats 1 Food a turn), scout 3, outpost 6, and city buildings under "Build..." (buildings.gd; Nathan's playtest: Industry piled up with nothing to spend it on): walls 10 per level (+4 defence, 2 levels), Granary 8 (+2 Food a turn), Workshop 12 (+2 Industry a turn), Watchtower 6 (city sight +2, +1 defence), Forge 10 (new army units +1 Strength), Barracks 8 (+2 army supply). Each building once. AIs build them when they can't feed more armies. On turn 15 an AI holds about 8 Industry unspent (was 18), the test player 12 (was 35). City defence = garrison unit's Strength + walls + land + population above 1 (+3 with the Daughter). Numbers: GROWTH_BASE, GROWTH_STEP etc. at the top of game_state.gd
 - Early game (turns 1-10, see "Early game" below): every faction starts with an army unit and a scout, explores through fog of war, searches ruins, founds outposts, and the player gets a small event every 2-3 turns. Goal: every early turn asks the player a decision
-- Phase 2: settle and survive. Sköll, the wolf who swallowed the sun at Ragnarök, followed the survivors through the void. He arrives on turn 14 and can't be killed, only driven back. Each time he appears (arrival, or after being driven back) he comes through one of the rifts in the void, chosen at random, and hunts the city that rift belongs to (he doesn't know where the Daughter is). Every standing city gets one rift, 4-7 hexes from it and at least 4 from every city (Skoll.place_rifts, RIFT_MIN_CITY_DISTANCE; was 3, and Nathan's playtest had him appear "right next to my city"). Rifts are rolled on turn 2 (after the Landing) and stay hidden; when he comes through one, only that rift is revealed. Every time he is driven back, the rifts are rolled again. Fair by design: over 300 games he first hunts each city about 25% (yours 25%); he comes out 4 hexes from the nearest city 52% of the time, 5+ the rest. (Rifts by map section, the old rule, put him on the player 41% of the time once the minimum distance was raised.) Once he is loose, AI units fall back to defend their cities. In Phase 2 he doesn't know which city hides the Daughter; he finds out only after attacking it. If he loses that battle, Phase 3 starts early. If he wins it, he swallows her: he becomes the sun (Strength 20, a blazing look) and the map goes dark. Lose if your city falls; survive to turn 20 (the Doom) to reach Phase 3
-- Phase 3 (not built yet): the Long Night. Design agreed, see "Phase 3: agreed design" below
+- Phase 2 (turns 1-40, code phase PLAYING): settle, scheme and survive Sköll; see "Middle and late game (Part 2)" below. He arrives on turn 14 through one of the rifts, chosen at random, and hunts the city that rift belongs to. Every standing city gets one rift, 4-7 hexes from it and at least 4 from every city (Skoll.place_rifts, RIFT_MIN_CITY_DISTANCE; was 3, and Nathan's playtest had him appear "right next to my city"). Rifts are rolled on turn 2 and stay hidden; when he comes through one, only that rift is revealed; they're rolled again every time he is driven back. Fair by design: over 300 games he first hunts each city about 25%. Once he is loose, AI units fall back to defend their cities
+- The game ends on turn 40 (END_TURN) or earlier (see Endings below). The old "Phase 3: the Long Night" design (chain, rogue factions, warbands) was replaced by Nathan's Part 2 spec; parked ideas from it are under "Later"
 
-## Phase 3: agreed design (not built yet)
+## Middle and late game (Part 2): built (Nathan's spec after the Part 1 playtest)
 
-Goal: Sköll can't be killed, but he can be bound with a chain (like Fenrir and Gleipnir). One city can't forge it alone, so winning needs other factions: politics first. Numbers below are starting points; measure them with simulated games before trusting them.
+Sunna (the Sun's Daughter, named by Nathan) is the prize; Sköll keeps coming back; the world shrinks as ash spreads. Target length about 40 turns. Numbers are placeholders, measured but not yet played.
 
-- Start: on turn 20 (the Doom), or early if Sköll attacks the Daughter's city and loses (he now knows where she is). Code phase CHAOS after PLAYING. He goes straight for her city (or hunts her by sight if she's rogue)
-- The Long Night: Phase 3 lasts 10 turns from its start (LONG_NIGHT_TURNS). If the chain isn't finished by then, the world freezes and everyone loses
-- The chain: 3 links, each forged by a DIFFERENT faction, 15 Industry each (10 if Sköll swallowed the Daughter, but he is Strength 20 then). The player forges their own link with a "Forge link" button (like walls). When the 3rd link is done Sköll is bound: the player wins. If he had swallowed her, binding him frees her and the sun returns
-- Chain oaths: the player asks an AI to forge a link (uses the turn's diplomatic action). Accept chance: 30% + 10% per Trust, +20% if Sköll is hunting its city, +10% if the Daughter's Favour toward the player is 7+ (she speaks for you), 0% if the player is its oathbreaker. Once sworn, the AI puts its spare Industry into its link each turn. Breaking a chain oath is the worst betrayal: Trust -5, its half-forged link is lost
-- Rogue factions = existing AIs kneeling to Sköll (no new factions). Each Phase 3 turn, an AI without a chain oath that is desperate (starving, or Sköll hunts it and its city defence is under 6, or its Trust toward the player is -5 or less) has a 25% chance to go rogue. Rogue: Sköll and warbands leave it alone, its units attack everyone else, no diplomacy, can't forge a link, permanent. A rogue AI sheltering the Daughter hands her to Sköll (he swallows her)
-- Chaos warbands (Sköll's chaos factions): every 3 turns 2 warbands (Strength 3, move 1) come out of a random rift (that rift is revealed). No city, no diplomacy. They walk to the nearest non-rogue territory (a city and its 6 neighbouring hexes) and sit there draining it: -1 Food and -1 Industry a turn to that city for each warband on its territory. They fight back when attacked (normal auto-resolve). A light version of the parked Doom-creatures
-- Lose: your city falls; the Long Night ends with the chain unfinished; or the chain can no longer be finished (fewer than 3 factions left that could still forge a link, counting finished links)
-- Win: Sköll is bound. The end screen shows the survivor score: the population of every standing city that didn't go rogue, +5 if the Daughter is alive and free, and lists who made it
-- Build steps, in order (each playable and tested):
-  1. Phase 3 starts (turn 20 or early), the Long Night clock, Sköll charges her city
-  2. The chain: forging your link, chain oaths, binding, the survivor score (first playable win)
-  3. AIs going rogue
-  4. Chaos warbands and draining (territory is already a rule: GameState.territory_owner)
+- Sköll's cycles (skoll.gd): Strength 10 (STRENGTH). Driven back, he vanishes into the void for 3 turns (RETURN_TURNS), the rifts are re-rolled, and he comes back 2 stronger (STRENGTH_PER_RETURN). Each time he comes through a rift, 8 hexes turn to ash (ASH_PER_CYCLE, GameState.spread_ash)
+- Wounds (standard HP combat, see Unit health): while Sunna is hidden (sheltered or rogue) he can't be killed. A unit attacking him dies, but the damage it deals wounds him; wounds lower his Strength (Skoll.effective_strength) and heal 2 a turn (WOUND_HEAL); wounds of half his Strength drive him back. Each other army of yours (or an ally's) next to him adds +2 to an attack (WOLF_SUPPORT, GameState.wolf_attack). Hovering him shows his Strength and wounds; the line under the top bar shows wounded / mortal / in the void
+- Who he hunts: the city of the rift he came through, until he hits Sunna's city; then he knows where she is (knows_her) and hunts whoever shelters her (Skoll.her_city). She is the prize and the target
+- City HP (standard 4X sieges): a city has 20 HP (CITY_MAX_HP) and repairs 3 a turn (CITY_HEAL). Attacks (units in a war, and Sköll) damage it by the HP-combat formula against the city defence; Sköll hits twice as hard (CITY_DAMAGE 2.0). A unit's siege that takes it to 0 makes the city a tributary (it restarts at 10 HP). Sköll taking it to 0 tears it down: that faction is devoured; if Sunna was there he swallows her; then he is sated and goes back into the void. HP bar under every city; the tooltip predicts a siege
+- Ash: spreads in from the map's edges, from ash already there and around the rift he used. Dead land: outposts on it are lost, ruins buried, counts as nobody's land; units can still walk on it; never on a city or the hexes next to it. Stops once Sunna has risen
+- Sunna's requests (from turn 8, every 4 turns, REQUEST_FROM / REQUEST_GAP; turn_events.gd SUNNA_REQUESTS): her protector is asked for something (Industry, Food, a guard, grain for the neighbours). Grant: the cost, her Favour +1. Refuse: Favour -2. An AI holding her pays 5 Industry (AI_REQUEST_COST) for +1, or takes -2. Being fed only raises her Favour up to 7 (FED_FAVOUR_CAP): to reach 8 you must grant her requests
+- Rising (from turn 20, RISE_TURN): if her protector's Favour is 8+ (RISE_FAVOUR) she rises as the new sun and stands with them: +3 Food and +3 Industry a turn (RISEN_*), Sköll becomes MORTAL at his normal Strength 10 (wounds cleared), and the ash stops. Mortal, an attack that brings his wounds to his full Strength kills him (only an attack kills him: a city that holds just drives him back)
+- Swallowed: if he tears down the city sheltering her (or reaches her in the open) he swallows her: +8 Strength (SWALLOW_BONUS) but mortal; only a large combined force (WOLF_SUPPORT) can bring him down
+- Endings (GameState.final_ending, devour, wolf_slain): your city torn down by Sköll: "Devoured" (you lose). Sköll has devoured 45% of factions (2 of 4, DEVOURED_SHARE): "Sköll wins". You kill him: "Slay the wolf" (an AI killing him: they win). Turn 40: "Dawn" if Sunna rose with you, "Dawn for the X" if she rose with an AI; otherwise Dominion for whoever holds the most land not under ash (a tie counts as yours). The top bar shows "Turn N/40" and your "Land N"
+- Measured (tests/midgame_test.gd, a passive player; quick run of 60 games): Sköll returns about 2 times a game, ash 15 hexes, Sunna rises 0.5 a game (0.23 with you), swallowed 0.02, requests 2.2, games last 36 turns, factions devoured 0.35. Endings roughly: Dawn 23%, devoured 32%, an AI's Dawn 17%, an AI's Dominion 28%. Strong player (army_test): ends with about 7 armies, kills the wolf in about 8% of games, devoured under 2%
+- Known gaps: the AIs don't seek out Sunna's requests or rising on purpose (they only answer requests); Sunna choosing a new protector when she rises is not built (she rises with whoever holds her); text is placeholder
 
 ## Early game: built (standard 4X, from Nathan's playtest "turns 1-10 are dead")
 
@@ -70,7 +68,7 @@ Built so far: she chooses her protector at the Landing by Favour, judges her pro
 - Four factions: the player (Norse) and three AI factions with placeholder names, one per pantheon: Japanese, Celtic, Greek. Each has its own word for a sworn agreement (Norse oath, Japanese pact, Celtic bond, Greek treaty: placeholders, not lore). AI cities start at fixed spots spread around the map; the player lands at least 4 hexes from all of them
 - One 15 x 11 hex map, no art (shapes and colours only)
 - Fog of war (standard 4X) with memory, for every faction: see "Early game" above. Never-seen hexes are black; seen-before hexes are dimmed, with units, Sköll and the Daughter hidden. Cities are hidden until found. The diplomacy panel still lists every AI faction from the start (they were met on the Crossing)
-- Do not add more factions, pantheons, rogue factions or lore unless asked (Phase 3's rogues are the existing AIs; its chaos warbands are not factions)
+- Do not add more factions, pantheons, rogue factions or lore unless asked
 - Every move on the map goes through GameState.enter_hex (ruins, taking outposts); after anything moves call update_sight
 - Goal: a playable loop of Crossing, Landing, turns, cities, auto-resolve and the Doom
 - Basic diplomacy with the rival: pacts, demands, and a memory of whether promises were kept. This is the core hook and should be built before more combat or Sköll features.
@@ -138,24 +136,24 @@ Keep game rules separate from drawing. The game state and rules (map data, terra
 - diplomacy.gd (class Diplomacy): the player's relationship with ONE AI faction ("other"): war and peace, alliances (oaths), demands, Trust, that faction's offers, wars and betrayals; numbers are constants at its top. Holds a weak link to the GameState. Wars between AIs, allies answering the call, and the call-to-arms pop-up are in game_state.gd ("War and peace")
 - tests/: headless test scripts (see tests/README.md); NOTES.md: development history and decisions
 - crossing_events.gd: the Crossing's events (text, choices, effects), kept separate so they can be edited without touching game logic
-- Code phases in order: CROSSING, LANDING, PLAYING (PLAYING covers game Phase 2), in GameState.Phase; Phase 3 will add CHAOS
+- Code phases in order: CROSSING, LANDING, PLAYING (PLAYING covers the whole game after the Landing, to turn 40), in GameState.Phase
 - Sköll's numbers (ARRIVAL_TURN, STRENGTH, ...) are constants at the top of skoll.gd; the Daughter's (NAME, FOOD, DEFENCE, Favour ranges) at the top of sun_daughter.gd
 - Pointy-top hexes, offset rows, drawn with code in _draw()
 - 3D assets are .glb files in assets/models/ (tiles/, props/, units/), exported from Blender by Claude chat. Godot must never import .blend files. concept_art/ is reference art only: its .gdignore keeps Godot out of it
 
-## What's next (agreed order, as of the session that added borders)
+## What's next (as of the session that finished Part 2)
 
 Claude's recommendation, waiting on Nathan's choice:
-1. Nathan plays a few games. He hasn't played since the early-game fix; war and peace, alliances, terrain, trading, tributaries and borders were only tested by simulation. His last playtest found what simulations missed
-2. Phase 3, build step 1 (the Long Night starts, the clock runs, Sköll charges her city), so a game actually ends instead of stopping at "Phase 3 is not built yet"
-3. Zone of control and healing (cheapest of the defaults still missing)
+1. Nathan plays Part 2 to turn 40 (Sköll returning, ash, Sunna's requests and rising, the endings). All its numbers are placeholders tuned only by simulation
+2. Tune from that playtest (Sunna rises with the player only ~23% when passive; devoured ~32%)
+3. Zone of control (the cheapest default still missing; healing is built)
 
 ## Unit health: built (Nathan's playtest after Part 1, from the backlog)
 
 - Every unit has 10 HP (Unit.MAX_HP). Unit against unit, both sides take damage: COMBAT_DAMAGE (10) is shared out by Strength (each side deals 10 x its Strength / both Strengths), varied by +/-25%. Equal fresh units deal about 5 each (two fights to kill); Strength 6 against 3 deals 6.6 and takes 3.4. A unit at 0 HP dies; if the defender dies and the attacker lives, it moves in (never into a city)
 - A wounded unit fights weaker: Strength x (0.5 + 0.5 x HP/10), never below 1 (Unit.fighting_strength); used attacking, defending, garrisoning a city and in sieges
 - Healing (standard 4X): a unit that neither moved nor fought in a turn heals HEAL_REST 2, or HEAL_HOME 4 in its own territory (Unit.acted). AI units at 4 HP or less rest instead of attacking
-- Not changed (yet): attacks on cities and fights with Sköll stay win-or-lose (Sköll is reworked in Part 2; city HP would be its own system)
+- Since Part 2: attacks on cities and fights with Sköll use HP too (city HP, Sköll's wounds: see "Middle and late game")
 - On screen: an HP bar under every unit (green to yellow to red); the tooltip shows HP, Strength while wounded, healing, and, next to your selected unit, the damage an attack would deal and take. Map tooltips sit above the hovered hex so its neighbours stay visible
 - Measured (tests/health_test.gd): 1000-fight averages as above; 4 unit fights a game, half of them kill a unit; HP never out of range
 
@@ -165,7 +163,7 @@ Claude's recommendation, waiting on Nathan's choice:
 - Rising Industry upkeep: the first FREE_ARMIES (2) armies are free, then each pair costs 1 more per army (armies 3-4: 1 each, 5-6: 2 each, 7-8: 3 each; 6 armies = 6 Industry a turn, 8 = 12). It shows in the Industry breakdown. If Industry would go below 0, the army farthest from the city disbands (like starving). Each army still eats 1 Food
 - AIs obey the same cap and only build an army they can keep paying for
 - Measured (tests/army_test.gd, 150 games, a "strong player" that builds outposts, a Granary and every army it can feed, marches them out and attacks Sköll): armies at the end 10.3 (up to 18) -> 5.7 (mostly 6-7, at most 8); army Strength 39 -> 21; each AI 8.4 -> 5.3 armies. If Sköll came on turn 19: his odds against the strong player's city 56% -> 55%; all its armies attacking him once drive him off 84% -> 74% (each attack is ~20% and a lost attack kills the unit, so it costs about 4-5 armies)
-- Honest limit: in a 20-turn game Sköll reaches a strong player's city only ~0.1 times a game (arrives turn 14, 4+ hexes away, hunts you 25% of the time). That's game length, which Part 2 handles
+- Since Part 2 (40-turn games): the strong player meets Sköll at its city about 0.5 times a game and attacks him about 2.7 times; it still ends with about 7 armies
 
 ## Missing 4X mechanics (backlog)
 
@@ -182,6 +180,8 @@ Other standard 4X mechanics (ask Nathan before building, they change the game's 
 Deliberately left out of the prototype (big systems that don't serve "politics first" in 20 turns): tech tree, settlers and new cities (outposts do that job), happiness, culture, religion, more unit types, naval units
 
 ## Later (parked until the full loop is playable)
+
+- From the old Long Night design (replaced by Part 2): binding Sköll with a 3-link chain forged by different factions (chain oaths), AIs going rogue and kneeling to him, chaos warbands draining territory. Ask Nathan before reviving any of it
 
 - Combat: +1 strength when defending in your own territory (terrain defence now exists: forest +1, hills +2)
 - Asking an AI to join your war (for a payment): the next trading step
