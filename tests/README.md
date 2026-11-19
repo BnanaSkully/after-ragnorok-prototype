@@ -59,6 +59,7 @@ Run a test:
 | health_test.gd | unit health: damage both ways over 1000 fights, wounded units weaker, healing at rest and at home, AI resting; full games (HP in range) |
 | army_test.gd | the army snowball: a strong player's armies, Strength, Food/Industry and Sköll's fate at the end |
 | midgame_test.gd | Part 2: Sköll returning stronger, wounds and driving him back, ash, support against him, Sunna's requests and rising, swallowing, the endings; full 40-turn games (returns, ash, rising, endings, impossible states) |
+| zoc_test.gd | zone of control: each rule on a set-up game (stop next to an enemy army, no slipping past, attack allowed, peace, scouts, own city, the AI obeys it); full games with the rule off and on |
 | helpers.gd | not a test: shared helpers (answer every pop-up, list landing hexes) |
 
 Screenshot scripts need a virtual screen and an output folder in `S`:
@@ -67,7 +68,7 @@ Screenshot scripts need a virtual screen and an output folder in `S`:
 S=/tmp/shots xvfb-run -a -s "-screen 0 1152x648x24" /tmp/godot --rendering-driver opengl3 --script tests/fog_screenshot.gd
 ```
 
-(fog_screenshot.gd, four_click_screenshot.gd, early_screenshot.gd, war_screenshot.gd, deal_screenshot.gd, tribute_screenshot.gd, border_screenshot.gd, city_screenshot.gd, tooltip_screenshot.gd, health_screenshot.gd, supply_screenshot.gd, midgame_screenshot.gd, view3d_screenshot.gd, touch_screenshot.gd: real clicks (tooltip_screenshot hovers the mouse and prints each tooltip) in a window; images go to $S. touch_screenshot.gd taps the 3D button, drags one finger and pinches two, printing the camera after each. early_screenshot.gd saves the Landing, turn 1, a scout move, choosing an outpost, a pop-up and turn 9.)
+(fog_screenshot.gd, four_click_screenshot.gd, early_screenshot.gd, war_screenshot.gd, deal_screenshot.gd, tribute_screenshot.gd, border_screenshot.gd, city_screenshot.gd, tooltip_screenshot.gd, health_screenshot.gd, supply_screenshot.gd, midgame_screenshot.gd, zoc_screenshot.gd, view3d_screenshot.gd, touch_screenshot.gd: real clicks (tooltip_screenshot hovers the mouse and prints each tooltip) in a window; images go to $S. touch_screenshot.gd taps the 3D button, drags one finger and pinches two, printing the camera after each. early_screenshot.gd saves the Landing, turn 1, a scout move, choosing an outpost, a pop-up and turn 9.)
 
 Gotchas:
 - The map's terrain is random. A test that puts units on fixed hexes must call `H.flatten(s)` before the Landing, or a hex may be water.
