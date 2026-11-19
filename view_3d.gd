@@ -26,6 +26,17 @@ const RUNESTONE := preload("res://assets/models/props/runestone.glb") # ruins no
 const RIFT := preload("res://assets/models/props/rift.glb") # a rift you have found
 const PINE := preload("res://assets/models/props/pine.glb")
 const GRASS := preload("res://assets/models/props/grass.glb")
+# Nathan's Meshy tileable textures, laid over the Blender kit's flat colours
+# (like concept_art/tile_set_preview.png). Triplanar: they need no UVs.
+const GRASS_TEXTURE := preload("res://assets/textures/grass.png")
+const CLIFF_TEXTURE := preload("res://assets/textures/cliff.png")
+const TEXTURE_SCALE := 0.9 # repeats per map unit
+# How each land shades the grass texture (multiplied), so lands stay easy to tell apart.
+const GRASS_SHADE := {
+	Terrain.Type.PLAINS: Color(0.95, 1.1, 0.8),
+	Terrain.Type.FOREST: Color(0.65, 0.8, 0.6),
+	Terrain.Type.HILLS: Color(0.95, 0.9, 0.65),
+}
 # Lands dressed with props: forest is a grassy tile with pines on it, plains get a
 # clump of grass on some hexes. [base tile, prop, how many, height, distance from the middle]
 const DRESSING := {
@@ -272,6 +283,7 @@ func make_tile_model(key, variant: int) -> Node3D:
 	var base: Node3D = tile_scenes[base_key].instantiate()
 	holder.add_child(base)
 	fit_to_hex(base)
+	restyle(base, key)
 	if dress.is_empty():
 		return holder
 	var count: int = dress[2]
@@ -285,6 +297,44 @@ func make_tile_model(key, variant: int) -> Node3D:
 		prop.rotation.y = angle * 3.0
 		holder.add_child(prop)
 	return holder
+
+# Swaps the kit's flat colours for textured ones: grass on the tops, rock on the sides, shiny water.
+var restyled := {} # [land, kit material name] -> material
+func restyle(model: Node3D, land) -> void:
+	for mi in model.find_children("*", "MeshInstance3D", true, false):
+		var m := mi as MeshInstance3D
+		for i in m.mesh.get_surface_count():
+			var old := m.mesh.surface_get_material(i)
+			if old == null:
+				continue
+			var key := [land, old.resource_name]
+			if not restyled.has(key):
+				restyled[key] = restyled_material(land, old.resource_name)
+			if restyled[key] != null:
+				m.set_surface_override_material(i, restyled[key])
+
+func restyled_material(land, kit_name: String) -> Material:
+	var m := StandardMaterial3D.new()
+	m.roughness = 0.95
+	m.uv1_triplanar = true
+	m.uv1_world_triplanar = true
+	m.uv1_scale = Vector3.ONE * TEXTURE_SCALE
+	match kit_name:
+		"Kit grass", "Kit forest floor":
+			m.albedo_texture = GRASS_TEXTURE
+			m.albedo_color = GRASS_SHADE.get(land, Color.WHITE)
+		"Kit cliff", "Kit stone", "Kit shore":
+			m.albedo_texture = CLIFF_TEXTURE
+			m.albedo_color = Color(0.9, 0.85, 0.8) if kit_name == "Kit cliff" else Color(1.3, 1.25, 1.15)
+		"Kit water":
+			m.uv1_triplanar = false
+			m.albedo_color = Color(0.08, 0.2, 0.3)
+			m.roughness = 0.12
+			m.metallic = 0.4
+			m.metallic_specular = 0.8
+		_:
+			return null
+	return m
 
 # A new copy of a prop, scaled so its height (or its longest side) is "size", its bottom at "at".
 func place_scaled(scene: PackedScene, at: Vector3, size: float, by: String) -> Node3D:
