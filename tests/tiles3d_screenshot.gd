@@ -43,6 +43,11 @@ func _initialize() -> void:
 	v.cam_target = v.cell_position(s.player.city_pos); v.cam_distance = 6.0; v.place_camera()
 	for i in 5: await process_frame
 	await shot("tiles3d_city.png")
+	# side on, low: does the longhouse stand on the ground?
+	v.camera.position = v.cell_position(s.player.city_pos) + Vector3(0.6, 0.55, 2.2)
+	v.camera.look_at(v.cell_position(s.player.city_pos) + Vector3(0, 0.35, 0), Vector3.UP)
+	for i in 5: await process_frame
+	await shot("tiles3d_city_side.png")
 	v.cam_target = v.cell_position(near); v.place_camera()
 	for i in 5: await process_frame
 	await shot("tiles3d_rift.png")
