@@ -100,7 +100,7 @@ func _initialize() -> void:
 	s.player.favour = SunDaughter.RISE_FAVOUR; sk.strength = 20; s.skoll.active = true
 	var ash_before = s.ash.size()
 	while s.turn < GameState.RISE_TURN + 1 and not s.daughter.is_risen(): play_turn(s)
-	print("   turn %d, her Favour %d: risen=%s with you=%s; Sköll mortal=%s, Strength %d (expect %d)" % [s.turn, s.player.favour, s.daughter.is_risen(), s.daughter.risen_with(s.player), sk.is_mortal(), sk.strength, Skoll.STRENGTH])
+	print("   turn %d, her Favour %d: risen=%s with you=%s; Sköll mortal=%s, Strength %d (expect 20: he keeps it, enraged), knows her=%s" % [s.turn, s.player.favour, s.daughter.is_risen(), s.daughter.risen_with(s.player), sk.is_mortal(), sk.strength, sk.knows_her])
 	var parts = s.food_parts(s.player).filter(func(p): return "risen" in p[0])
 	s.spread_ash(Vector2i(0, 0))
 	print("   her gift: %s; ash spreads after she rose: %s (expect false)" % [parts, s.ash.size() != ash_before])

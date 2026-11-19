@@ -38,6 +38,7 @@ const RIFT_MIN_CITY_DISTANCE := 4 # rifts stay at least this far from every city
 const RIFT_MAX_CITY_DISTANCE := 7 # ...and at most this far from the city they belong to
 const SIGHT_RANGE := 2 # fog of war: he only sees this far; a rogue Daughter further away is hidden from him
 const SPEED := 2 # hexes a turn he walks toward the city he hunts (was 1; Nathan's playtest: "he isn't scary anymore")
+const RAGE_SPEED := 3 # once Sunna has risen he is mortal but enraged: he runs this fast at her city
 const SPRINT := 3 # hexes a turn he runs when hunting her in the open (she runs 1; was 2, kept faster than SPEED)
 
 # The GameState (game_state.gd). A "weak" link: the game keeps this object alive,
@@ -104,7 +105,7 @@ func take_turn() -> void:
 		return
 	# He lopes SPEED hexes a turn toward the city he hunts. Reaching it, he
 	# attacks at once; a unit standing in his way stops him and he fights it.
-	for step in SPEED:
+	for step in (RAGE_SPEED if game.daughter.is_risen() else SPEED):
 		if HexMap.is_neighbour(pos, target.city_pos):
 			attack_city(target)
 			return
@@ -135,7 +136,7 @@ func attack_city(f: Faction) -> void:
 	var defence: int = game.city_defence(f)
 	var dealt: int = roundi(game.combat_damage(effective_strength(), defence) * CITY_DAMAGE)
 	var taken: int = game.combat_damage(defence, effective_strength())
-	var she_is_here: bool = game.daughter.shelters_with(f)
+	var she_is_here: bool = game.daughter.shelters_with(f) or game.daughter.risen_with(f)
 	f.city_hp -= dealt
 	if she_is_here and not knows_her:
 		knows_her = true

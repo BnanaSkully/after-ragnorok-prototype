@@ -1433,13 +1433,17 @@ func maybe_rise() -> void:
 	if daughter.holder.favour < SunDaughter.RISE_FAVOUR:
 		return
 	daughter.state = SunDaughter.State.RISEN
-	skoll.strength = Skoll.STRENGTH # mortal, and back to his normal Strength
+	# Mortal now, but enraged (Nathan's playtest: "the game just ends with Sunna
+	# rising"): he keeps his Strength, knows where she is and runs at her city.
+	# Dawn still needs her city to stand on turn END_TURN.
 	skoll.wounds = 0
+	skoll.knows_her = true
 	var who := "you" if daughter.holder == player else "the " + daughter.holder.name
 	diplomacy_log.append("Turn %d: SUNNA HAS RISEN with %s. Sköll is mortal." % [turn, who])
 	if diplomacy_log.size() > DIPLOMACY_LOG_SIZE:
 		diplomacy_log.pop_front()
-	add_message("Turn %d: SUNNA HAS RISEN and stands with %s (+%d Food, +%d Industry a turn). Sköll is mortal now (Strength %d), and the ash stops." % [turn, who, SunDaughter.RISEN_FOOD, SunDaughter.RISEN_INDUSTRY, skoll.strength])
+	add_message("Turn %d: SUNNA HAS RISEN and stands with %s (+%d Food, +%d Industry a turn). The ash stops." % [turn, who, SunDaughter.RISEN_FOOD, SunDaughter.RISEN_INDUSTRY])
+	add_message("Sköll is MORTAL now, but enraged (Strength %d): he runs %d hexes a turn at her city. If it stands on turn %d it is Dawn; if it falls, he swallows her." % [skoll.strength, Skoll.RAGE_SPEED, END_TURN])
 
 # Every few turns after the Landing, a small event asks the player to choose.
 func maybe_turn_event() -> void:
