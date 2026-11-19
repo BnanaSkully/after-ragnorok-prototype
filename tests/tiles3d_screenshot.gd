@@ -25,6 +25,13 @@ func _initialize() -> void:
 	for c in s.terrain:
 		if ash < 4 and c.x == 0:
 			s.ash[c] = true; ash += 1
+	# a rift and ruins in sight, to show their models
+	var near: Vector2i = s.player.city_pos + Vector2i(2, -1)
+	s.player.known_rifts[near] = true
+	s.player.add_unit(s.player.city_pos + Vector2i(-1, 1))
+	for r in s.ruins:
+		if r["cell"].x >= 5 and r["cell"].x <= 10:
+			s.reveal_area(s.player, r["cell"], 1)
 	s.update_sight(); m.refresh()
 	m.toggle_3d()
 	for i in 30: await process_frame
@@ -33,7 +40,13 @@ func _initialize() -> void:
 	v.cam_distance = 9.0; v.place_camera()
 	for i in 5: await process_frame
 	await shot("tiles3d_close.png")
-	for land in [Terrain.Type.MOUNTAINS, Terrain.Type.WATER]:
+	v.cam_target = v.cell_position(s.player.city_pos); v.cam_distance = 6.0; v.place_camera()
+	for i in 5: await process_frame
+	await shot("tiles3d_city.png")
+	v.cam_target = v.cell_position(near); v.place_camera()
+	for i in 5: await process_frame
+	await shot("tiles3d_rift.png")
+	for land in [Terrain.Type.MOUNTAINS, Terrain.Type.WATER, Terrain.Type.FOREST]:
 		for c in s.terrain:
 			if s.terrain[c] == land and s.player_has_explored(c):
 				v.cam_target = v.cell_position(c); v.cam_distance = 6.0; v.place_camera()
