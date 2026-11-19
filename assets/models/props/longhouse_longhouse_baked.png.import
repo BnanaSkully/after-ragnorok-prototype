@@ -2,19 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://ckernmgck4bjv"
-path="res://.godot/imported/rift_Meshy_AI_Astral_Root_Abyss_20261116_texture_normal.png-7606031ec2ce33c2e6a2a1c9f910af2f.ctex"
+uid="uid://dr5m1kk37f1yw"
+path="res://.godot/imported/longhouse_longhouse_baked.png-5b8c010b462a6dd1c833b055fd66a31b.ctex"
 metadata={
 "vram_texture": false
 }
 generator_parameters={
-"md5": "56055ef25f0673679b24b0f4daeef59d"
+"md5": "bc47e7610546c8e316be7adefa1010b9"
 }
 
 [deps]
 
-source_file="res://assets/models/props/rift_Meshy_AI_Astral_Root_Abyss_20261116_texture_normal.png"
-dest_files=["res://.godot/imported/rift_Meshy_AI_Astral_Root_Abyss_20261116_texture_normal.png-7606031ec2ce33c2e6a2a1c9f910af2f.ctex"]
+source_file="res://assets/models/props/longhouse_longhouse_baked.png"
+dest_files=["res://.godot/imported/longhouse_longhouse_baked.png-5b8c010b462a6dd1c833b055fd66a31b.ctex"]
 
 [params]
 

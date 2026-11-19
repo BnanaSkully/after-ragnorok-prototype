@@ -45,8 +45,8 @@ const DRESSING := {
 }
 const LONGHOUSE_LENGTH := 1.1 # its longest side (a hex is 2.0 corner to corner)
 const RUNESTONE_HEIGHT := 0.55
-const RIFT_WIDTH := 1.5
-const CITY_UNIT_OFFSET := Vector3(0.0, 0, 0.45) # a unit in its city stands beside the longhouse
+const MOUNTAIN_STRETCH := 1.35 # the mountain tile is drawn this much taller than its model
+const CITY_UNIT_OFFSET := Vector3(0.0, 0, 0.5) # a unit in its city stands in front of the longhouse
 const SKOLL_LENGTH_IN_HEXES := 1.25 # nose to tail, in hex widths
 const SKOLL_STEP_TIME := 0.6 # seconds to walk one hex
 # Which way the model faces before we turn it: 0 if its nose points along +Z.
@@ -126,16 +126,17 @@ func build_meshes() -> void:
 		var path := TILE_MODEL_PATH % Terrain.NAMES[land].to_lower()
 		if ResourceLoader.exists(path):
 			tile_scenes[land] = load(path)
+	tile_scenes["rift"] = RIFT # a found rift is a whole tile of its own
 	if ResourceLoader.exists(TILE_MODEL_PATH % "ash"):
 		tile_scenes["ash"] = load(TILE_MODEL_PATH % "ash")
 	army_mesh = CylinderMesh.new()
-	army_mesh.top_radius = 0.28
-	army_mesh.bottom_radius = 0.32
-	army_mesh.height = 0.45
+	army_mesh.top_radius = 0.15
+	army_mesh.bottom_radius = 0.18
+	army_mesh.height = 0.3
 	scout_mesh = CylinderMesh.new()
-	scout_mesh.top_radius = 0.15
-	scout_mesh.bottom_radius = 0.18
-	scout_mesh.height = 0.3
+	scout_mesh.top_radius = 0.09
+	scout_mesh.bottom_radius = 0.11
+	scout_mesh.height = 0.2
 	city_mesh = CylinderMesh.new()
 	city_mesh.top_radius = 0.65
 	city_mesh.bottom_radius = 0.65
@@ -223,6 +224,7 @@ func update_board() -> void:
 	var s := state
 	var landing := s.phase == GameState.Phase.LANDING
 	var dark := s.daughter.is_swallowed()
+	var rifts := shown_rifts()
 	for c in hexes:
 		var mi: MeshInstance3D = hexes[c]
 		var tint := Color.WHITE
@@ -233,6 +235,8 @@ func update_board() -> void:
 			mesh = tiles["ash"]
 		else:
 			mesh = tiles[s.terrain_at(c)][mi.get_meta("variant")]
+		if rifts.has(c):
+			key = "rift" # a rift you have found takes the place of its hex's tile
 		if not landing:
 			var land_owner := s.territory_owner(c)
 			if land_owner != null:
@@ -282,7 +286,7 @@ func make_tile_model(key, variant: int) -> Node3D:
 		base_key = Terrain.NAMES.find(String(dress[0]).capitalize())
 	var base: Node3D = tile_scenes[base_key].instantiate()
 	holder.add_child(base)
-	fit_to_hex(base)
+	fit_to_hex(base, MOUNTAIN_STRETCH if key is int and key == Terrain.Type.MOUNTAINS else 1.0)
 	restyle(base, key)
 	if dress.is_empty():
 		return holder
@@ -355,15 +359,15 @@ func place_scaled(scene: PackedScene, at: Vector3, size: float, by: String) -> N
 	holder.position = at
 	return holder
 
-# Scales a model so it is as wide as one hex and stands on the ground.
-func fit_to_hex(model: Node3D) -> void:
+# Scales a model so it is as wide as one hex and stands on the ground ("stretch" makes it taller).
+func fit_to_hex(model: Node3D, stretch := 1.0) -> void:
 	var box := model_bounds(model)
 	var widest := maxf(box.size.x, box.size.z)
 	var k := 2.0 * TileKit3D.RADIUS / widest if widest > 0.0 else 1.0
-	model.scale = Vector3.ONE * k
+	model.scale = Vector3(k, k * stretch, k)
 	model.rotation.y = TILE_MODEL_YAW
 	var centre := box.get_center()
-	model.position = Vector3(-centre.x * k, -box.position.y * k, -centre.z * k)
+	model.position = Vector3(-centre.x * k, -box.position.y * k * stretch, -centre.z * k)
 
 func tint_overlay(tint: Color) -> StandardMaterial3D:
 	if tint == Color.WHITE:
@@ -394,10 +398,10 @@ func update_cities() -> void:
 		tint_prop(house, Color.WHITE if state.player_can_see(f.city_pos) else Color.WHITE.darkened(0.45))
 	hide_rest(city_nodes, used)
 	hide_props(LONGHOUSE, houses)
-	update_ruins_and_rifts()
+	update_ruins()
 
-# Unsearched ruins you've seen (a runestone) and rifts you've found (the Astral Root abyss).
-func update_ruins_and_rifts() -> void:
+# Unsearched ruins you've seen (a runestone). Rifts you've found replace their tile (update_board).
+func update_ruins() -> void:
 	var s := state
 	var stones := 0
 	if s.phase != GameState.Phase.LANDING:
@@ -408,16 +412,17 @@ func update_ruins_and_rifts() -> void:
 				stone.position = cell_position(r["cell"]) + Vector3(0.25, hex_top(r["cell"]), -0.2)
 				tint_prop(stone, Color.WHITE if s.player_can_see(r["cell"]) else Color.WHITE.darkened(0.45))
 	hide_props(RUNESTONE, stones)
-	var rifts: Array = []
-	if s.phase != GameState.Phase.LANDING:
-		rifts = s.player.known_rifts.keys()
-		var w := s.skoll.revealed_rift
-		if w != NO_CELL and s.player_can_see(w) and not rifts.has(w):
-			rifts.append(w)
-	for i in rifts.size():
-		var rift := pooled_prop(RIFT, i, RIFT_WIDTH, "longest")
-		rift.position = cell_position(rifts[i]) + Vector3(0, hex_top(rifts[i]) + 0.01, 0)
-	hide_props(RIFT, rifts.size())
+
+# Rifts the player knows about (drawn as their hex's tile by update_board).
+func shown_rifts() -> Array:
+	var s := state
+	if s.phase == GameState.Phase.LANDING:
+		return []
+	var rifts: Array = s.player.known_rifts.keys()
+	var w := s.skoll.revealed_rift
+	if w != NO_CELL and s.player_can_see(w) and not rifts.has(w):
+		rifts.append(w)
+	return rifts
 
 func pooled_prop(scene: PackedScene, i: int, size: float, by: String) -> Node3D:
 	if not prop_pools.has(scene):

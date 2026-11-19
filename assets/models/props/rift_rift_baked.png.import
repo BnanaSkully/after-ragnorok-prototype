@@ -2,19 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://qanagpb78lip"
-path="res://.godot/imported/rift_Meshy_AI_Astral_Root_Abyss_20261116_texture.png-eb86c82c8c0b3fe6d26e67fe77064238.ctex"
+uid="uid://ceq1tql1mmd5i"
+path="res://.godot/imported/rift_rift_baked.png-6797ea309d327493c1d965d05b5d06eb.ctex"
 metadata={
 "vram_texture": false
 }
 generator_parameters={
-"md5": "d21c79ac993bf051d11331368347b8b2"
+"md5": "db79c7194e7d5a1d90b0bb0b02d5065e"
 }
 
 [deps]
 
-source_file="res://assets/models/props/rift_Meshy_AI_Astral_Root_Abyss_20261116_texture.png"
-dest_files=["res://.godot/imported/rift_Meshy_AI_Astral_Root_Abyss_20261116_texture.png-eb86c82c8c0b3fe6d26e67fe77064238.ctex"]
+source_file="res://assets/models/props/rift_rift_baked.png"
+dest_files=["res://.godot/imported/rift_rift_baked.png-6797ea309d327493c1d965d05b5d06eb.ctex"]
 
 [params]
 

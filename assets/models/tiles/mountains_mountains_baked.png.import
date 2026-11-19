@@ -2,19 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://vg5o7x4oocum"
-path="res://.godot/imported/longhouse_Meshy_AI_Viking_Longhouse_20261118_image-to-3d-texture.png-35edeeb1737727c3ca6a52b6e0e1010b.ctex"
+uid="uid://dcuc0nopfs6fa"
+path="res://.godot/imported/mountains_mountains_baked.png-ac6e4acb126626726b7a94b462b71ec2.ctex"
 metadata={
 "vram_texture": false
 }
 generator_parameters={
-"md5": "3aed9cbba8a8985787a57f57e4730378"
+"md5": "e1c0681891d933e283d154e6fa121d17"
 }
 
 [deps]
 
-source_file="res://assets/models/props/longhouse_Meshy_AI_Viking_Longhouse_20261118_image-to-3d-texture.png"
-dest_files=["res://.godot/imported/longhouse_Meshy_AI_Viking_Longhouse_20261118_image-to-3d-texture.png-35edeeb1737727c3ca6a52b6e0e1010b.ctex"]
+source_file="res://assets/models/tiles/mountains_mountains_baked.png"
+dest_files=["res://.godot/imported/mountains_mountains_baked.png-ac6e4acb126626726b7a94b462b71ec2.ctex"]
 
 [params]
 
