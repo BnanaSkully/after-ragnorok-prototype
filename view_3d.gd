@@ -5,8 +5,9 @@ extends Node3D
 # switches between the 2D and 3D views (V, or the 3D button for phones). Clicking on hexes, buttons and
 # pop-ups all stay in main.gd.
 #
-# Placeholders until real models arrive in assets/models/: each hex is a
-# six-sided prism coloured by its land, a city is a box, a unit a small cylinder.
+# Each hex is a low-poly tile made in code (tile_kit_3d.gd: grass, pines, hills,
+# snowy peaks, lakes) until real tile models arrive in assets/models/tiles/.
+# A city is still a box and a unit a small cylinder (placeholders).
 # Sköll is the real model (assets/models/units/skoll.glb).
 
 const SKOLL_SCENE := preload("res://assets/models/units/skoll.glb")
@@ -14,10 +15,6 @@ const NO_CELL := HexMap.NO_CELL
 
 # --- Sizes (in 3D units; one hex is HEX_RADIUS from its centre to a corner) ---
 const HEX_RADIUS := 1.0
-const HEX_GAP := 0.04 # a thin dark line between hexes
-# How tall each land's prism is (index = Terrain.Type: plains, forest, hills, mountains, water)
-const TERRAIN_HEIGHTS := [0.2, 0.26, 0.4, 0.7, 0.1]
-const UNSEEN_HEIGHT := 0.2
 const SKOLL_LENGTH_IN_HEXES := 1.25 # nose to tail, in hex widths
 const SKOLL_STEP_TIME := 0.6 # seconds to walk one hex
 # Which way the model faces before we turn it: 0 if its nose points along +Z.
@@ -29,8 +26,7 @@ const ZOOM_MIN := 6.0
 const ZOOM_MAX := 40.0
 const PAN_SPEED := 0.9 # map units a second, per unit of zoom distance
 
-# Colours copied from the 2D view so both views agree
-const ASH_COLOUR := Color(0.36, 0.34, 0.33)
+# Never-seen hexes, as in the 2D view
 const UNSEEN_COLOUR := Color(0.03, 0.03, 0.04)
 
 var state: GameState # set by main.gd before the view is added
@@ -45,9 +41,9 @@ var dragging := false
 var touches := {} # finger index -> where it is on the screen (phones and touch screens)
 
 var hexes := {} # Vector2i -> MeshInstance3D
-var prism_meshes: Array[CylinderMesh] = [] # one per height, shared by all hexes
-var unseen_mesh: CylinderMesh
+var tiles := {} # the tile models, from TileKit3D.build_all(), shared by all hexes
 var materials := {} # colour -> StandardMaterial3D, shared
+var tile_materials := {} # tint -> material that keeps the tile's own colours, shared
 var unit_nodes: Array[MeshInstance3D] = [] # reused each frame
 var city_nodes: Array[MeshInstance3D] = []
 var army_mesh: CylinderMesh
@@ -80,17 +76,15 @@ func cell_position(cell: Vector2i) -> Vector3:
 
 func hex_top(cell: Vector2i) -> float:
 	if not hex_is_explored(cell):
-		return UNSEEN_HEIGHT
-	return TERRAIN_HEIGHTS[state.terrain_at(cell)]
+		return TileKit3D.top_height(Terrain.Type.PLAINS)
+	return TileKit3D.top_height(state.terrain_at(cell))
 
 func hex_is_explored(cell: Vector2i) -> bool:
 	return state.phase == GameState.Phase.LANDING or state.player_has_explored(cell)
 
 # --- Building the scene once ------------------------------------------------------
 func build_meshes() -> void:
-	for h in TERRAIN_HEIGHTS:
-		prism_meshes.append(make_prism(h))
-	unseen_mesh = make_prism(UNSEEN_HEIGHT)
+	tiles = TileKit3D.build_all()
 	army_mesh = CylinderMesh.new()
 	army_mesh.top_radius = 0.28
 	army_mesh.bottom_radius = 0.32
@@ -102,23 +96,17 @@ func build_meshes() -> void:
 	city_mesh = BoxMesh.new()
 	city_mesh.size = Vector3(0.9, 0.6, 0.9)
 
-# A six-sided cylinder is a hex prism. Godot puts its first corner on +Z, which
-# is "up" on the screen here, so the hexes come out pointy-top like the 2D map.
-func make_prism(height: float) -> CylinderMesh:
-	var m := CylinderMesh.new()
-	m.radial_segments = 6
-	m.rings = 1
-	m.top_radius = HEX_RADIUS - HEX_GAP
-	m.bottom_radius = HEX_RADIUS - HEX_GAP
-	m.height = height
-	return m
-
 func build_board() -> void:
 	for row in HexMap.ROWS:
 		for col in HexMap.COLS:
 			var c := Vector2i(col, row)
 			var mi := MeshInstance3D.new()
 			add_child(mi)
+			mi.position = cell_position(c)
+			# the same land doesn't always look the same: a variant and a turn picked from the hex
+			var pick := (col * 7 + row * 13) % 101
+			mi.rotation.y = (pick % 6) * TAU / 6.0
+			mi.set_meta("variant", pick % TileKit3D.VARIANTS)
 			hexes[c] = mi
 
 func build_skoll() -> void:
@@ -165,31 +153,43 @@ func material(colour: Color) -> StandardMaterial3D:
 		materials[colour] = m
 	return materials[colour]
 
+# A tile keeps its own painted colours; the tint multiplies them (white = as made).
+func tile_material(tint: Color) -> StandardMaterial3D:
+	if not tile_materials.has(tint):
+		var m := StandardMaterial3D.new()
+		m.vertex_color_use_as_albedo = true
+		m.albedo_color = tint
+		m.roughness = 0.9
+		tile_materials[tint] = m
+	return tile_materials[tint]
+
 func update_board() -> void:
 	var s := state
 	var landing := s.phase == GameState.Phase.LANDING
 	var dark := s.daughter.is_swallowed()
 	for c in hexes:
 		var mi: MeshInstance3D = hexes[c]
-		var land: int = s.terrain_at(c)
-		var fill: Color = ASH_COLOUR if s.is_ash(c) else terrain_colours[land]
-		var mesh: CylinderMesh = prism_meshes[land]
+		var tint := Color.WHITE
+		var mesh: ArrayMesh
+		if s.is_ash(c):
+			mesh = tiles["ash"]
+		else:
+			mesh = tiles[s.terrain_at(c)][mi.get_meta("variant")]
 		if not landing:
 			var land_owner := s.territory_owner(c)
 			if land_owner != null:
-				fill = fill.lerp(territory_colour_of.call(land_owner), 0.45)
+				tint = tint.lerp(territory_colour_of.call(land_owner), 0.45)
 		if dark:
-			fill = fill.darkened(0.7)
+			tint = tint.darkened(0.7)
 		if not hex_is_explored(c):
-			fill = UNSEEN_COLOUR # never seen: black
-			mesh = unseen_mesh
+			mesh = tiles["unseen"]
+			tint = UNSEEN_COLOUR # never seen: a black block
 		elif not landing and not s.player_can_see(c):
-			fill = fill.darkened(0.45) # seen before, out of sight now
+			tint = tint.darkened(0.45) # seen before, out of sight now
 		elif landing and not s.can_land_at(c):
-			fill = fill.darkened(0.6)
+			tint = tint.darkened(0.6)
 		mi.mesh = mesh
-		mi.material_override = material(fill)
-		mi.position = cell_position(c) + Vector3(0, mesh.height / 2.0, 0)
+		mi.material_override = tile_material(tint)
 
 func update_cities() -> void:
 	var used := 0
