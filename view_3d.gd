@@ -45,6 +45,7 @@ const DRESSING := {
 }
 const LONGHOUSE_LENGTH := 1.1 # its longest side (a hex is 2.0 corner to corner)
 const RUNESTONE_HEIGHT := 0.55
+const RIFT_RIM := 0.8 # how far up the rift model its rim is (0 bottom, 1 top): the rim is put at grass level
 const MOUNTAIN_STRETCH := 1.35 # the mountain tile is drawn this much taller than its model
 const CITY_UNIT_OFFSET := Vector3(0.0, 0, 0.5) # a unit in its city stands in front of the longhouse
 const SKOLL_LENGTH_IN_HEXES := 1.25 # nose to tail, in hex widths
@@ -79,12 +80,14 @@ var overlays := {} # tint -> material that multiplies a real model's colours by 
 var materials := {} # colour -> StandardMaterial3D, shared
 var tile_materials := {} # tint -> material that keeps the tile's own colours, shared
 var unit_nodes: Array[MeshInstance3D] = [] # reused each frame
-var city_nodes: Array[MeshInstance3D] = [] # a flat disc in the owner's colour under each longhouse
+var city_nodes: Array[MeshInstance3D] = [] # a banner in the owner's colour beside each longhouse
+var pole_nodes: Array[MeshInstance3D] = [] # the banners' poles
 var prop_pools := {} # PackedScene -> Array[Node3D], reused each frame (longhouses, runestones, rifts)
 var prop_fits := {} # PackedScene -> [scale, lift], measured once
 var army_mesh: CylinderMesh
 var scout_mesh: CylinderMesh
-var city_mesh: CylinderMesh
+var city_mesh: BoxMesh # the banner's cloth
+var pole_mesh: CylinderMesh
 
 var skoll: Node3D
 var skoll_anim: AnimationPlayer
@@ -137,11 +140,13 @@ func build_meshes() -> void:
 	scout_mesh.top_radius = 0.09
 	scout_mesh.bottom_radius = 0.11
 	scout_mesh.height = 0.2
-	city_mesh = CylinderMesh.new()
-	city_mesh.top_radius = 0.65
-	city_mesh.bottom_radius = 0.65
-	city_mesh.height = 0.04
-	city_mesh.radial_segments = 6
+	city_mesh = BoxMesh.new()
+	city_mesh.size = Vector3(0.2, 0.26, 0.02)
+	pole_mesh = CylinderMesh.new()
+	pole_mesh.top_radius = 0.015
+	pole_mesh.bottom_radius = 0.015
+	pole_mesh.height = 0.75
+	pole_mesh.radial_segments = 5
 
 func build_board() -> void:
 	for row in HexMap.ROWS:
@@ -288,6 +293,10 @@ func make_tile_model(key, variant: int) -> Node3D:
 	holder.add_child(base)
 	fit_to_hex(base, MOUNTAIN_STRETCH if key is int and key == Terrain.Type.MOUNTAINS else 1.0)
 	restyle(base, key)
+	if key is String and key == "rift":
+		# sink the rift so its rim is level with the grass on the hexes around it
+		var h := model_bounds(base).size.y * base.scale.y
+		base.position.y -= h * RIFT_RIM - TileKit3D.top_height(Terrain.Type.PLAINS)
 	if dress.is_empty():
 		return holder
 	var count: int = dress[2]
@@ -386,17 +395,23 @@ func update_cities() -> void:
 	for f in state.factions:
 		if f.city_pos == NO_CELL or not state.player_has_explored(f.city_pos):
 			continue
-		var top := cell_position(f.city_pos) + Vector3(0, hex_top(f.city_pos) + 0.05, 0)
-		var disc := pooled(city_nodes, used, city_mesh)
+		var top := cell_position(f.city_pos) + Vector3(0, hex_top(f.city_pos), 0)
+		# whose city: a banner in their colour at the longhouse's corner
+		var flag_at := top + Vector3(0.62, 0, 0.12)
+		var pole := pooled(pole_nodes, used, pole_mesh)
+		pole.material_override = material(Color(0.3, 0.22, 0.15))
+		pole.position = flag_at + Vector3(0, pole_mesh.height / 2.0, 0)
+		var cloth := pooled(city_nodes, used, city_mesh)
 		used += 1
-		disc.material_override = material(colour_of.call(f)) # whose city: a disc in their colour
-		disc.position = top + Vector3(0, city_mesh.height / 2.0, 0)
+		cloth.material_override = material(colour_of.call(f))
+		cloth.position = flag_at + Vector3(city_mesh.size.x / 2.0, pole_mesh.height - city_mesh.size.y / 2.0, 0)
 		var house := pooled_prop(LONGHOUSE, houses, LONGHOUSE_LENGTH, "longest")
 		houses += 1
-		house.position = top + Vector3(0, city_mesh.height, -0.25) # toward the back, leaving room for a unit
+		house.position = top + Vector3(0, 0, -0.2) # toward the back, leaving room for a unit
 		house.rotation.y = 0.0
 		tint_prop(house, Color.WHITE if state.player_can_see(f.city_pos) else Color.WHITE.darkened(0.45))
 	hide_rest(city_nodes, used)
+	hide_rest(pole_nodes, used)
 	hide_props(LONGHOUSE, houses)
 	update_ruins()
 
@@ -461,7 +476,6 @@ func update_units() -> void:
 			var lift := hex_top(u.pos)
 			var beside := Vector3.ZERO
 			if state.is_city(u.pos):
-				lift += city_mesh.height
 				beside = CITY_UNIT_OFFSET # standing in its city: next to the longhouse
 			mi.position = cell_position(u.pos) + beside + Vector3(0, lift + mesh.height / 2.0, 0)
 	hide_rest(unit_nodes, used)
