@@ -17,7 +17,7 @@ const NO_CELL := HexMap.NO_CELL
 const HEX_RADIUS := 1.0
 # Real tile models: assets/models/tiles/plains.glb, forest.glb, hills.glb,
 # mountains.glb, water.glb (and ash.glb), any that exist. Each is scaled to fit
-# one hex, its bottom on the ground. Units stand at TileKit3D.top_height either way.
+# one hex, its bottom on the ground. Units, cities and props stand on land_top.
 const TILE_MODEL_PATH := "res://assets/models/tiles/%s.glb"
 const TILE_MODEL_YAW := 0.0 # turn (radians) if the models come out flat-top instead of pointy-top
 # Nathan's Meshy models (assets/models/props/), made smaller for phones.
@@ -116,7 +116,19 @@ func cell_position(cell: Vector2i) -> Vector3:
 func hex_top(cell: Vector2i) -> float:
 	if not hex_is_explored(cell):
 		return TileKit3D.top_height(Terrain.Type.PLAINS)
-	return TileKit3D.top_height(state.terrain_at(cell))
+	if state.is_ash(cell):
+		return TileKit3D.top_height(Terrain.Type.PLAINS)
+	return land_top(state.terrain_at(cell))
+
+# How high the ground is on a land's tile: the Blender kit tiles are thicker than the
+# code-made ones, so things standing on them must stand higher.
+const MODEL_TOPS := {"plains": 0.35, "forest": 0.35, "hills": 0.42, "water": 0.215} # in the .glb's own units
+const MODEL_WIDTH := 1.942 # the kit tiles' width corner to corner, in the same units
+func land_top(land: int) -> float:
+	var named: String = Terrain.NAMES[land].to_lower()
+	if tile_scenes.has(land) and MODEL_TOPS.has(named):
+		return MODEL_TOPS[named] * 2.0 * TileKit3D.RADIUS / MODEL_WIDTH
+	return TileKit3D.top_height(land)
 
 func hex_is_explored(cell: Vector2i) -> bool:
 	return state.phase == GameState.Phase.LANDING or state.player_has_explored(cell)
@@ -296,13 +308,13 @@ func make_tile_model(key, variant: int) -> Node3D:
 	if key is String and key == "rift":
 		# sink the rift so its rim is level with the grass on the hexes around it
 		var h := model_bounds(base).size.y * base.scale.y
-		base.position.y -= h * RIFT_RIM - TileKit3D.top_height(Terrain.Type.PLAINS)
+		base.position.y -= h * RIFT_RIM - land_top(Terrain.Type.PLAINS)
 	if dress.is_empty():
 		return holder
 	var count: int = dress[2]
 	if key == Terrain.Type.PLAINS and variant != 0:
 		count = 0 # grass on one plains hex in three
-	var top := TileKit3D.top_height(Terrain.Type.PLAINS)
+	var top := land_top(Terrain.Type.PLAINS)
 	for i in count:
 		var angle := TAU * (i + 0.3 * variant) / maxf(count, 1.0) + 0.6
 		var spot := Vector3(cos(angle), 0, sin(angle)) * float(dress[4])
@@ -408,7 +420,7 @@ func update_cities() -> void:
 		var house := pooled_prop(LONGHOUSE, houses, LONGHOUSE_LENGTH, "longest")
 		houses += 1
 		house.position = top + Vector3(0, 0, -0.2) # toward the back, leaving room for a unit
-		house.rotation.y = 0.0
+		house.rotation.y = 0.45 # turned a little, so a carved gable end faces the camera
 		tint_prop(house, Color.WHITE if state.player_can_see(f.city_pos) else Color.WHITE.darkened(0.45))
 	hide_rest(city_nodes, used)
 	hide_rest(pole_nodes, used)
