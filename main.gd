@@ -52,6 +52,7 @@ var crossing_panel: VBoxContainer
 var crossing_label: Label
 var crossing_buttons: VBoxContainer
 var end_turn_button: Button
+var view_button: Button # switches between the 2D and 3D views, like V (for phones, which have no keyboard)
 var build_button: Button
 var scout_button: Button
 var outpost_button: Button
@@ -85,7 +86,9 @@ func _ready() -> void:
 	outpost_button = add_button("", Vector2(PANEL_X, 58), on_outpost_button)
 	walls_button = add_button("Build...", Vector2(PANEL_X + 110, 58), on_open_city)
 	trade_button = add_button("Trade her", Vector2(PANEL_X + 240, 58), on_open_trade)
-	for b in [build_button, scout_button, outpost_button, walls_button, trade_button]:
+	view_button = add_button("3D", Vector2(PANEL_X + 294, 20), toggle_3d)
+	view_button.focus_mode = Control.FOCUS_NONE # clicking it doesn't leave it focused, so Space/Enter can't press it by accident
+	for b in [build_button, scout_button, outpost_button, walls_button, trade_button, view_button]:
 		b.add_theme_font_size_override("font_size", 14)
 	build_button.tooltip_text = "An army unit: Strength %d, 1 move, eats %d Food a turn." % [state.player.strength, GameState.UNIT_FOOD_UPKEEP]
 	scout_button.tooltip_text = "A scout: 2 moves, sees 3 hexes, eats nothing, but Strength %d. Up to %d." % [Unit.SCOUT_STRENGTH, GameState.MAX_SCOUTS]
@@ -143,7 +146,7 @@ func refresh() -> void:
 	queue_redraw()
 
 func all_game_buttons() -> Array[Button]:
-	var list: Array[Button] = [end_turn_button, build_button, scout_button, outpost_button, walls_button, trade_button]
+	var list: Array[Button] = [end_turn_button, build_button, scout_button, outpost_button, walls_button, trade_button, view_button]
 	for buttons in faction_buttons.values():
 		for b in buttons.values():
 			list.append(b)
@@ -153,6 +156,8 @@ func update_buttons() -> void:
 	var playing: bool = state.can_act()
 	var p := state.player
 	end_turn_button.disabled = not playing
+	view_button.text = "2D" if showing_3d else "3D"
+	view_button.tooltip_text = "Back to the flat 2D map (or press V)." if showing_3d else "Show the map in 3D (or press V). Drag or WASD to move, pinch or the wheel to zoom."
 	var armies: int = state.army_count(p)
 	var cap: int = state.supply_cap(p)
 	build_button.text = "Army (%d) %d/%d" % [GameState.UNIT_COST, armies, cap]
@@ -693,7 +698,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			selected = null
 		refresh()
 
-# --- Switching between the 2D and 3D views (V) ------------------------------------
+# --- Switching between the 2D and 3D views (V, or the 3D/2D button) ---------------
 func toggle_3d() -> void:
 	if state.phase == GameState.Phase.CROSSING:
 		return # no map yet

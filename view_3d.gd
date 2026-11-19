@@ -2,7 +2,7 @@ extends Node3D
 
 # The 3D view of the game (first step). Like main.gd, it owns no rules: it only
 # READS the GameState and shows it. main.gd creates it, hands it the state, and
-# switches between the 2D and 3D views with V. Clicking on hexes, buttons and
+# switches between the 2D and 3D views (V, or the 3D button for phones). Clicking on hexes, buttons and
 # pop-ups all stay in main.gd.
 #
 # Placeholders until real models arrive in assets/models/: each hex is a
@@ -42,6 +42,7 @@ var territory_colour_of: Callable # main.gd's territory_colour(faction)
 var cam_target := Vector3.ZERO # the point on the ground the camera looks at
 var cam_distance := 22.0
 var dragging := false
+var touches := {} # finger index -> where it is on the screen (phones and touch screens)
 
 var hexes := {} # Vector2i -> MeshInstance3D
 var prism_meshes: Array[CylinderMesh] = [] # one per height, shared by all hexes
@@ -278,7 +279,7 @@ func play(anim_name: String) -> void:
 	if skoll_anim and skoll_anim.current_animation != anim_name and skoll_anim.has_animation(anim_name):
 		skoll_anim.play(anim_name, 0.2)
 
-# --- Camera: WASD or middle-drag to pan, the wheel to zoom ------------------------
+# --- Camera: WASD, middle-drag or one finger to pan; the wheel or a pinch to zoom --
 func place_camera() -> void:
 	var pitch := deg_to_rad(CAMERA_PITCH)
 	camera.position = cam_target + Vector3(0, sin(pitch), cos(pitch)) * cam_distance
@@ -304,17 +305,52 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.button_index == MOUSE_BUTTON_MIDDLE:
 			dragging = event.pressed
 		elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			cam_distance = clampf(cam_distance * 0.9, ZOOM_MIN, ZOOM_MAX)
-			place_camera()
+			zoom_by(0.9)
 		elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			cam_distance = clampf(cam_distance / 0.9, ZOOM_MIN, ZOOM_MAX)
-			place_camera()
+			zoom_by(1.0 / 0.9)
 	elif event is InputEventMouseMotion and dragging:
-		# drag the map: the further out you are, the more ground a pixel covers
-		var per_pixel := cam_distance / get_viewport().get_visible_rect().size.y * 1.2
-		cam_target -= Vector3(event.relative.x, 0, event.relative.y) * per_pixel
-		clamp_target()
-		place_camera()
+		pan_by_pixels(event.relative)
+	elif event is InputEventScreenTouch:
+		# a finger touched or left the screen
+		if event.pressed:
+			touches[event.index] = event.position
+		else:
+			touches.erase(event.index)
+	elif event is InputEventScreenDrag:
+		if not touches.has(event.index):
+			touches[event.index] = event.position # (it touched down on a button, then slid onto the map)
+		var span_before := finger_span()
+		touches[event.index] = event.position
+		if touches.size() == 1:
+			pan_by_pixels(event.relative) # one finger: drag the map
+		elif touches.size() == 2 and span_before > 0.0:
+			zoom_by(span_before / maxf(finger_span(), 1.0)) # two fingers: pinch apart to zoom in, together to zoom out
+	elif event is InputEventMagnifyGesture:
+		zoom_by(1.0 / event.factor) # a laptop trackpad's pinch
+
+# How far apart the first two fingers are on the screen (0 with fewer than two).
+func finger_span() -> float:
+	if touches.size() < 2:
+		return 0.0
+	var points: Array = touches.values()
+	return (points[0] as Vector2).distance_to(points[1])
+
+# Moves the camera's distance by a factor (below 1 = closer), within the limits.
+func zoom_by(factor: float) -> void:
+	cam_distance = clampf(cam_distance * factor, ZOOM_MIN, ZOOM_MAX)
+	place_camera()
+
+# Drags the map with the mouse or a finger: the further out you are, the more ground a pixel covers.
+func pan_by_pixels(relative: Vector2) -> void:
+	var per_pixel := cam_distance / get_viewport().get_visible_rect().size.y * 1.2
+	cam_target -= Vector3(relative.x, 0, relative.y) * per_pixel
+	clamp_target()
+	place_camera()
+
+# Taken off screen (back to 2D): forget any fingers or drag, their "let go" may never arrive.
+func _exit_tree() -> void:
+	touches.clear()
+	dragging = false
 
 func clamp_target() -> void:
 	var last := cell_position(Vector2i(HexMap.COLS - 1, HexMap.ROWS - 1))
