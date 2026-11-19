@@ -29,13 +29,13 @@ const GRASS := preload("res://assets/models/props/grass.glb")
 # Lands dressed with props: forest is a grassy tile with pines on it, plains get a
 # clump of grass on some hexes. [base tile, prop, how many, height, distance from the middle]
 const DRESSING := {
-	Terrain.Type.FOREST: ["plains", PINE, 4, 0.75, 0.52],
-	Terrain.Type.PLAINS: ["", GRASS, 1, 0.22, 0.55],
+	Terrain.Type.FOREST: ["plains", PINE, 5, 1.0, 0.5],
+	Terrain.Type.PLAINS: ["", GRASS, 1, 0.32, 0.5],
 }
-const LONGHOUSE_LENGTH := 1.25 # its longest side (a hex is 2.0 corner to corner)
+const LONGHOUSE_LENGTH := 1.1 # its longest side (a hex is 2.0 corner to corner)
 const RUNESTONE_HEIGHT := 0.55
-const RIFT_WIDTH := 1.7
-const CITY_UNIT_OFFSET := Vector3(0.5, 0, 0.45) # a unit in its city stands beside the longhouse
+const RIFT_WIDTH := 1.5
+const CITY_UNIT_OFFSET := Vector3(0.0, 0, 0.45) # a unit in its city stands beside the longhouse
 const SKOLL_LENGTH_IN_HEXES := 1.25 # nose to tail, in hex widths
 const SKOLL_STEP_TIME := 0.6 # seconds to walk one hex
 # Which way the model faces before we turn it: 0 if its nose points along +Z.
@@ -339,8 +339,8 @@ func update_cities() -> void:
 		disc.position = top + Vector3(0, city_mesh.height / 2.0, 0)
 		var house := pooled_prop(LONGHOUSE, houses, LONGHOUSE_LENGTH, "longest")
 		houses += 1
-		house.position = top + Vector3(0, city_mesh.height, 0)
-		house.rotation.y = 0.5
+		house.position = top + Vector3(0, city_mesh.height, -0.25) # toward the back, leaving room for a unit
+		house.rotation.y = 0.0
 		tint_prop(house, Color.WHITE if state.player_can_see(f.city_pos) else Color.WHITE.darkened(0.45))
 	hide_rest(city_nodes, used)
 	hide_props(LONGHOUSE, houses)
