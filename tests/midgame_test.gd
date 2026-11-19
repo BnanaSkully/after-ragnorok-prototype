@@ -89,6 +89,8 @@ func _initialize() -> void:
 		var was_request = s.has_pending_choice() and s.pending_choices[0]["title"].begins_with("SUNNA")
 		if was_request:
 			var refuse := asked.size() == 1 # refuse the first, grant the rest (refusing twice would drive her out)
+			if not refuse and not s.can_afford(s.pending_choices[0]["options"][0]["effects"]):
+				refuse = true # (can't grant it, e.g. a guard with no army left: the option is greyed out)
 			s.answer_choice(1 if refuse else 0)
 			var expect = clampi(fav_before + (SunDaughter.REQUEST_REFUSED if refuse else SunDaughter.REQUEST_GRANTED), 0, SunDaughter.MAX_FAVOUR)
 			if s.player.favour != expect: print("   BAD: answering the request changed her Favour %d -> %d, expected %d" % [fav_before, s.player.favour, expect])
