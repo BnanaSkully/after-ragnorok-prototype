@@ -781,6 +781,8 @@ func draw_map() -> void:
 				elif not other and not (s.is_city(c) and c != player.city_pos) and s.passable(c) and s.can_afford_move(selected, c):
 					if s.closed_border(c):
 						fill = Color(0.75, 0.45, 0.55) # behind a closed border: entering declares war
+					elif s.zoc_blocks(player, selected.pos, c):
+						pass # zone of control: an enemy army next to both hexes holds it here
 					else:
 						fill = Color(0.9, 0.75, 0.3) # free to move
 			draw_colored_polygon(pts, fill)
@@ -1102,6 +1104,8 @@ func hex_tooltip(c: Vector2i) -> Array[String]:
 		lines.append(line)
 		if u.hp < Unit.MAX_HP and u.faction == s.player:
 			lines.append("   Heals %d HP in a turn it doesn't move or fight (%d in your own land)." % [GameState.HEAL_REST, GameState.HEAL_HOME])
+		if u.faction != s.player and not u.is_scout() and s.at_war(s.player, u.faction):
+			lines.append("   Zone of control: your units stop when they step next to it, and can't walk past it.")
 		if selected != null and u.faction != s.player and HexMap.is_neighbour(selected.pos, c) and not s.is_city(c):
 			var e: Vector2i = s.expected_combat(selected, u)
 			lines.append("   If your selected unit attacks: it deals about %d and takes about %d (of %d HP)." % [e.x, e.y, selected.hp])
@@ -1138,6 +1142,12 @@ func hex_tooltip(c: Vector2i) -> Array[String]:
 		var land_owner := s.territory_owner(c)
 		if land_owner != null and land_owner != s.player:
 			lines.append("%s land%s" % [land_owner.name, " (borders CLOSED to you: entering declares war)" if s.closed_border(c) else ""])
+	if selected != null and HexMap.is_neighbour(selected.pos, c) and s.unit_at(c) == null and not (s.is_city(c) and c != s.player.city_pos) and s.passable(c):
+		var holder: Unit = s.zoc_holder(s.player, selected.pos)
+		if s.zoc_blocks(s.player, selected.pos, c):
+			lines.append("Zone of control: your unit is next to a %s army and can't slip past it to here. Attack it, step away, or stay." % holder.faction.name)
+		elif s.in_enemy_zoc(s.player, c) and selected.max_moves() > 1:
+			lines.append("Zone of control: stepping here, next to an enemy army, ends your unit's move.")
 	if s.is_ash(c):
 		lines.append("Ash: dead land. No outposts, no income, counts as nobody's land.")
 	var land: int = s.terrain_at(c)

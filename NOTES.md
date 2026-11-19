@@ -96,6 +96,12 @@ CLAUDE.md holds the rules for working; this file holds the history.
 - Tests that read message text break when the text changes: four_test, balance_state and army_test counted Sköll's attacks by old messages; rift_timing_test expected him back the moment he was driven off (now he's away 3 turns)
 - The memory list ("They remember") shows 2 lines per entry: keep remembered lines short and put the detail in the message
 
+## Zone of control (2026-11-18)
+
+- Nathan said "continue" without picking; read as the recommended next build, zone of control. Built in the cloud
+- Pushback recorded: the backlog's wording ("a unit must stop when it moves next to an enemy") does nothing for armies, which have 1 move. So the classic Civ 1-3 rule was added too: from an enemy army's zone you can't step to another hex in an enemy zone. That is what stops armies walking past each other
+- Effect is small (zoc_test: outposts lost 0.62 -> 0.53, fights 7.8 -> 6.7): it matters more once Nathan plays wars by hand
+
 ## Ideas parked (see CLAUDE.md "Later")
 
 Faction names, the Daughter's name, Crossing text, small-event and ruin text, a choice when you find a rift (e.g. seal it: changes Sköll, ask first), AIs using fog of war to chase a rogue Daughter, AI landing choice, AI-to-AI diplomacy and trading, combat defence bonus, paying an AI to join your war, mini-games, full rifts (Doom-creatures, seasons, underground travel). The old Long Night design (chain, rogues, warbands) is parked in CLAUDE.md "Later".
