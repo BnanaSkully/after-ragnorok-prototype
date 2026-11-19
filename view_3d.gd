@@ -15,6 +15,11 @@ const NO_CELL := HexMap.NO_CELL
 
 # --- Sizes (in 3D units; one hex is HEX_RADIUS from its centre to a corner) ---
 const HEX_RADIUS := 1.0
+# Real tile models: assets/models/tiles/plains.glb, forest.glb, hills.glb,
+# mountains.glb, water.glb (and ash.glb), any that exist. Each is scaled to fit
+# one hex, its bottom on the ground. Units stand at TileKit3D.top_height either way.
+const TILE_MODEL_PATH := "res://assets/models/tiles/%s.glb"
+const TILE_MODEL_YAW := 0.0 # turn (radians) if the models come out flat-top instead of pointy-top
 const SKOLL_LENGTH_IN_HEXES := 1.25 # nose to tail, in hex widths
 const SKOLL_STEP_TIME := 0.6 # seconds to walk one hex
 # Which way the model faces before we turn it: 0 if its nose points along +Z.
@@ -42,6 +47,8 @@ var touches := {} # finger index -> where it is on the screen (phones and touch 
 
 var hexes := {} # Vector2i -> MeshInstance3D
 var tiles := {} # the tile models, from TileKit3D.build_all(), shared by all hexes
+var tile_scenes := {} # land -> PackedScene, for each land with a real model in assets/models/tiles/
+var overlays := {} # tint -> material that multiplies a real model's colours by the tint
 var materials := {} # colour -> StandardMaterial3D, shared
 var tile_materials := {} # tint -> material that keeps the tile's own colours, shared
 var unit_nodes: Array[MeshInstance3D] = [] # reused each frame
@@ -85,6 +92,13 @@ func hex_is_explored(cell: Vector2i) -> bool:
 # --- Building the scene once ------------------------------------------------------
 func build_meshes() -> void:
 	tiles = TileKit3D.build_all()
+	# Real tile models (exported from Blender) win over the ones made in code.
+	for land in Terrain.NAMES.size():
+		var path := TILE_MODEL_PATH % Terrain.NAMES[land].to_lower()
+		if ResourceLoader.exists(path):
+			tile_scenes[land] = load(path)
+	if ResourceLoader.exists(TILE_MODEL_PATH % "ash"):
+		tile_scenes["ash"] = load(TILE_MODEL_PATH % "ash")
 	army_mesh = CylinderMesh.new()
 	army_mesh.top_radius = 0.28
 	army_mesh.bottom_radius = 0.32
@@ -171,7 +185,9 @@ func update_board() -> void:
 		var mi: MeshInstance3D = hexes[c]
 		var tint := Color.WHITE
 		var mesh: ArrayMesh
+		var key: Variant = s.terrain_at(c) # which tile this hex shows (a land, or "ash")
 		if s.is_ash(c):
+			key = "ash"
 			mesh = tiles["ash"]
 		else:
 			mesh = tiles[s.terrain_at(c)][mi.get_meta("variant")]
@@ -188,8 +204,54 @@ func update_board() -> void:
 			tint = tint.darkened(0.45) # seen before, out of sight now
 		elif landing and not s.can_land_at(c):
 			tint = tint.darkened(0.6)
-		mi.mesh = mesh
-		mi.material_override = tile_material(tint)
+		if mesh != tiles["unseen"] and tile_scenes.has(key):
+			mi.mesh = null
+			show_model(mi, key, tint)
+		else:
+			show_model(mi, null, tint)
+			mi.mesh = mesh
+			mi.material_override = tile_material(tint)
+
+# Puts a real tile model on a hex (made once, remade only when its land changes),
+# or takes it away (key null). The tint is laid over it like the made-in-code tiles.
+func show_model(mi: MeshInstance3D, key, tint: Color) -> void:
+	var model: Node3D = mi.get_node_or_null("Model")
+	if model != null and (key == null or model.get_meta("key") != key):
+		mi.remove_child(model)
+		model.queue_free()
+		model = null
+	if key == null:
+		return
+	if model == null:
+		model = tile_scenes[key].instantiate()
+		model.name = "Model"
+		model.set_meta("key", key)
+		mi.add_child(model)
+		fit_to_hex(model)
+	var overlay := tint_overlay(tint)
+	for part in model.find_children("*", "GeometryInstance3D", true, false):
+		(part as GeometryInstance3D).material_overlay = overlay
+
+# Scales a model so it is as wide as one hex and stands on the ground.
+func fit_to_hex(model: Node3D) -> void:
+	var box := model_bounds(model)
+	var widest := maxf(box.size.x, box.size.z)
+	var k := 2.0 * TileKit3D.RADIUS / widest if widest > 0.0 else 1.0
+	model.scale = Vector3.ONE * k
+	model.rotation.y = TILE_MODEL_YAW
+	var centre := box.get_center()
+	model.position = Vector3(-centre.x * k, -box.position.y * k, -centre.z * k)
+
+func tint_overlay(tint: Color) -> StandardMaterial3D:
+	if tint == Color.WHITE:
+		return null
+	if not overlays.has(tint):
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.blend_mode = BaseMaterial3D.BLEND_MODE_MUL # darkens the model's own colours, like the tint on the code tiles
+		m.albedo_color = tint
+		overlays[tint] = m
+	return overlays[tint]
 
 func update_cities() -> void:
 	var used := 0
