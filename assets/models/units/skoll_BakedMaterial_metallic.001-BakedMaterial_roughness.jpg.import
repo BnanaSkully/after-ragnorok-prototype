@@ -2,16 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dsy2hegwq6oyc"
-path="res://.godot/imported/cliff.png-5844d79e4140ae42bbd37ba9e90880ab.ctex"
+uid="uid://cncxfbaaptthp"
+path="res://.godot/imported/skoll_BakedMaterial_metallic.001-BakedMaterial_roughness.jpg-ac76ee2f81bbfd1cf5948a590c43634b.ctex"
 metadata={
 "vram_texture": false
+}
+generator_parameters={
+"md5": "b30db57714bc867e21d6036a68e862d8"
 }
 
 [deps]
 
-source_file="res://assets/textures/cliff.png"
-dest_files=["res://.godot/imported/cliff.png-5844d79e4140ae42bbd37ba9e90880ab.ctex"]
+source_file="res://assets/models/units/skoll_BakedMaterial_metallic.001-BakedMaterial_roughness.jpg"
+dest_files=["res://.godot/imported/skoll_BakedMaterial_metallic.001-BakedMaterial_roughness.jpg-ac76ee2f81bbfd1cf5948a590c43634b.ctex"]
 
 [params]
 
@@ -23,7 +26,7 @@ compress/rdo_quality_loss=0.0
 compress/hdr_compression=1
 compress/normal_map=0
 compress/channel_pack=0
-mipmaps/generate=false
+mipmaps/generate=true
 mipmaps/limit=-1
 roughness/mode=0
 roughness/src_normal=""

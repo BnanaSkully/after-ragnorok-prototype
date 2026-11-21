@@ -2,16 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://mh76r7e3k13c"
-path="res://.godot/imported/grass.png-44de1b601ed5e0482c9aa195977ab90c.ctex"
+uid="uid://ut7j7646qtoq"
+path="res://.godot/imported/ruins_Image_1.jpg-9f209f1699a771b4217e5af64d3c4f26.ctex"
 metadata={
 "vram_texture": false
+}
+generator_parameters={
+"md5": "fc7f61992af9b0baac01e2fb0a972f17"
 }
 
 [deps]
 
-source_file="res://assets/textures/grass.png"
-dest_files=["res://.godot/imported/grass.png-44de1b601ed5e0482c9aa195977ab90c.ctex"]
+source_file="res://assets/models/tiles/ruins_Image_1.jpg"
+dest_files=["res://.godot/imported/ruins_Image_1.jpg-9f209f1699a771b4217e5af64d3c4f26.ctex"]
 
 [params]
 
@@ -23,7 +26,7 @@ compress/rdo_quality_loss=0.0
 compress/hdr_compression=1
 compress/normal_map=0
 compress/channel_pack=0
-mipmaps/generate=false
+mipmaps/generate=true
 mipmaps/limit=-1
 roughness/mode=0
 roughness/src_normal=""

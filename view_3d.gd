@@ -5,49 +5,27 @@ extends Node3D
 # switches between the 2D and 3D views (V, or the 3D button for phones). Clicking on hexes, buttons and
 # pop-ups all stay in main.gd.
 #
-# Each hex is a low-poly tile made in code (tile_kit_3d.gd: grass, pines, hills,
-# snowy peaks, lakes) until real tile models arrive in assets/models/tiles/.
-# A city is still a box and a unit a small cylinder (placeholders).
-# Sköll is the real model (assets/models/units/skoll.glb).
+# Each hex shows Nathan's tile model for its land (assets/models/tiles/: plains,
+# forest, mountain), or a low-poly tile made in code (tile_kit_3d.gd) for lands
+# with no model yet (hills, water, ash). A city's hex shows settlement.glb,
+# unsearched ruins ruins.glb, a rift you have found rift.glb. Units are small
+# cylinders (placeholders). Sköll is the real model (assets/models/units/skoll.glb).
 
 const SKOLL_SCENE := preload("res://assets/models/units/skoll.glb")
 const NO_CELL := HexMap.NO_CELL
 
 # --- Sizes (in 3D units; one hex is HEX_RADIUS from its centre to a corner) ---
 const HEX_RADIUS := 1.0
-# Real tile models: assets/models/tiles/plains.glb, forest.glb, hills.glb,
-# mountains.glb, water.glb (and ash.glb), any that exist. Each is scaled to fit
-# one hex, its bottom on the ground. Units, cities and props stand on land_top.
+# Nathan's tile models: pointy-top hexes, TILE_MODEL_RADIUS from centre to corner
+# (the rest of a hex is the gap between tiles), base at y = 0, ground at MODEL_GROUND.
+const TILE_MODELS := {
+	Terrain.Type.PLAINS: "plains", Terrain.Type.FOREST: "forest", Terrain.Type.MOUNTAINS: "mountain",
+	"settlement": "settlement", "ruins": "ruins", "rift": "rift",
+}
 const TILE_MODEL_PATH := "res://assets/models/tiles/%s.glb"
-const TILE_MODEL_YAW := 0.0 # turn (radians) if the models come out flat-top instead of pointy-top
-# Nathan's Meshy models (assets/models/props/), made smaller for phones.
-const LONGHOUSE := preload("res://assets/models/props/longhouse.glb") # a city
-const RUNESTONE := preload("res://assets/models/props/runestone.glb") # ruins not yet searched
-const RIFT := preload("res://assets/models/props/rift.glb") # a rift you have found
-const PINE := preload("res://assets/models/props/pine.glb")
-const GRASS := preload("res://assets/models/props/grass.glb")
-# Nathan's Meshy tileable textures, laid over the Blender kit's flat colours
-# (like concept_art/tile_set_preview.png). Triplanar: they need no UVs.
-const GRASS_TEXTURE := preload("res://assets/textures/grass.png")
-const CLIFF_TEXTURE := preload("res://assets/textures/cliff.png")
-const TEXTURE_SCALE := 0.9 # repeats per map unit
-# How each land shades the grass texture (multiplied), so lands stay easy to tell apart.
-const GRASS_SHADE := {
-	Terrain.Type.PLAINS: Color(0.95, 1.1, 0.8),
-	Terrain.Type.FOREST: Color(0.65, 0.8, 0.6),
-	Terrain.Type.HILLS: Color(0.95, 0.9, 0.65),
-}
-# Lands dressed with props: forest is a grassy tile with pines on it, plains get a
-# clump of grass on some hexes. [base tile, prop, how many, height, distance from the middle]
-const DRESSING := {
-	Terrain.Type.FOREST: ["plains", PINE, 5, 1.0, 0.5],
-	Terrain.Type.PLAINS: ["", GRASS, 1, 0.32, 0.5],
-}
-const LONGHOUSE_LENGTH := 1.1 # its longest side (a hex is 2.0 corner to corner)
-const RUNESTONE_HEIGHT := 0.55
-const RIFT_RIM := 0.8 # how far up the rift model its rim is (0 bottom, 1 top): the rim is put at grass level
-const MOUNTAIN_STRETCH := 1.35 # the mountain tile is drawn this much taller than its model
-const CITY_UNIT_OFFSET := Vector3(0.0, 0, 0.5) # a unit in its city stands in front of the longhouse
+const TILE_MODEL_RADIUS := 0.98 # made for hexes 1.0 apart (centre to corner), so scale = HEX_RADIUS
+const MODEL_GROUND := 0.39 # how high the ground is on the models (units and banners stand on it)
+const CITY_UNIT_OFFSET := Vector3(0.0, 0, 0.5) # a unit in its city stands at the front of the settlement
 const SKOLL_LENGTH_IN_HEXES := 1.25 # nose to tail, in hex widths
 const SKOLL_STEP_TIME := 0.6 # seconds to walk one hex
 # Which way the model faces before we turn it: 0 if its nose points along +Z.
@@ -74,16 +52,15 @@ var dragging := false
 var touches := {} # finger index -> where it is on the screen (phones and touch screens)
 
 var hexes := {} # Vector2i -> MeshInstance3D
+var rifts_now: Array = [] # shown_rifts(), worked out once a frame
 var tiles := {} # the tile models, from TileKit3D.build_all(), shared by all hexes
-var tile_scenes := {} # land -> PackedScene, for each land with a real model in assets/models/tiles/
+var tile_scenes := {} # tile key (a land, "settlement", "ruins", "rift") -> PackedScene
 var overlays := {} # tint -> material that multiplies a real model's colours by the tint
 var materials := {} # colour -> StandardMaterial3D, shared
 var tile_materials := {} # tint -> material that keeps the tile's own colours, shared
 var unit_nodes: Array[MeshInstance3D] = [] # reused each frame
-var city_nodes: Array[MeshInstance3D] = [] # a banner in the owner's colour beside each longhouse
+var city_nodes: Array[MeshInstance3D] = [] # a banner in the owner's colour on each city
 var pole_nodes: Array[MeshInstance3D] = [] # the banners' poles
-var prop_pools := {} # PackedScene -> Array[Node3D], reused each frame (longhouses, runestones, rifts)
-var prop_fits := {} # PackedScene -> [scale, lift], measured once
 var army_mesh: CylinderMesh
 var scout_mesh: CylinderMesh
 var city_mesh: BoxMesh # the banner's cloth
@@ -113,22 +90,32 @@ func cell_position(cell: Vector2i) -> Vector3:
 	var w := sqrt(3.0) * HEX_RADIUS
 	return Vector3(w * (cell.x + 0.5 * (cell.y % 2)), 0.0, 1.5 * HEX_RADIUS * cell.y)
 
+# How high the ground is on a hex: the tile models are thicker than the code-made tiles.
 func hex_top(cell: Vector2i) -> float:
-	if not hex_is_explored(cell):
+	if tile_scenes.has(tile_key(cell)):
+		return MODEL_GROUND * HEX_RADIUS
+	if not hex_is_explored(cell) or state.is_ash(cell):
 		return TileKit3D.top_height(Terrain.Type.PLAINS)
-	if state.is_ash(cell):
-		return TileKit3D.top_height(Terrain.Type.PLAINS)
-	return land_top(state.terrain_at(cell))
+	return TileKit3D.top_height(state.terrain_at(cell))
 
-# How high the ground is on a land's tile: the Blender kit tiles are thicker than the
-# code-made ones, so things standing on them must stand higher.
-const MODEL_TOPS := {"plains": 0.35, "forest": 0.35, "hills": 0.42, "water": 0.215} # in the .glb's own units
-const MODEL_WIDTH := 1.942 # the kit tiles' width corner to corner, in the same units
-func land_top(land: int) -> float:
-	var named: String = Terrain.NAMES[land].to_lower()
-	if tile_scenes.has(land) and MODEL_TOPS.has(named):
-		return MODEL_TOPS[named] * 2.0 * TileKit3D.RADIUS / MODEL_WIDTH
-	return TileKit3D.top_height(land)
+# Which tile a hex shows: "unseen", a city ("settlement"), unsearched ruins, a rift you
+# have found, "ash", or its land (a Terrain.Type).
+func tile_key(c: Vector2i) -> Variant:
+	var s := state
+	if not hex_is_explored(c):
+		return "unseen"
+	if s.phase != GameState.Phase.LANDING:
+		for f in s.factions:
+			if f.city_pos == c:
+				return "settlement"
+		for r in s.ruins:
+			if r["cell"] == c and not r["taken"]:
+				return "ruins"
+		if rifts_now.has(c):
+			return "rift"
+	if s.is_ash(c):
+		return "ash"
+	return s.terrain_at(c)
 
 func hex_is_explored(cell: Vector2i) -> bool:
 	return state.phase == GameState.Phase.LANDING or state.player_has_explored(cell)
@@ -136,14 +123,11 @@ func hex_is_explored(cell: Vector2i) -> bool:
 # --- Building the scene once ------------------------------------------------------
 func build_meshes() -> void:
 	tiles = TileKit3D.build_all()
-	# Real tile models (exported from Blender) win over the ones made in code.
-	for land in Terrain.NAMES.size():
-		var path := TILE_MODEL_PATH % Terrain.NAMES[land].to_lower()
+	# Real tile models win over the ones made in code.
+	for key in TILE_MODELS:
+		var path: String = TILE_MODEL_PATH % TILE_MODELS[key]
 		if ResourceLoader.exists(path):
-			tile_scenes[land] = load(path)
-	tile_scenes["rift"] = RIFT # a found rift is a whole tile of its own
-	if ResourceLoader.exists(TILE_MODEL_PATH % "ash"):
-		tile_scenes["ash"] = load(TILE_MODEL_PATH % "ash")
+			tile_scenes[key] = load(path)
 	army_mesh = CylinderMesh.new()
 	army_mesh.top_radius = 0.15
 	army_mesh.bottom_radius = 0.18
@@ -167,10 +151,12 @@ func build_board() -> void:
 			var mi := MeshInstance3D.new()
 			add_child(mi)
 			mi.position = cell_position(c)
-			# the same land doesn't always look the same: a variant and a turn picked from the hex
-			var pick := (col * 7 + row * 13) % 101
-			mi.rotation.y = (pick % 6) * TAU / 6.0
-			mi.set_meta("variant", pick % TileKit3D.VARIANTS)
+			# so repeats look less obvious: each hex turned by a random multiple of 60°
+			# (seeded by its position, so it's the same every game) and a variant of the code tiles
+			var rng := RandomNumberGenerator.new()
+			rng.seed = hash(c)
+			mi.rotation.y = rng.randi_range(0, 5) * TAU / 6.0
+			mi.set_meta("variant", rng.randi_range(0, TileKit3D.VARIANTS - 1))
 			hexes[c] = mi
 
 func build_skoll() -> void:
@@ -214,6 +200,7 @@ func _process(delta: float) -> void:
 	if state == null:
 		return
 	pan_with_keys(delta)
+	rifts_now = shown_rifts()
 	update_board()
 	update_cities()
 	update_units()
@@ -241,41 +228,34 @@ func update_board() -> void:
 	var s := state
 	var landing := s.phase == GameState.Phase.LANDING
 	var dark := s.daughter.is_swallowed()
-	var rifts := shown_rifts()
 	for c in hexes:
 		var mi: MeshInstance3D = hexes[c]
+		var key: Variant = tile_key(c)
 		var tint := Color.WHITE
-		var mesh: ArrayMesh
-		var key: Variant = s.terrain_at(c) # which tile this hex shows (a land, or "ash")
-		if s.is_ash(c):
-			key = "ash"
-			mesh = tiles["ash"]
-		else:
-			mesh = tiles[s.terrain_at(c)][mi.get_meta("variant")]
-		if rifts.has(c):
-			key = "rift" # a rift you have found takes the place of its hex's tile
 		if not landing:
 			var land_owner := s.territory_owner(c)
 			if land_owner != null:
 				tint = tint.lerp(territory_colour_of.call(land_owner), 0.45)
 		if dark:
 			tint = tint.darkened(0.7)
-		if not hex_is_explored(c):
-			mesh = tiles["unseen"]
+		if key is String and key == "unseen":
 			tint = UNSEEN_COLOUR # never seen: a black block
 		elif not landing and not s.player_can_see(c):
-			tint = tint.darkened(0.45) # seen before, out of sight now
+			tint = tint.darkened(0.45) # seen before, out of sight now: the model, darkened
 		elif landing and not s.can_land_at(c):
 			tint = tint.darkened(0.6)
-		if mesh != tiles["unseen"] and tile_scenes.has(key):
+		if tile_scenes.has(key):
 			mi.mesh = null
 			show_model(mi, key, tint)
 		else:
 			show_model(mi, null, tint)
-			mi.mesh = mesh
+			if key is String:
+				mi.mesh = tiles[key] # "unseen" or "ash"
+			else:
+				mi.mesh = tiles[key][mi.get_meta("variant")]
 			mi.material_override = tile_material(tint)
 
-# Puts a real tile model on a hex (made once, remade only when its land changes),
+# Puts a tile model on a hex (made once, remade only when what the hex shows changes),
 # or takes it away (key null). The tint is laid over it like the made-in-code tiles.
 func show_model(mi: MeshInstance3D, key, tint: Color) -> void:
 	var model: Node3D = mi.get_node_or_null("Model")
@@ -286,109 +266,14 @@ func show_model(mi: MeshInstance3D, key, tint: Color) -> void:
 	if key == null:
 		return
 	if model == null:
-		model = make_tile_model(key, mi.get_meta("variant"))
+		model = tile_scenes[key].instantiate()
+		model.scale = Vector3.ONE * HEX_RADIUS # the models are already sized for hexes 1.0 apart
 		model.name = "Model"
 		model.set_meta("key", key)
 		mi.add_child(model)
 	var overlay := tint_overlay(tint)
 	for part in model.find_children("*", "GeometryInstance3D", true, false):
 		(part as GeometryInstance3D).material_overlay = overlay
-
-# A real tile model, and for dressed lands its props (pines on forest, grass on plains).
-func make_tile_model(key, variant: int) -> Node3D:
-	var holder := Node3D.new()
-	var base_key = key
-	var dress: Array = DRESSING.get(key, [])
-	if not dress.is_empty() and dress[0] != "" and tile_scenes.has(Terrain.NAMES.find(String(dress[0]).capitalize())):
-		base_key = Terrain.NAMES.find(String(dress[0]).capitalize())
-	var base: Node3D = tile_scenes[base_key].instantiate()
-	holder.add_child(base)
-	fit_to_hex(base, MOUNTAIN_STRETCH if key is int and key == Terrain.Type.MOUNTAINS else 1.0)
-	restyle(base, key)
-	if key is String and key == "rift":
-		# sink the rift so its rim is level with the grass on the hexes around it
-		var h := model_bounds(base).size.y * base.scale.y
-		base.position.y -= h * RIFT_RIM - land_top(Terrain.Type.PLAINS)
-	if dress.is_empty():
-		return holder
-	var count: int = dress[2]
-	if key == Terrain.Type.PLAINS and variant != 0:
-		count = 0 # grass on one plains hex in three
-	var top := land_top(Terrain.Type.PLAINS)
-	for i in count:
-		var angle := TAU * (i + 0.3 * variant) / maxf(count, 1.0) + 0.6
-		var spot := Vector3(cos(angle), 0, sin(angle)) * float(dress[4])
-		var prop := place_scaled(dress[1], spot + Vector3(0, top, 0), float(dress[3]) * (0.85 + 0.1 * ((i + variant) % 3)), "height")
-		prop.rotation.y = angle * 3.0
-		holder.add_child(prop)
-	return holder
-
-# Swaps the kit's flat colours for textured ones: grass on the tops, rock on the sides, shiny water.
-var restyled := {} # [land, kit material name] -> material
-func restyle(model: Node3D, land) -> void:
-	for mi in model.find_children("*", "MeshInstance3D", true, false):
-		var m := mi as MeshInstance3D
-		for i in m.mesh.get_surface_count():
-			var old := m.mesh.surface_get_material(i)
-			if old == null:
-				continue
-			var key := [land, old.resource_name]
-			if not restyled.has(key):
-				restyled[key] = restyled_material(land, old.resource_name)
-			if restyled[key] != null:
-				m.set_surface_override_material(i, restyled[key])
-
-func restyled_material(land, kit_name: String) -> Material:
-	var m := StandardMaterial3D.new()
-	m.roughness = 0.95
-	m.uv1_triplanar = true
-	m.uv1_world_triplanar = true
-	m.uv1_scale = Vector3.ONE * TEXTURE_SCALE
-	match kit_name:
-		"Kit grass", "Kit forest floor":
-			m.albedo_texture = GRASS_TEXTURE
-			m.albedo_color = GRASS_SHADE.get(land, Color.WHITE)
-		"Kit cliff", "Kit stone", "Kit shore":
-			m.albedo_texture = CLIFF_TEXTURE
-			m.albedo_color = Color(0.9, 0.85, 0.8) if kit_name == "Kit cliff" else Color(1.3, 1.25, 1.15)
-		"Kit water":
-			m.uv1_triplanar = false
-			m.albedo_color = Color(0.08, 0.2, 0.3)
-			m.roughness = 0.12
-			m.metallic = 0.4
-			m.metallic_specular = 0.8
-		_:
-			return null
-	return m
-
-# A new copy of a prop, scaled so its height (or its longest side) is "size", its bottom at "at".
-func place_scaled(scene: PackedScene, at: Vector3, size: float, by: String) -> Node3D:
-	if not prop_fits.has(scene):
-		var probe: Node3D = scene.instantiate()
-		var box := model_bounds(probe)
-		probe.free()
-		prop_fits[scene] = box
-	var b: AABB = prop_fits[scene]
-	var measure := b.size.y if by == "height" else maxf(b.size.x, b.size.z)
-	var k := size / measure if measure > 0.0 else 1.0
-	var node: Node3D = scene.instantiate()
-	var holder := Node3D.new()
-	holder.add_child(node)
-	node.scale = Vector3.ONE * k
-	var c := b.get_center()
-	node.position = Vector3(-c.x * k, -b.position.y * k, -c.z * k)
-	holder.position = at
-	return holder
-
-# Scales a model so it is as wide as one hex and stands on the ground ("stretch" makes it taller).
-func fit_to_hex(model: Node3D, stretch := 1.0) -> void:
-	var box := model_bounds(model)
-	var widest := maxf(box.size.x, box.size.z)
-	var k := 2.0 * TileKit3D.RADIUS / widest if widest > 0.0 else 1.0
-	model.scale = Vector3(k, k * stretch, k)
-	model.rotation.y = TILE_MODEL_YAW
-	var centre := box.get_center()
-	model.position = Vector3(-centre.x * k, -box.position.y * k * stretch, -centre.z * k)
 
 func tint_overlay(tint: Color) -> StandardMaterial3D:
 	if tint == Color.WHITE:
@@ -401,15 +286,13 @@ func tint_overlay(tint: Color) -> StandardMaterial3D:
 		overlays[tint] = m
 	return overlays[tint]
 
+# Whose city: a banner in the owner's colour on each settlement you've found.
 func update_cities() -> void:
 	var used := 0
-	var houses := 0
 	for f in state.factions:
 		if f.city_pos == NO_CELL or not state.player_has_explored(f.city_pos):
 			continue
-		var top := cell_position(f.city_pos) + Vector3(0, hex_top(f.city_pos), 0)
-		# whose city: a banner in their colour at the longhouse's corner
-		var flag_at := top + Vector3(0.62, 0, 0.12)
+		var flag_at := cell_position(f.city_pos) + Vector3(0.55, hex_top(f.city_pos), 0.3)
 		var pole := pooled(pole_nodes, used, pole_mesh)
 		pole.material_override = material(Color(0.3, 0.22, 0.15))
 		pole.position = flag_at + Vector3(0, pole_mesh.height / 2.0, 0)
@@ -417,28 +300,8 @@ func update_cities() -> void:
 		used += 1
 		cloth.material_override = material(colour_of.call(f))
 		cloth.position = flag_at + Vector3(city_mesh.size.x / 2.0, pole_mesh.height - city_mesh.size.y / 2.0, 0)
-		var house := pooled_prop(LONGHOUSE, houses, LONGHOUSE_LENGTH, "longest")
-		houses += 1
-		house.position = top + Vector3(0, 0, -0.2) # toward the back, leaving room for a unit
-		house.rotation.y = 0.45 # turned a little, so a carved gable end faces the camera
-		tint_prop(house, Color.WHITE if state.player_can_see(f.city_pos) else Color.WHITE.darkened(0.45))
 	hide_rest(city_nodes, used)
 	hide_rest(pole_nodes, used)
-	hide_props(LONGHOUSE, houses)
-	update_ruins()
-
-# Unsearched ruins you've seen (a runestone). Rifts you've found replace their tile (update_board).
-func update_ruins() -> void:
-	var s := state
-	var stones := 0
-	if s.phase != GameState.Phase.LANDING:
-		for r in s.ruins:
-			if not r["taken"] and s.player_has_explored(r["cell"]):
-				var stone := pooled_prop(RUNESTONE, stones, RUNESTONE_HEIGHT, "height")
-				stones += 1
-				stone.position = cell_position(r["cell"]) + Vector3(0.25, hex_top(r["cell"]), -0.2)
-				tint_prop(stone, Color.WHITE if s.player_can_see(r["cell"]) else Color.WHITE.darkened(0.45))
-	hide_props(RUNESTONE, stones)
 
 # Rifts the player knows about (drawn as their hex's tile by update_board).
 func shown_rifts() -> Array:
@@ -450,27 +313,6 @@ func shown_rifts() -> Array:
 	if w != NO_CELL and s.player_can_see(w) and not rifts.has(w):
 		rifts.append(w)
 	return rifts
-
-func pooled_prop(scene: PackedScene, i: int, size: float, by: String) -> Node3D:
-	if not prop_pools.has(scene):
-		prop_pools[scene] = []
-	var pool: Array = prop_pools[scene]
-	if i >= pool.size():
-		var node := place_scaled(scene, Vector3.ZERO, size, by)
-		add_child(node)
-		pool.append(node)
-	pool[i].visible = true
-	return pool[i]
-
-func hide_props(scene: PackedScene, used: int) -> void:
-	var pool: Array = prop_pools.get(scene, [])
-	for i in range(used, pool.size()):
-		pool[i].visible = false
-
-func tint_prop(node: Node3D, tint: Color) -> void:
-	var overlay := tint_overlay(tint)
-	for part in node.find_children("*", "GeometryInstance3D", true, false):
-		(part as GeometryInstance3D).material_overlay = overlay
 
 func update_units() -> void:
 	var used := 0
