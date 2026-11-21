@@ -29,6 +29,8 @@ func _initialize() -> void:
 	var near: Vector2i = s.player.city_pos + Vector2i(2, -1)
 	s.player.known_rifts[near] = true
 	s.player.add_unit(s.player.city_pos + Vector2i(-1, 1))
+	var other = s.factions[1] # another faction's army, to see its arm band in its own colour
+	other.add_unit(s.player.city_pos + Vector2i(1, 1))
 	for r in s.ruins:
 		if r["cell"].x >= 5 and r["cell"].x <= 10:
 			s.reveal_area(s.player, r["cell"], 1)
@@ -48,6 +50,14 @@ func _initialize() -> void:
 	v.camera.look_at(v.cell_position(s.player.city_pos) + Vector3(0, 0.35, 0), Vector3.UP)
 	for i in 5: await process_frame
 	await shot("tiles3d_city_side.png")
+	# units walk when they move: catch one halfway, then standing at the end
+	v.cam_target = v.cell_position(s.player.city_pos); v.cam_distance = 4.5; v.place_camera()
+	var walker = s.player.units[s.player.units.size() - 1]
+	walker.pos = walker.pos + Vector2i(1, 0)
+	for i in 8: await process_frame
+	await shot("tiles3d_unit_walk.png")
+	for i in 40: await process_frame
+	await shot("tiles3d_units.png")
 	v.cam_target = v.cell_position(near); v.place_camera()
 	for i in 5: await process_frame
 	await shot("tiles3d_rift.png")

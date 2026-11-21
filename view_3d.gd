@@ -8,8 +8,9 @@ extends Node3D
 # Each hex shows Nathan's tile model for its land (assets/models/tiles/: plains,
 # forest, mountain), or a low-poly tile made in code (tile_kit_3d.gd) for lands
 # with no model yet (hills, water, ash). A city's hex shows settlement.glb,
-# unsearched ruins ruins.glb, a rift you have found rift.glb. Units are small
-# cylinders (placeholders). Sköll is the real model (assets/models/units/skoll.glb).
+# unsearched ruins ruins.glb, a rift you have found rift.glb. Armies are
+# units/warrior.glb and scouts units/scout.glb (idle when still, walk when moving,
+# the blue arm band repainted in the faction's colour). Sköll is units/skoll.glb.
 
 const SKOLL_SCENE := preload("res://assets/models/units/skoll.glb")
 const NO_CELL := HexMap.NO_CELL
@@ -19,13 +20,20 @@ const HEX_RADIUS := 1.0
 # Nathan's tile models: pointy-top hexes, TILE_MODEL_RADIUS from centre to corner
 # (the rest of a hex is the gap between tiles), base at y = 0, ground at MODEL_GROUND.
 const TILE_MODELS := {
-	Terrain.Type.PLAINS: "plains", Terrain.Type.FOREST: "forest", Terrain.Type.MOUNTAINS: "mountain",
+	Terrain.Type.PLAINS: "plains", Terrain.Type.FOREST: "forest", Terrain.Type.HILLS: "hills",
+	Terrain.Type.MOUNTAINS: "mountain",
 	"settlement": "settlement", "ruins": "ruins", "rift": "rift",
 }
 const TILE_MODEL_PATH := "res://assets/models/tiles/%s.glb"
 const TILE_MODEL_RADIUS := 0.98 # made for hexes 1.0 apart (centre to corner), so scale = HEX_RADIUS
 const MODEL_GROUND := 0.39 # how high the ground is on the models (units and banners stand on it)
 const CITY_UNIT_OFFSET := Vector3(0.0, 0, 0.5) # a unit in its city stands at the front of the settlement
+const WARRIOR := preload("res://assets/models/units/warrior.glb")
+const SCOUT := preload("res://assets/models/units/scout.glb")
+const UNIT_BAND_SHADER := preload("res://assets/shaders/unit_band.gdshader")
+const UNIT_HEIGHT := 0.6 # about a third of a hex (a hex is 2.0 corner to corner)
+const UNIT_MODEL_HEIGHT := 1.8 # how tall the warrior and scout are in their own files
+const UNIT_STEP_TIME := 0.45 # seconds to walk one hex
 const SKOLL_LENGTH_IN_HEXES := 1.25 # nose to tail, in hex widths
 const SKOLL_STEP_TIME := 0.6 # seconds to walk one hex
 # Which way the model faces before we turn it: 0 if its nose points along +Z.
@@ -58,11 +66,10 @@ var tile_scenes := {} # tile key (a land, "settlement", "ruins", "rift") -> Pack
 var overlays := {} # tint -> material that multiplies a real model's colours by the tint
 var materials := {} # colour -> StandardMaterial3D, shared
 var tile_materials := {} # tint -> material that keeps the tile's own colours, shared
-var unit_nodes: Array[MeshInstance3D] = [] # reused each frame
+var figures := {} # Unit -> its model on the map (see update_units)
+var band_materials := {} # [scene, colour] -> ShaderMaterial, shared
 var city_nodes: Array[MeshInstance3D] = [] # a banner in the owner's colour on each city
 var pole_nodes: Array[MeshInstance3D] = [] # the banners' poles
-var army_mesh: CylinderMesh
-var scout_mesh: CylinderMesh
 var city_mesh: BoxMesh # the banner's cloth
 var pole_mesh: CylinderMesh
 
@@ -128,14 +135,6 @@ func build_meshes() -> void:
 		var path: String = TILE_MODEL_PATH % TILE_MODELS[key]
 		if ResourceLoader.exists(path):
 			tile_scenes[key] = load(path)
-	army_mesh = CylinderMesh.new()
-	army_mesh.top_radius = 0.15
-	army_mesh.bottom_radius = 0.18
-	army_mesh.height = 0.3
-	scout_mesh = CylinderMesh.new()
-	scout_mesh.top_radius = 0.09
-	scout_mesh.bottom_radius = 0.11
-	scout_mesh.height = 0.2
 	city_mesh = BoxMesh.new()
 	city_mesh.size = Vector3(0.2, 0.26, 0.02)
 	pole_mesh = CylinderMesh.new()
@@ -203,7 +202,7 @@ func _process(delta: float) -> void:
 	rifts_now = shown_rifts()
 	update_board()
 	update_cities()
-	update_units()
+	update_units(delta)
 	update_skoll(delta)
 
 func material(colour: Color) -> StandardMaterial3D:
@@ -314,25 +313,95 @@ func shown_rifts() -> Array:
 		rifts.append(w)
 	return rifts
 
-func update_units() -> void:
-	var used := 0
+# Armies and scouts: one animated model per unit you can see. When a unit's hex
+# changes it walks there (walk animation), then stands (idle).
+func update_units(delta: float) -> void:
+	var seen := {}
 	for f in state.factions:
 		for u in f.units:
 			if f != state.player and not state.player_can_see(u.pos):
 				continue # hidden by fog of war
-			var mesh: CylinderMesh = scout_mesh if u.is_scout() else army_mesh
-			var mi := pooled(unit_nodes, used, mesh)
-			used += 1
+			seen[u] = true
+			var fig: Node3D = figures.get(u)
+			if fig == null or fig.get_meta("scout") != u.is_scout():
+				if fig != null:
+					fig.queue_free()
+				fig = make_figure(u.is_scout())
+				figures[u] = fig
 			var col: Color = colour_of.call(f)
 			if f == state.player and u.moves <= 0:
 				col = col.darkened(0.4) # dim = already moved, like the 2D view
-			mi.material_override = material(col)
-			var lift := hex_top(u.pos)
-			var beside := Vector3.ZERO
+			paint_band(fig, col)
+			var target := cell_position(u.pos) + Vector3(0, hex_top(u.pos), 0)
 			if state.is_city(u.pos):
-				beside = CITY_UNIT_OFFSET # standing in its city: next to the longhouse
-			mi.position = cell_position(u.pos) + beside + Vector3(0, lift + mesh.height / 2.0, 0)
-	hide_rest(unit_nodes, used)
+				target += CITY_UNIT_OFFSET # standing in its city: at the front of the settlement
+			walk_figure(fig, u.pos, target, delta)
+	for u in figures.keys():
+		if not seen.has(u):
+			figures[u].queue_free()
+			figures.erase(u)
+
+func make_figure(is_scout: bool) -> Node3D:
+	var fig: Node3D = (SCOUT if is_scout else WARRIOR).instantiate()
+	fig.scale = Vector3.ONE * UNIT_HEIGHT / UNIT_MODEL_HEIGHT
+	fig.set_meta("scout", is_scout)
+	fig.set_meta("cell", NO_CELL)
+	fig.set_meta("walk", 0.0)
+	var anim: AnimationPlayer = fig.find_child("AnimationPlayer", true, false)
+	for anim_name in ["idle", "walk"]:
+		if anim and anim.has_animation(anim_name):
+			anim.get_animation(anim_name).loop_mode = Animation.LOOP_LINEAR
+	add_child(fig)
+	fig.rotation.y = randf() * TAU # (until it first walks somewhere)
+	return fig
+
+# Repaints the blue arm band in the faction's colour (a shared material per colour).
+func paint_band(fig: Node3D, col: Color) -> void:
+	if fig.get_meta("band", Color.TRANSPARENT) == col:
+		return
+	fig.set_meta("band", col)
+	for mi in fig.find_children("*", "MeshInstance3D", true, false):
+		var m := mi as MeshInstance3D
+		for i in m.mesh.get_surface_count():
+			var own := m.mesh.surface_get_material(i) as StandardMaterial3D
+			if own == null:
+				continue
+			var key := [own, col]
+			if not band_materials.has(key):
+				var sm := ShaderMaterial.new()
+				sm.shader = UNIT_BAND_SHADER
+				sm.set_shader_parameter("albedo_tex", own.albedo_texture)
+				sm.set_shader_parameter("band_colour", col)
+				band_materials[key] = sm
+			m.set_surface_override_material(i, band_materials[key])
+
+# Stands a unit's model on its hex, or walks it there if the unit has just moved.
+func walk_figure(fig: Node3D, cell: Vector2i, target: Vector3, delta: float) -> void:
+	var anim: AnimationPlayer = fig.find_child("AnimationPlayer", true, false)
+	var from_cell: Vector2i = fig.get_meta("cell")
+	if from_cell == NO_CELL:
+		fig.position = target # just came into view
+	elif from_cell != cell:
+		fig.set_meta("from", fig.position)
+		var total := UNIT_STEP_TIME * maxi(1, HexMap.hex_distance(from_cell, cell))
+		fig.set_meta("walk", total)
+		fig.set_meta("walk_total", total)
+	fig.set_meta("cell", cell)
+	var left: float = fig.get_meta("walk")
+	var next_anim := "idle"
+	if left > 0.0:
+		left = maxf(0.0, left - delta)
+		fig.set_meta("walk", left)
+		var from: Vector3 = fig.get_meta("from")
+		fig.position = from.lerp(target, 1.0 - left / float(fig.get_meta("walk_total")))
+		var dir := target - from
+		if Vector2(dir.x, dir.z).length() > 0.001:
+			fig.rotation.y = atan2(dir.x, dir.z)
+		next_anim = "walk"
+	else:
+		fig.position = target
+	if anim and anim.current_animation != next_anim and anim.has_animation(next_anim):
+		anim.play(next_anim, 0.2)
 
 # Reuses the i-th node of a pool (making it if needed) instead of making new ones every frame.
 func pooled(pool: Array[MeshInstance3D], i: int, mesh: Mesh) -> MeshInstance3D:
