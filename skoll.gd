@@ -37,7 +37,9 @@ const RIFT_TURN := 2 # the turn the rifts are first rolled
 const RIFT_MIN_CITY_DISTANCE := 4 # rifts stay at least this far from every city (was 3: he came out one step from a city's walls)
 const RIFT_MAX_CITY_DISTANCE := 7 # ...and at most this far from the city they belong to
 const SIGHT_RANGE := 2 # fog of war: he only sees this far; a rogue Daughter further away is hidden from him
-const SPRINT := 2 # hexes a turn he runs when hunting her in the open (she runs 1)
+const SPEED := 2 # hexes a turn he walks toward the city he hunts (was 1; Nathan's playtest: "he isn't scary anymore")
+const RAGE_SPEED := 3 # once Sunna has risen he is mortal but enraged: he runs this fast at her city
+const SPRINT := 3 # hexes a turn he runs when hunting her in the open (she runs 1; was 2, kept faster than SPEED)
 
 # The GameState (game_state.gd). A "weak" link: the game keeps this object alive,
 # but this object doesn't keep the game alive, so Godot can free both later.
@@ -101,25 +103,31 @@ func take_turn() -> void:
 		pick_target()
 	if target == null:
 		return
-	if HexMap.is_neighbour(pos, target.city_pos):
-		attack_city(target)
-		return
-	# Step to the neighbouring hex that gets closest to the target city.
-	var best := HexMap.NO_CELL
-	var best_d := 999
-	for c in HexMap.neighbours(pos):
-		if game.is_city(c):
-			continue
-		var d := HexMap.hex_distance(c, target.city_pos)
-		if d < best_d:
-			best_d = d
-			best = c
-	if best == HexMap.NO_CELL:
-		return
-	var in_the_way: Unit = game.unit_at(best)
-	if in_the_way:
-		attack_unit(in_the_way)
-	else:
+	# He lopes SPEED hexes a turn toward the city he hunts. Reaching it, he
+	# attacks at once; a unit standing in his way stops him and he fights it.
+	for step in (RAGE_SPEED if game.daughter.is_risen() else SPEED):
+		if HexMap.is_neighbour(pos, target.city_pos):
+			attack_city(target)
+			return
+		var best := HexMap.NO_CELL
+		var best_d := 999
+		var best_free := false
+		for c in HexMap.neighbours(pos):
+			if game.is_city(c):
+				continue
+			var d := HexMap.hex_distance(c, target.city_pos)
+			var free: bool = game.unit_at(c) == null
+			# closest to the city first; at the same distance he goes round a unit rather than through it
+			if d < best_d or (d == best_d and free and not best_free):
+				best_d = d
+				best = c
+				best_free = free
+		if best == HexMap.NO_CELL:
+			return
+		var in_the_way: Unit = game.unit_at(best)
+		if in_the_way:
+			attack_unit(in_the_way)
+			return
 		pos = best
 
 # Sköll doesn't know who shelters the Daughter. He only finds out after
@@ -128,7 +136,7 @@ func attack_city(f: Faction) -> void:
 	var defence: int = game.city_defence(f)
 	var dealt: int = roundi(game.combat_damage(effective_strength(), defence) * CITY_DAMAGE)
 	var taken: int = game.combat_damage(defence, effective_strength())
-	var she_is_here: bool = game.daughter.shelters_with(f)
+	var she_is_here: bool = game.daughter.shelters_with(f) or game.daughter.risen_with(f)
 	f.city_hp -= dealt
 	if she_is_here and not knows_her:
 		knows_her = true

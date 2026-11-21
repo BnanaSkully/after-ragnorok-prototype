@@ -905,7 +905,7 @@ func draw_overlay() -> void:
 	if daughter.is_swallowed():
 		daughter_info = "Sköll swallowed %s. He is the sun now (Strength %d), but MORTAL: a combined force can kill him." % [SunDaughter.NAME, skoll.strength]
 	elif daughter.is_risen():
-		daughter_info = "%s has RISEN with %s. Sköll is mortal; the ash has stopped." % [SunDaughter.NAME, "you" if daughter.holder == player else "the " + daughter.holder.name]
+		daughter_info = "%s has RISEN with %s. Sköll is mortal but enraged and hunts her city: it must stand until turn %d." % [SunDaughter.NAME, "you" if daughter.holder == player else "the " + daughter.holder.name, GameState.END_TURN]
 	elif daughter.holder != null:
 		var note := "(Sköll knows: he hunts her city)" if skoll.knows_her else "(Sköll doesn't know which city)"
 		if daughter.holder == player and s.turn >= GameState.RISE_TURN:

@@ -89,6 +89,8 @@ func _initialize() -> void:
 		var was_request = s.has_pending_choice() and s.pending_choices[0]["title"].begins_with("SUNNA")
 		if was_request:
 			var refuse := asked.size() == 1 # refuse the first, grant the rest (refusing twice would drive her out)
+			if not refuse and not s.can_afford(s.pending_choices[0]["options"][0]["effects"]):
+				refuse = true # (can't grant it, e.g. a guard with no army left: the option is greyed out)
 			s.answer_choice(1 if refuse else 0)
 			var expect = clampi(fav_before + (SunDaughter.REQUEST_REFUSED if refuse else SunDaughter.REQUEST_GRANTED), 0, SunDaughter.MAX_FAVOUR)
 			if s.player.favour != expect: print("   BAD: answering the request changed her Favour %d -> %d, expected %d" % [fav_before, s.player.favour, expect])
@@ -100,7 +102,7 @@ func _initialize() -> void:
 	s.player.favour = SunDaughter.RISE_FAVOUR; sk.strength = 20; s.skoll.active = true
 	var ash_before = s.ash.size()
 	while s.turn < GameState.RISE_TURN + 1 and not s.daughter.is_risen(): play_turn(s)
-	print("   turn %d, her Favour %d: risen=%s with you=%s; Sköll mortal=%s, Strength %d (expect %d)" % [s.turn, s.player.favour, s.daughter.is_risen(), s.daughter.risen_with(s.player), sk.is_mortal(), sk.strength, Skoll.STRENGTH])
+	print("   turn %d, her Favour %d: risen=%s with you=%s; Sköll mortal=%s, Strength %d (expect 20: he keeps it, enraged), knows her=%s" % [s.turn, s.player.favour, s.daughter.is_risen(), s.daughter.risen_with(s.player), sk.is_mortal(), sk.strength, sk.knows_her])
 	var parts = s.food_parts(s.player).filter(func(p): return "risen" in p[0])
 	s.spread_ash(Vector2i(0, 0))
 	print("   her gift: %s; ash spreads after she rose: %s (expect false)" % [parts, s.ash.size() != ash_before])
