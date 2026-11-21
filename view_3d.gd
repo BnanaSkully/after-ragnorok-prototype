@@ -22,15 +22,31 @@ const HEX_RADIUS := 1.0
 const TILE_MODELS := {
 	Terrain.Type.PLAINS: "plains", Terrain.Type.FOREST: "forest", Terrain.Type.HILLS: "hills",
 	Terrain.Type.MOUNTAINS: "mountain",
+	"plains_living": "plains_living", "forest_living": "forest_living",
 	"settlement": "settlement", "ruins": "ruins", "rift": "rift",
 }
 const TILE_MODEL_PATH := "res://assets/models/tiles/%s.glb"
 const TILE_MODEL_RADIUS := 0.98 # made for hexes 1.0 apart (centre to corner), so scale = HEX_RADIUS
+# Plains and forest come in two looks: living (green) and ashen (grey, the plain
+# plains.glb / forest.glb). A hex looks ashen on dead land, next to it, or within
+# ASHEN_RIFT_RANGE of a rift the PLAYER has found (Faction.known_rifts only, so the
+# ground never gives away a hidden rift).
+const ASHEN_RIFT_RANGE := 2
+const LIVING_MODELS := {Terrain.Type.PLAINS: "plains_living", Terrain.Type.FOREST: "forest_living"}
+const DEAD_LAND_TINT := Color(0.62, 0.6, 0.6) # dead land (under ash) is the ashen look, greyed further
+# The grass tufts in the tile files carry no colour (Blender's colour didn't export), so
+# they showed pure white ("glints"). Painted here until the files carry their own colour.
+const TUFT_COLOURS := {"Plains tuft": Color(0.36, 0.4, 0.22), "Ash tuft": Color(0.4, 0.39, 0.37)}
 const MODEL_GROUND := 0.39 # how high the ground is on the models (units and banners stand on it)
 const CITY_UNIT_OFFSET := Vector3(0.0, 0, 0.5) # a unit in its city stands at the front of the settlement
 const WARRIOR := preload("res://assets/models/units/warrior.glb")
 const SCOUT := preload("res://assets/models/units/scout.glb")
 const UNIT_BAND_SHADER := preload("res://assets/shaders/unit_band.gdshader")
+const WATER_SHADER := preload("res://assets/shaders/water.gdshader")
+# Water hexes get no tile: one water plane lies under the whole map at WATER_LEVEL, below
+# the land tiles' ground (MODEL_GROUND) and the never-seen blocks' top, so neighbouring
+# water hexes read as one lake or sea and the land tiles' sides are the shore.
+const WATER_LEVEL := 0.25
 const UNIT_HEIGHT := 0.6 # about a third of a hex (a hex is 2.0 corner to corner)
 const UNIT_MODEL_HEIGHT := 1.8 # how tall the warrior and scout are in their own files
 const UNIT_STEP_TIME := 0.45 # seconds to walk one hex
@@ -47,6 +63,7 @@ const PAN_SPEED := 0.9 # map units a second, per unit of zoom distance
 
 # Never-seen hexes, as in the 2D view
 const UNSEEN_COLOUR := Color(0.03, 0.03, 0.04)
+const FOG_MEMORY_DARKEN := 0.6 # seen-before hexes out of sight: about 40% as bright
 
 var state: GameState # set by main.gd before the view is added
 var terrain_colours: Array = [] # set by main.gd (its TERRAIN_COLOURS)
@@ -72,6 +89,7 @@ var city_nodes: Array[MeshInstance3D] = [] # a banner in the owner's colour on e
 var pole_nodes: Array[MeshInstance3D] = [] # the banners' poles
 var city_mesh: BoxMesh # the banner's cloth
 var pole_mesh: CylinderMesh
+var water_shade_mesh: ArrayMesh # a flat hex laid on the water to darken it (fog, territory)
 
 var skoll: Node3D
 var skoll_anim: AnimationPlayer
@@ -86,6 +104,7 @@ func _ready() -> void:
 	$Sun.rotation_degrees = Vector3(-50, -30, 0) # low sun from the upper left, for shadows
 	build_meshes()
 	build_board()
+	build_water()
 	build_skoll()
 	# start over the middle of the map, nudged right so the side panel doesn't cover it
 	var last := cell_position(Vector2i(HexMap.COLS - 1, HexMap.ROWS - 1))
@@ -101,12 +120,13 @@ func cell_position(cell: Vector2i) -> Vector3:
 func hex_top(cell: Vector2i) -> float:
 	if tile_scenes.has(tile_key(cell)):
 		return MODEL_GROUND * HEX_RADIUS
-	if not hex_is_explored(cell) or state.is_ash(cell):
+	if not hex_is_explored(cell):
 		return TileKit3D.top_height(Terrain.Type.PLAINS)
 	return TileKit3D.top_height(state.terrain_at(cell))
 
 # Which tile a hex shows: "unseen", a city ("settlement"), unsearched ruins, a rift you
-# have found, "ash", or its land (a Terrain.Type).
+# have found, or its land (a Terrain.Type; plains and forest away from ash and known
+# rifts show their living look instead, see is_ashen). Dead land shows the ashen look.
 func tile_key(c: Vector2i) -> Variant:
 	var s := state
 	if not hex_is_explored(c):
@@ -120,9 +140,23 @@ func tile_key(c: Vector2i) -> Variant:
 				return "ruins"
 		if rifts_now.has(c):
 			return "rift"
-	if s.is_ash(c):
-		return "ash"
-	return s.terrain_at(c)
+	var land := s.terrain_at(c)
+	if LIVING_MODELS.has(land) and not is_ashen(c):
+		return LIVING_MODELS[land]
+	return land
+
+# Grey, dying ground: dead land, the hexes next to it, and around the rifts the player
+# has found. Only Faction.known_rifts counts, so ash never gives away a hidden rift.
+func is_ashen(c: Vector2i) -> bool:
+	var s := state
+	if s.phase == GameState.Phase.LANDING:
+		return false
+	if s.is_ash(c) or HexMap.neighbours(c).any(func(n): return s.is_ash(n)):
+		return true
+	for rift in s.player.known_rifts:
+		if HexMap.hex_distance(c, rift) <= ASHEN_RIFT_RANGE:
+			return true
+	return false
 
 func hex_is_explored(cell: Vector2i) -> bool:
 	return state.phase == GameState.Phase.LANDING or state.player_has_explored(cell)
@@ -157,6 +191,26 @@ func build_board() -> void:
 			mi.rotation.y = rng.randi_range(0, 5) * TAU / 6.0
 			mi.set_meta("variant", rng.randi_range(0, TileKit3D.VARIANTS - 1))
 			hexes[c] = mi
+
+# One plane of water under the whole map (and a hex past its edges).
+func build_water() -> void:
+	var last := cell_position(Vector2i(HexMap.COLS - 1, HexMap.ROWS - 1))
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(last.x + 4.0 * HEX_RADIUS, last.z + 4.0 * HEX_RADIUS)
+	plane.subdivide_width = 80 # enough corners for the waves to move
+	plane.subdivide_depth = 60
+	var m := ShaderMaterial.new()
+	m.shader = WATER_SHADER
+	var water := MeshInstance3D.new()
+	water.name = "Water"
+	water.mesh = plane
+	water.material_override = m
+	water.position = Vector3(last.x / 2.0, WATER_LEVEL, last.z / 2.0)
+	add_child(water)
+	# a full-size hex (no gap) so neighbouring darkened water hexes join up
+	var b := TileKit3D.Builder.new()
+	b.prism(HEX_RADIUS, 0.002, WATER_LEVEL + 0.03, Color.WHITE)
+	water_shade_mesh = b.commit()
 
 func build_skoll() -> void:
 	skoll = SKOLL_SCENE.instantiate()
@@ -235,21 +289,27 @@ func update_board() -> void:
 			var land_owner := s.territory_owner(c)
 			if land_owner != null:
 				tint = tint.lerp(territory_colour_of.call(land_owner), 0.45)
+		if not landing and s.is_ash(c):
+			tint = tint * DEAD_LAND_TINT
 		if dark:
 			tint = tint.darkened(0.7)
 		if key is String and key == "unseen":
 			tint = UNSEEN_COLOUR # never seen: a black block
 		elif not landing and not s.player_can_see(c):
-			tint = tint.darkened(0.45) # seen before, out of sight now: the model, darkened
+			tint = tint.darkened(FOG_MEMORY_DARKEN) # seen before, out of sight now: the model, darkened
 		elif landing and not s.can_land_at(c):
 			tint = tint.darkened(0.6)
 		if tile_scenes.has(key):
 			mi.mesh = null
 			show_model(mi, key, tint)
+		elif key is int and key == Terrain.Type.WATER:
+			show_model(mi, null, tint) # no tile: the water plane shows through
+			mi.mesh = null if tint == Color.WHITE else water_shade_mesh
+			mi.material_override = tint_overlay(tint) # darkens the water under it
 		else:
 			show_model(mi, null, tint)
 			if key is String:
-				mi.mesh = tiles[key] # "unseen" or "ash"
+				mi.mesh = tiles[key] # "unseen"
 			else:
 				mi.mesh = tiles[key][mi.get_meta("variant")]
 			mi.material_override = tile_material(tint)
@@ -258,7 +318,7 @@ func update_board() -> void:
 # or takes it away (key null). The tint is laid over it like the made-in-code tiles.
 func show_model(mi: MeshInstance3D, key, tint: Color) -> void:
 	var model: Node3D = mi.get_node_or_null("Model")
-	if model != null and (key == null or model.get_meta("key") != key):
+	if model != null and (key == null or var_to_str(model.get_meta("key")) != var_to_str(key)):
 		mi.remove_child(model)
 		model.queue_free()
 		model = null
@@ -269,10 +329,21 @@ func show_model(mi: MeshInstance3D, key, tint: Color) -> void:
 		model.scale = Vector3.ONE * HEX_RADIUS # the models are already sized for hexes 1.0 apart
 		model.name = "Model"
 		model.set_meta("key", key)
+		paint_tufts(model)
 		mi.add_child(model)
 	var overlay := tint_overlay(tint)
 	for part in model.find_children("*", "GeometryInstance3D", true, false):
 		(part as GeometryInstance3D).material_overlay = overlay
+
+func paint_tufts(model: Node3D) -> void:
+	for part in model.find_children("*", "MeshInstance3D", true, false):
+		var mesh: Mesh = (part as MeshInstance3D).mesh
+		for i in mesh.get_surface_count():
+			var mat := mesh.surface_get_material(i)
+			if mat != null and TUFT_COLOURS.has(mat.resource_name):
+				var paint := material(TUFT_COLOURS[mat.resource_name])
+				paint.cull_mode = BaseMaterial3D.CULL_DISABLED # thin blades: seen from both sides
+				(part as MeshInstance3D).set_surface_override_material(i, paint)
 
 func tint_overlay(tint: Color) -> StandardMaterial3D:
 	if tint == Color.WHITE:
