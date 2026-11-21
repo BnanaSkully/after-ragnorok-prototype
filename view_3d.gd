@@ -21,11 +21,17 @@ const HEX_RADIUS := 1.0
 # (the rest of a hex is the gap between tiles), base at y = 0, ground at MODEL_GROUND.
 const TILE_MODELS := {
 	Terrain.Type.PLAINS: "plains", Terrain.Type.FOREST: "forest", Terrain.Type.HILLS: "hills",
-	Terrain.Type.MOUNTAINS: "mountain",
 	"plains_living": "plains_living", "forest_living": "forest_living",
 	"settlement": "settlement", "ruins": "ruins", "rift": "rift",
 }
 const TILE_MODEL_PATH := "res://assets/models/tiles/%s.glb"
+# Mountains are built from peak props on a plain basalt hex base, so neighbouring
+# mountain hexes join into ranges (see make_mountain). Peaks: base at y = 0, sized in hex units.
+const PEAK_TALL := preload("res://assets/models/props/peak_tall.glb")
+const PEAK_MEDIUM := preload("res://assets/models/props/peak_medium.glb")
+const PEAK_LOW := preload("res://assets/models/props/peak_low.glb")
+const PEAK_CENTRE_SCALE := 0.85 # the middle peak of a hex in a range
+const PEAK_EDGE_SCALE := 0.8 # the peaks on the edge shared with another mountain hex
 const TILE_MODEL_RADIUS := 0.98 # made for hexes 1.0 apart (centre to corner), so scale = HEX_RADIUS
 # Plains and forest come in two looks: living (green) and ashen (grey, the plain
 # plains.glb / forest.glb). A hex looks ashen on dead land, next to it, or within
@@ -89,6 +95,7 @@ var city_nodes: Array[MeshInstance3D] = [] # a banner in the owner's colour on e
 var pole_nodes: Array[MeshInstance3D] = [] # the banners' poles
 var city_mesh: BoxMesh # the banner's cloth
 var pole_mesh: CylinderMesh
+var basalt_base: ArrayMesh # a plain hex base in the tiles' basalt cliff texture (under mountains)
 var water_shade_mesh: ArrayMesh # a flat hex laid on the water to darken it (fog, territory)
 
 var skoll: Node3D
@@ -118,7 +125,8 @@ func cell_position(cell: Vector2i) -> Vector3:
 
 # How high the ground is on a hex: the tile models are thicker than the code-made tiles.
 func hex_top(cell: Vector2i) -> float:
-	if tile_scenes.has(tile_key(cell)):
+	var key: Variant = tile_key(cell)
+	if tile_scenes.has(key) or is_mountain_key(key):
 		return MODEL_GROUND * HEX_RADIUS
 	if not hex_is_explored(cell):
 		return TileKit3D.top_height(Terrain.Type.PLAINS)
@@ -141,9 +149,28 @@ func tile_key(c: Vector2i) -> Variant:
 		if rifts_now.has(c):
 			return "rift"
 	var land := s.terrain_at(c)
+	if land == Terrain.Type.MOUNTAINS and basalt_base != null:
+		return mountain_key(c)
 	if LIVING_MODELS.has(land) and not is_ashen(c):
 		return LIVING_MODELS[land]
 	return land
+
+# A mountain hex's look depends on its mountain neighbours (only ones the player has
+# seen, so the shape of a range never gives away unexplored land): "mountain" alone,
+# "mountain+" in a range, then each shared edge whose peak this hex draws (the hex that
+# comes first in reading order draws it, so it is drawn once).
+func mountain_key(c: Vector2i) -> String:
+	var key := "mountain"
+	var edges := ""
+	for n in HexMap.neighbours(c):
+		if state.terrain_at(n) == Terrain.Type.MOUNTAINS and hex_is_explored(n):
+			key = "mountain+"
+			if n.y > c.y or (n.y == c.y and n.x > c.x):
+				edges += "|%d,%d" % [n.x, n.y]
+	return key + edges
+
+func is_mountain_key(key: Variant) -> bool:
+	return key is String and key.begins_with("mountain")
 
 # Grey, dying ground: dead land, the hexes next to it, and around the rifts the player
 # has found. Only Faction.known_rifts counts, so ash never gives away a hidden rift.
@@ -169,6 +196,7 @@ func build_meshes() -> void:
 		var path: String = TILE_MODEL_PATH % TILE_MODELS[key]
 		if ResourceLoader.exists(path):
 			tile_scenes[key] = load(path)
+	basalt_base = make_basalt_base()
 	city_mesh = BoxMesh.new()
 	city_mesh.size = Vector3(0.2, 0.26, 0.02)
 	pole_mesh = CylinderMesh.new()
@@ -299,9 +327,9 @@ func update_board() -> void:
 			tint = tint.darkened(FOG_MEMORY_DARKEN) # seen before, out of sight now: the model, darkened
 		elif landing and not s.can_land_at(c):
 			tint = tint.darkened(0.6)
-		if tile_scenes.has(key):
+		if tile_scenes.has(key) or is_mountain_key(key):
 			mi.mesh = null
-			show_model(mi, key, tint)
+			show_model(mi, key, tint, c)
 		elif key is int and key == Terrain.Type.WATER:
 			show_model(mi, null, tint) # no tile: the water plane shows through
 			mi.mesh = null if tint == Color.WHITE else water_shade_mesh
@@ -316,7 +344,7 @@ func update_board() -> void:
 
 # Puts a tile model on a hex (made once, remade only when what the hex shows changes),
 # or takes it away (key null). The tint is laid over it like the made-in-code tiles.
-func show_model(mi: MeshInstance3D, key, tint: Color) -> void:
+func show_model(mi: MeshInstance3D, key, tint: Color, cell := NO_CELL) -> void:
 	var model: Node3D = mi.get_node_or_null("Model")
 	if model != null and (key == null or var_to_str(model.get_meta("key")) != var_to_str(key)):
 		mi.remove_child(model)
@@ -325,7 +353,11 @@ func show_model(mi: MeshInstance3D, key, tint: Color) -> void:
 	if key == null:
 		return
 	if model == null:
-		model = tile_scenes[key].instantiate()
+		if is_mountain_key(key):
+			model = make_mountain(cell, key)
+			model.rotation.y = -mi.rotation.y # its peaks are placed by map direction
+		else:
+			model = tile_scenes[key].instantiate()
 		model.scale = Vector3.ONE * HEX_RADIUS # the models are already sized for hexes 1.0 apart
 		model.name = "Model"
 		model.set_meta("key", key)
@@ -334,6 +366,65 @@ func show_model(mi: MeshInstance3D, key, tint: Color) -> void:
 	var overlay := tint_overlay(tint)
 	for part in model.find_children("*", "GeometryInstance3D", true, false):
 		(part as GeometryInstance3D).material_overlay = overlay
+
+# A mountain hex: the basalt base, and on it one tall peak alone, or in a range a
+# medium peak in the middle plus a medium or low one on each shared edge it draws.
+# Every peak's turn and choice are seeded by where it stands, so the map looks the
+# same every time it is drawn.
+func make_mountain(c: Vector2i, key: String) -> Node3D:
+	var root := Node3D.new()
+	var base := MeshInstance3D.new()
+	base.mesh = basalt_base
+	root.add_child(base)
+	var ground := MODEL_GROUND
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([c, "peak"])
+	var centre: Node3D = (PEAK_MEDIUM if key.begins_with("mountain+") else PEAK_TALL).instantiate()
+	centre.position = Vector3(0, ground, 0)
+	centre.rotation.y = rng.randf() * TAU
+	if key.begins_with("mountain+"):
+		centre.scale = Vector3.ONE * PEAK_CENTRE_SCALE
+	root.add_child(centre)
+	var parts := key.split("|")
+	for i in range(1, parts.size()):
+		var xy := parts[i].split(",")
+		var n := Vector2i(int(xy[0]), int(xy[1]))
+		var edge_rng := RandomNumberGenerator.new()
+		edge_rng.seed = hash([c, n])
+		var peak: Node3D = (PEAK_MEDIUM if edge_rng.randf() < 0.5 else PEAK_LOW).instantiate()
+		var mid := (cell_position(n) - cell_position(c)) / 2.0 / HEX_RADIUS
+		peak.position = Vector3(mid.x, ground, mid.z)
+		peak.rotation.y = edge_rng.randf() * TAU
+		peak.scale = Vector3.ONE * PEAK_EDGE_SCALE
+		root.add_child(peak)
+	return root
+
+# The basalt base under mountains: the plains tile's shape with its grass top and
+# tufts swapped for the cliff texture its sides already use.
+func make_basalt_base() -> ArrayMesh:
+	var path := TILE_MODEL_PATH % "plains"
+	if not ResourceLoader.exists(path):
+		return null
+	var tile: Node3D = load(path).instantiate()
+	var result: ArrayMesh = null
+	for part in tile.find_children("*", "MeshInstance3D", true, false):
+		var mesh: Mesh = (part as MeshInstance3D).mesh
+		var basalt: Material = null
+		for i in mesh.get_surface_count():
+			if mesh.surface_get_material(i) != null and mesh.surface_get_material(i).resource_name == "Tile bedrock":
+				basalt = mesh.surface_get_material(i)
+		if basalt == null:
+			continue
+		result = ArrayMesh.new()
+		for i in mesh.get_surface_count():
+			var mat := mesh.surface_get_material(i)
+			if mat != null and TUFT_COLOURS.has(mat.resource_name):
+				continue # no grass on a mountain
+			result.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, mesh.surface_get_arrays(i))
+			result.surface_set_material(result.get_surface_count() - 1, basalt)
+		break
+	tile.free()
+	return result
 
 func paint_tufts(model: Node3D) -> void:
 	for part in model.find_children("*", "MeshInstance3D", true, false):
