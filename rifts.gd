@@ -24,13 +24,26 @@ const MAX_CITY_DISTANCE := 7 # ...and at most this far from the city they belong
 # "for now"): the roots of Yggdrasil stir and the rifts wake. SEASON_LENGTH
 # turns long, every SEASON_EVERY turns from SEASON_FIRST (turns 7-8, 14-15,
 # 21-22, 28-29, 35-36; 14 is Sköll's arrival on purpose). A message warns the
-# turn before. Nothing else happens in it yet: Rift Walkers (step 4) and
-# travelling between rifts (step 5) will use it.
+# turn before. When it begins, Rift Walkers crawl out (step 4, below);
+# travelling between rifts (step 5) will use it too.
 const SEASON_NAME := "the Root-tide" # placeholder name
 const SEASON_FIRST := 7
 const SEASON_EVERY := 7
 const SEASON_LENGTH := 2
 
+# Rift Walkers (full rifts step 4, the simple version Nathan picked;
+# rift_walker.gd): when the season begins, WALKERS_PER_SEASON crawl out of
+# every rift, onto a free hex next to it, up to MAX_WALKERS_PER_RIFT alive
+# from each rift. They stay until killed (more come each season). Every turn
+# each one may take a step (WANDER_CHANCE), never farther than WANDER_RANGE
+# from its rift, never into a city or onto a rift. Each one standing on a
+# faction's land costs that faction WALKER_FOOD Food a turn.
+const WALKERS_PER_SEASON := 1
+const MAX_WALKERS_PER_RIFT := 2
+const WANDER_RANGE := 3
+const WANDER_CHANCE := 0.5
+const WALKER_FOOD := 1
+const WALKER_HEAL := 2 # HP it heals in a turn nobody fought it
 # The GameState (game_state.gd). A "weak" link: the game keeps this object alive,
 # but this object doesn't keep the game alive, so Godot can free both later.
 var game: GameState:
@@ -40,6 +53,7 @@ var _game: WeakRef
 var cells: Array[Vector2i] = [] # the current rifts (hidden until found)
 var city := {} # rift hex -> name of the faction whose city that rift opened toward
 var revealed := HexMap.NO_CELL # the rift Sköll last came through (shown to whoever sees it)
+var walkers: Array[RiftWalker] = [] # the Rift Walkers out on the map
 
 func _init(p_game: GameState) -> void:
 	_game = weakref(p_game)
@@ -79,11 +93,77 @@ func announce_season() -> void:
 	elif season_on(t + 1):
 		game.add_message("The ground hums: %s begins next turn." % SEASON_NAME)
 
+# --- Rift Walkers ----------------------------------------------------------
+# The Walker standing on this hex, or null.
+func walker_at(cell: Vector2i) -> RiftWalker:
+	for w in walkers:
+		if w.pos == cell:
+			return w
+	return null
+
+# Food the Walkers on this faction's land cost it this turn.
+func walkers_on_land(f: Faction) -> int:
+	var n := 0
+	for w in walkers:
+		if game.territory_owner(w.pos) == f:
+			n += 1
+	return n
+
+# Can a Walker step onto (or come out on) this hex? Free, not a city, not a rift.
+func walker_may_stand(c: Vector2i) -> bool:
+	return HexMap.in_bounds(c) and not game.is_blocked(c) and not game.is_city(c) and not has(c)
+
+# The Walkers' part of a turn (GameState.end_turn, after Sköll): the season's
+# first turn brings new ones out; the others wander and heal; the player is
+# told when one wanders onto their land.
+func walkers_turn() -> void:
+	var t: int = game.turn
+	var old := walkers.duplicate()
+	for w in old:
+		if not w.acted and w.hp < RiftWalker.MAX_HP:
+			w.hp = mini(RiftWalker.MAX_HP, w.hp + WALKER_HEAL)
+		w.acted = false
+		if randf() < WANDER_CHANCE:
+			var options: Array[Vector2i] = []
+			for c in HexMap.neighbours(w.pos):
+				if walker_may_stand(c) and HexMap.hex_distance(c, w.home) <= WANDER_RANGE:
+					options.append(c)
+			if not options.is_empty():
+				w.pos = options.pick_random()
+	if season_on(t) and not season_on(t - 1):
+		var seen := 0
+		for rift in cells:
+			var out := walkers.filter(func(w): return w.home == rift).size()
+			for i in mini(WALKERS_PER_SEASON, MAX_WALKERS_PER_RIFT - out):
+				var spots: Array[Vector2i] = []
+				for c in HexMap.neighbours(rift):
+					if walker_may_stand(c):
+						spots.append(c)
+				if spots.is_empty():
+					break
+				var w := RiftWalker.new(spots.pick_random(), rift)
+				walkers.append(w)
+				if game.player.known_rifts.has(rift) or game.player_can_see(w.pos):
+					seen += 1
+		if seen > 0:
+			game.add_message("%s out of the rifts you know. They never attack first, but each one on your land eats %d Food a turn." % ["A Rift Walker crawls" if seen == 1 else "%d Rift Walkers crawl" % seen, WALKER_FOOD])
+	for w in walkers:
+		var land: Faction = game.territory_owner(w.pos)
+		var whose: String = land.name if land != null else ""
+		if land == game.player and w.on_land != whose:
+			game.add_message("A Rift Walker wandered onto your land: -%d Food a turn while it stays. Attack it to drive it off." % WALKER_FOOD)
+		w.on_land = whose
+
+# A Walker killed in a fight.
+func remove_walker(w: RiftWalker) -> void:
+	walkers.erase(w)
+
 # Forget every rift (a new game's Crossing).
 func clear() -> void:
 	cells.clear()
 	city.clear()
 	revealed = HexMap.NO_CELL
+	walkers.clear()
 
 # One rift per standing city: a random hex MIN_CITY_DISTANCE to
 # MAX_CITY_DISTANCE from that city and at least MIN_CITY_DISTANCE from every

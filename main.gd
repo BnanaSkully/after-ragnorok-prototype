@@ -1319,11 +1319,11 @@ func highlight_of(c: Vector2i, outpost_spots: Array[Vector2i]) -> Color:
 		var other := s.unit_at(c)
 		if daughter.is_rogue() and c == daughter.pos and s.player_can_see(c):
 			mark = Color(1.0, 0.95, 0.55) # persuade her
-		elif (s.skoll.is_at(c) or (other and other.faction != player)) and s.player_can_see(c):
+		elif (s.skoll.is_at(c) or (other and other.faction != player) or s.rifts.walker_at(c) != null) and s.player_can_see(c):
 			mark = Color(0.95, 0.45, 0.2) # something to attack
 		elif s.is_city(c) and c != player.city_pos:
 			mark = Color(0.95, 0.45, 0.2) # a city you could attack (it would become your tributary)
-		elif not other and not (s.is_city(c) and c != player.city_pos) and s.passable(c) and s.can_afford_move(selected, c):
+		elif not other and s.rifts.walker_at(c) == null and not (s.is_city(c) and c != player.city_pos) and s.passable(c) and s.can_afford_move(selected, c):
 			if s.closed_border(c):
 				mark = Color(0.75, 0.45, 0.55) # behind a closed border: entering declares war
 			elif s.zoc_blocks(player, selected.pos, c):
@@ -1515,6 +1515,12 @@ func draw_map() -> void:
 				draw_circle(uc, HexView2D.HEX_SIZE * 0.55, ring)
 				draw_circle(uc, HexView2D.HEX_SIZE * 0.45, col)
 			draw_hp_bar(uc + Vector2(0, HexView2D.HEX_SIZE * 0.62), u.hp)
+
+	# Rift Walkers you can see: a dark knot of roots with a cold blue rim.
+	for w in s.rifts.walkers:
+		if s.player_can_see(w.pos):
+			draw_walker(HexView2D.hex_center(w.pos))
+			draw_hp_bar(HexView2D.hex_center(w.pos) + Vector2(0, HexView2D.HEX_SIZE * 0.62), roundi(float(w.hp) / RiftWalker.MAX_HP * Unit.MAX_HP))
 
 	# The Sun's Daughter alone in the open: a bright sun on her hex.
 	if daughter.is_rogue() and s.player_can_see(daughter.pos):
@@ -2127,6 +2133,18 @@ func hex_tooltip(c: Vector2i) -> Array[String]:
 		if selected != null and u.faction != s.player and HexMap.is_neighbour(selected.pos, c) and not s.is_city(c):
 			var e: Vector2i = s.expected_combat(selected, u)
 			lines.append("   If your selected unit attacks: it deals about %d and takes about %d (of %d HP)." % [e.x, e.y, selected.hp])
+	var walker: RiftWalker = s.rifts.walker_at(c)
+	if walker != null and seen:
+		var line := "A Rift Walker, out of the roots of Yggdrasil: HP %d/%d, Strength %d" % [walker.hp, RiftWalker.MAX_HP, RiftWalker.STRENGTH]
+		if s.walker_defence(walker) != RiftWalker.STRENGTH:
+			line += ", defends at %d here" % s.walker_defence(walker)
+		lines.append(line)
+		var land_owner := s.territory_owner(c)
+		var eats := ("eating %d of your Food a turn" % Rifts.WALKER_FOOD) if land_owner == s.player else ("eating %d of the %s's Food a turn" % [Rifts.WALKER_FOOD, land_owner.name]) if land_owner != null else "on nobody's land, so it eats nothing"
+		lines.append("   It never attacks first and fights back if attacked. Now %s. Attacking it is never an act of war." % eats)
+		if selected != null and HexMap.is_neighbour(selected.pos, c):
+			var e: Vector2i = s.expected_walker_combat(selected, walker)
+			lines.append("   If your selected unit attacks: it deals about %d and takes about %d (of %d HP)." % [e.x, e.y, selected.hp])
 	if seen and s.daughter.is_rogue() and s.daughter.pos == c:
 		lines.append("%s, alone in the open. Move a unit onto her to persuade her (%d%%)." % [SunDaughter.NAME.capitalize(), roundi(s.daughter.persuade_chance(s.player) * 100)])
 	var city := s.city_owner(c)
@@ -2161,7 +2179,7 @@ func hex_tooltip(c: Vector2i) -> Array[String]:
 		var land_owner := s.territory_owner(c)
 		if land_owner != null and land_owner != s.player:
 			lines.append("%s land%s" % [land_owner.name, " (borders CLOSED to you: entering declares war)" if s.closed_border(c) else ""])
-	if selected != null and HexMap.is_neighbour(selected.pos, c) and s.unit_at(c) == null and not (s.is_city(c) and c != s.player.city_pos) and s.passable(c):
+	if selected != null and HexMap.is_neighbour(selected.pos, c) and s.unit_at(c) == null and walker == null and not (s.is_city(c) and c != s.player.city_pos) and s.passable(c):
 		var holder: Unit = s.zoc_holder(s.player, selected.pos)
 		if s.zoc_blocks(s.player, selected.pos, c):
 			lines.append("Zone of control: your unit is next to a %s army and can't slip past it to here. Attack it, step away, or stay." % holder.faction.name)
@@ -2191,6 +2209,17 @@ func draw_hp_bar(at: Vector2, hp: int) -> void:
 	draw_rect(Rect2(at - Vector2(w / 2 + 1, 1), Vector2(w + 2, 5)), Color(0.08, 0.08, 0.08))
 	var col := Color(0.85, 0.2, 0.15).lerp(Color(0.95, 0.85, 0.2), clampf(frac * 2.0, 0.0, 1.0)) if frac < 0.5 else Color(0.95, 0.85, 0.2).lerp(Color(0.3, 0.85, 0.3), (frac - 0.5) * 2.0)
 	draw_rect(Rect2(at - Vector2(w / 2, 0), Vector2(w * frac, 3)), col)
+
+# A Rift Walker: a dark knot of roots with a cold blue rim (the season's colour).
+func draw_walker(c: Vector2) -> void:
+	var r := HexView2D.HEX_SIZE * 0.5
+	draw_circle(c, r + 2.0, SEASON_COLOUR)
+	draw_circle(c, r, Color(0.08, 0.1, 0.16))
+	for i in 3: # three roots twisting out from the middle
+		var a := TAU * i / 3.0 + 0.4
+		var mid := c + Vector2.from_angle(a) * r * 0.45 + Vector2.from_angle(a + PI / 2) * r * 0.2
+		draw_polyline(PackedVector2Array([c, mid, c + Vector2.from_angle(a) * r * 0.85]), Color(SEASON_COLOUR, 0.85), 2.0)
+	draw_circle(c, r * 0.18, Color(0.75, 0.9, 1.0))
 
 # A rift in the void: a dark swirl.
 func draw_rift(rc: Vector2) -> void:

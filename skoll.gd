@@ -104,8 +104,8 @@ func take_turn() -> void:
 		var best_d := 999
 		var best_free := false
 		for c in HexMap.neighbours(pos):
-			if game.is_city(c):
-				continue
+			if game.is_city(c) or game.rifts.walker_at(c) != null:
+				continue # (Rift Walkers are creatures of the roots, like him: he lopes round them)
 			var d := HexMap.hex_distance(c, target.city_pos)
 			var free: bool = game.unit_at(c) == null
 			# closest to the city first; at the same distance he goes round a unit rather than through it

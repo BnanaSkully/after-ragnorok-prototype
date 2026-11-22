@@ -39,6 +39,11 @@ const TILE_MODEL_PATH := "res://assets/models/tiles/%s.glb"
 const SEASON_GLOW_COLOUR := Color(0.55, 0.75, 1.0) # the season: a cold blue light over each rift you can see
 const SEASON_GLOW_ENERGY := 6.0
 const SEASON_GLOW_RANGE := 3.0 # world units (a hex is about 1.7 across): lights the hexes around it too
+# Rift Walkers (rifts.gd): no model yet, so a figure made in code: three dark
+# roots twisting up round a cold blue glowing heart, on a blue ring.
+const WALKER_HEIGHT := 0.8 # a little shorter than a unit
+const WALKER_ROOT_COLOUR := Color(0.07, 0.08, 0.12)
+const WALKER_GLOW := 2.5 # how bright its heart and ring shine
 const OUTPOST := preload("res://assets/models/props/outpost.glb")
 const OUTPOST_OFFSET := Vector3(0.0, 0.0, -0.42)
 const PEAK_TALL := preload("res://assets/models/props/peak_tall.glb")
@@ -134,6 +139,7 @@ var overlays := {} # tint -> material that multiplies a real model's colours by 
 var materials := {} # colour -> StandardMaterial3D, shared
 var tile_materials := {} # tint -> material that keeps the tile's own colours, shared
 var figures := {} # Unit -> its model on the map (see update_units)
+var walker_figures := {} # RiftWalker -> its figure (update_walkers)
 var band_materials := {} # [scene, colour] -> ShaderMaterial, shared
 var glow_materials := {} # colour -> glowing unshaded material for the rings
 var peak_materials := {} # a peak's own material -> its duller copy
@@ -413,6 +419,7 @@ func _process(delta: float) -> void:
 	update_cities()
 	update_marks()
 	update_units(delta)
+	update_walkers(delta)
 	update_skoll(delta)
 	update_sunna(delta)
 	update_markers()
@@ -866,6 +873,60 @@ func update_units(delta: float) -> void:
 			figures[u].queue_free()
 			figures.erase(u)
 
+# One figure per Rift Walker you can see; it walks hex to hex like units.
+func update_walkers(delta: float) -> void:
+	var seen := {}
+	for w in state.rifts.walkers:
+		if not state.player_can_see(w.pos):
+			continue
+		seen[w] = true
+		var fig: Node3D = walker_figures.get(w)
+		if fig == null:
+			fig = make_walker_figure()
+			walker_figures[w] = fig
+		walk_figure(fig, w.pos, cell_position(w.pos) + Vector3(0, hex_top(w.pos), 0), delta)
+		fig.rotate_y(delta * 0.4) # it turns slowly, as if looking for something
+	for w in walker_figures.keys():
+		if not seen.has(w):
+			walker_figures[w].queue_free()
+			walker_figures.erase(w)
+
+func make_walker_figure() -> Node3D:
+	var fig := Node3D.new()
+	fig.set_meta("cell", NO_CELL)
+	fig.set_meta("walk", 0.0)
+	fig.set_meta("marker", SEASON_GLOW_COLOUR)
+	var root_mesh := CylinderMesh.new()
+	root_mesh.top_radius = 0.02
+	root_mesh.bottom_radius = 0.09
+	root_mesh.height = WALKER_HEIGHT
+	root_mesh.radial_segments = 6
+	for i in 3: # three roots leaning in, twisted round each other
+		var root := MeshInstance3D.new()
+		root.mesh = root_mesh
+		root.material_override = material(WALKER_ROOT_COLOUR)
+		var a := TAU * i / 3.0
+		root.position = Vector3(cos(a) * 0.12, WALKER_HEIGHT / 2.0, sin(a) * 0.12)
+		root.rotation = Vector3(sin(a) * 0.35, a, -cos(a) * 0.35)
+		fig.add_child(root)
+	var heart := MeshInstance3D.new()
+	var ball := SphereMesh.new()
+	ball.radius = 0.11
+	ball.height = 0.22
+	heart.mesh = ball
+	heart.material_override = glow_material(SEASON_GLOW_COLOUR, WALKER_GLOW)
+	heart.position = Vector3(0, WALKER_HEIGHT * 0.55, 0)
+	heart.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	fig.add_child(heart)
+	var ring := MeshInstance3D.new()
+	ring.mesh = unit_ring_mesh
+	ring.position = Vector3(0, 0.02, 0)
+	ring.material_override = glow_material(SEASON_GLOW_COLOUR, WALKER_GLOW * 0.6)
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	fig.add_child(ring)
+	add_child(fig)
+	return fig
+
 func make_figure(is_scout: bool) -> Node3D:
 	var fig: Node3D = (SCOUT if is_scout else WARRIOR).instantiate()
 	fig.scale = Vector3.ONE * UNIT_HEIGHT / UNIT_MODEL_HEIGHT
@@ -1023,6 +1084,8 @@ func update_markers() -> void:
 	var wanted := {}
 	for fig in figures.values():
 		wanted[fig] = [fig.get_meta("marker", Color.WHITE), UNIT_HEIGHT]
+	for fig in walker_figures.values():
+		wanted[fig] = [SEASON_GLOW_COLOUR, WALKER_HEIGHT]
 	wanted[skoll] = [SKOLL_MARKER, skoll_height]
 	wanted[sunna] = [SUNNA_MARKER, SUNNA_HEIGHT]
 	for node in wanted:
