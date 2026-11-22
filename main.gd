@@ -116,6 +116,9 @@ var badges := {} # "offer" / "request" / "popup" -> round red-badged Button
 var build_button: Button
 var scout_button: Button
 var outpost_button: Button
+var queue_army_button: Button # "Queue": adds an army to the city's production queue
+var queue_scout_button: Button
+var queue_box: VBoxContainer # the production queue (rebuilt by update_queue)
 var walls_button: Button # "City buildings...": opens the city buildings panel (walls, granary...)
 var build_info: Label
 var city_panel: PanelContainer
@@ -539,15 +542,84 @@ func build_build_panel() -> void:
 	var box := make_panel("build", "BUILD")
 	build_info = text_label(13, Color(0.8, 0.78, 0.7))
 	box.add_child(build_info)
-	build_button = panel_button("Army (%d)" % GameState.UNIT_COST, on_build_unit, box)
-	scout_button = panel_button("Scout (%d)" % GameState.SCOUT_COST, on_build_scout, box)
+	var row := buy_row(box)
+	build_button = panel_button("Army (%d)" % GameState.UNIT_COST, on_build_unit, row)
+	build_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	queue_army_button = panel_button("Queue", on_queue.bind("army"), row)
+	row = buy_row(box)
+	scout_button = panel_button("Scout (%d)" % GameState.SCOUT_COST, on_build_scout, row)
+	scout_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	queue_scout_button = panel_button("Queue", on_queue.bind("scout"), row)
 	outpost_button = panel_button("", on_outpost_button, box)
 	walls_button = panel_button("City buildings...", on_open_city, box)
 	trade_button = panel_button("Trade %s..." % SunDaughter.NAME, on_open_trade, box)
 	scout_button.tooltip_text = "A scout: 2 moves, sees 3 hexes, eats nothing, but Strength %d. Up to %d." % [Unit.SCOUT_STRENGTH, GameState.MAX_SCOUTS]
 	outpost_button.tooltip_text = "Found an outpost on a hex you can see, within %d of your city. Income by land: plains +2 Food, forest +1 Food +1 Industry, hills +2 Industry. An enemy at war can take it if nobody guards it." % GameState.OUTPOST_RANGE
 	walls_button.tooltip_text = "City buildings: walls, granary, workshop, watchtower, forge, barracks. Each costs Industry once and gives a permanent bonus."
+	var line := HSeparator.new()
+	line.add_theme_stylebox_override("separator", line_style())
+	box.add_child(line)
+	box.add_child(heading_label("QUEUE", 14))
+	queue_box = VBoxContainer.new()
+	queue_box.add_theme_constant_override("separation", 0)
+	box.add_child(queue_box)
 	trade_button.tooltip_text = "Offer %s to another people (from turn %d, while she shelters with you). Uses your diplomatic action." % [SunDaughter.NAME, SunDaughter.TRADE_TURN]
+
+func buy_row(parent: Node) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	parent.add_child(row)
+	return row
+
+# The production queue in the Build panel: what the city works on, how far
+# along it is, each item with an x to take it out, and Finish now.
+func update_queue(playing: bool) -> void:
+	for c in queue_box.get_children():
+		queue_box.remove_child(c)
+		c.queue_free()
+	var p := state.player
+	var head := buy_row(queue_box)
+	var info := text_label(13, Color(0.8, 0.78, 0.7))
+	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(info)
+	if p.queue.is_empty():
+		info.text = "Empty. Queue lets your city build over the next turns: each turn's Industry goes into the queue instead of your store."
+		return
+	var front := state.queue_front(p)
+	if front < 0:
+		info.text = "Waiting (%s): Industry goes to the store." % state.item_blocked(p, p.queue[0])
+	else:
+		var key: String = p.queue[front]
+		var turns := state.queue_turns(p)
+		info.text = "%s %d/%d, %s" % [state.item_name(key), mini(p.production, state.item_cost(key)), state.item_cost(key), "done in %d turn%s" % [turns, "" if turns == 1 else "s"] if turns > 0 else "no Industry coming in"]
+		var cost := state.hurry_cost(p)
+		var hurry := panel_button("Finish now (%d)" % cost, on_hurry, head, 13)
+		hurry.disabled = not playing or p.industry < cost
+		hurry.tooltip_text = "Pay the %d Industry the %s still needs from your store (%d) and finish it this turn." % [cost, state.item_name(key), p.industry]
+	for i in p.queue.size():
+		var key: String = p.queue[i]
+		var row := buy_row(queue_box)
+		var l := text_label(14, GOLD if i == front else TEXT, false)
+		var blocked := state.item_blocked(p, key)
+		l.text = "%d. %s (%d)%s" % [i + 1, state.item_name(key), state.item_cost(key), "  waits: %s" % blocked if blocked != "" else ""]
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(l)
+		var x := panel_button("×", on_unqueue.bind(i), row, 14)
+		x.flat = true
+		x.tooltip_text = "Take it out of the queue (the Industry already in stays for the next item; taking the last one out gives it back to your store)."
+		x.disabled = not playing
+
+func on_queue(key: String) -> void:
+	state.player_queue(key)
+	refresh()
+
+func on_unqueue(index: int) -> void:
+	state.player_unqueue(index)
+	refresh()
+
+func on_hurry() -> void:
+	state.player_hurry()
+	refresh()
 
 # --- Sunna panel -------------------------------------------------------------------------
 func build_sunna_panel() -> void:
@@ -719,7 +791,7 @@ func hide_popup() -> void:
 
 # The buttons that act in the game (disabled while a deal/trade/city panel is open).
 func all_game_buttons() -> Array[Button]:
-	var list: Array[Button] = [end_turn_button, build_button, scout_button, outpost_button, walls_button, trade_button, view_button]
+	var list: Array[Button] = [end_turn_button, build_button, scout_button, queue_army_button, queue_scout_button, outpost_button, walls_button, trade_button, view_button]
 	for buttons in faction_buttons.values():
 		for b in buttons.values():
 			list.append(b)
@@ -741,7 +813,14 @@ func update_buttons() -> void:
 		icon_buttons[key].queue_redraw()
 	var armies: int = state.army_count(p)
 	var cap: int = state.supply_cap(p)
-	build_info.text = "Industry %d stored, %+d a turn. Each build is bought at once." % [p.industry, state.industry_change(p) - state.tribute_amount(p)]
+	build_info.text = "Industry %d stored, %+d a turn." % [p.industry, state.industry_change(p) - state.tribute_amount(p)]
+	build_info.tooltip_text = "Buy at once with stored Industry, or Queue it: your city builds it over the next turns with each turn's Industry."
+	build_info.mouse_filter = Control.MOUSE_FILTER_PASS
+	for pair in [[queue_army_button, "army"], [queue_scout_button, "scout"]]:
+		var problem := state.queue_problem(p, pair[1])
+		pair[0].disabled = not playing or problem != ""
+		pair[0].tooltip_text = "Add to the production queue: your city builds it with the next turns' Industry." if problem == "" else "Can't queue: %s." % problem
+	update_queue(playing)
 	build_button.text = "Army (%d) %d/%d" % [GameState.UNIT_COST, armies, cap]
 	build_button.disabled = not playing or p.industry < GameState.UNIT_COST or armies >= cap
 	build_button.tooltip_text = "An army unit: Strength %d, 1 move, eats %d Food a turn. Supply %d/%d (%d + population, +%d with a Barracks).\nUpkeep: your first %d armies are free; this one would add %d Industry a turn (now %d)." % [p.strength, GameState.UNIT_FOOD_UPKEEP, armies, cap, GameState.SUPPLY_BASE, GameState.Buildings.BARRACKS_SUPPLY, GameState.FREE_ARMIES, state.next_army_upkeep(p), state.army_upkeep(p)]
@@ -843,14 +922,27 @@ func build_city_ui() -> void:
 	box.add_child(city_buttons)
 	city_panel.visible = false
 
-func add_city_option(text: String, enabled: bool, action: Callable) -> void:
+# One line of the city buildings panel; with a queue key it gets a Queue button too.
+func add_city_option(text: String, enabled: bool, action: Callable, queue_key := "") -> void:
+	var row := buy_row(city_buttons)
 	var b := Button.new()
 	b.text = text
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	b.add_theme_font_size_override("font_size", 15)
 	b.disabled = not enabled
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	b.pressed.connect(action)
-	city_buttons.add_child(b)
+	row.add_child(b)
+	if queue_key != "":
+		var problem := state.queue_problem(state.player, queue_key)
+		var q := panel_button("Queue", on_city_queue.bind(queue_key), row, 15)
+		q.disabled = problem != ""
+		q.tooltip_text = "Add to the production queue (Build panel)." if problem == "" else "Can't queue: %s." % problem
+
+func on_city_queue(key: String) -> void:
+	state.player_queue(key)
+	refresh() # (shows the message)
+	on_open_city() # stays open, so several can be queued
 
 func on_open_city() -> void:
 	if not state.can_act():
@@ -862,7 +954,7 @@ func on_open_city() -> void:
 	if p.walls >= GameState.MAX_WALLS:
 		add_city_option("Walls: complete (+%d defence)" % (GameState.MAX_WALLS * GameState.WALL_DEFENCE), false, func(): pass)
 	else:
-		add_city_option("Walls %d/%d (%d): +%d city defence" % [p.walls + 1, GameState.MAX_WALLS, GameState.WALL_COST, GameState.WALL_DEFENCE], p.industry >= GameState.WALL_COST, on_city_build.bind(func(): state.player_build_walls()))
+		add_city_option("Walls %d/%d (%d): +%d city defence" % [p.walls + 1, GameState.MAX_WALLS, GameState.WALL_COST, GameState.WALL_DEFENCE], p.industry >= GameState.WALL_COST, on_city_build.bind(func(): state.player_build_walls()), "walls")
 	for key in GameState.Buildings.LIST:
 		var info: Dictionary = GameState.Buildings.LIST[key]
 		if p.buildings.has(key):
@@ -871,7 +963,7 @@ func on_open_city() -> void:
 			var text := "%s (%d): %s" % [info["name"], info["cost"], info["text"]]
 			if p.industry < info["cost"]:
 				text += "  (you need %d Industry)" % info["cost"]
-			add_city_option(text, state.can_build_building(p, key), on_city_build.bind(func(): state.player_build_building(key)))
+			add_city_option(text, state.can_build_building(p, key), on_city_build.bind(func(): state.player_build_building(key)), key)
 	add_city_option("Never mind", true, close_city)
 	city_panel.size = Vector2.ZERO
 	city_panel.visible = true
