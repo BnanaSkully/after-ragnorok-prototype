@@ -13,6 +13,12 @@ extends Node3D
 # the blue arm band repainted in the faction's colour). Sköll is units/skoll.glb.
 
 const SKOLL_SCENE := preload("res://assets/models/units/skoll.glb")
+const SUNNA_SCENE := preload("res://assets/models/units/sunna.glb") # Nathan's model: walk, run
+const SUNNA_HEIGHT := 1.0 # as tall as a unit
+const SUNNA_STEP_TIME := 0.6 # seconds to walk one hex
+const SUNNA_LIGHT_COLOUR := Color(1.0, 0.78, 0.4) # warm gold, so her grey cloak stands out on ash and hills
+const SUNNA_LIGHT_ENERGY := 2.5
+const SUNNA_LIGHT_RANGE := 2.2
 const NO_CELL := HexMap.NO_CELL
 
 # --- Sizes (in 3D units; one hex is HEX_RADIUS from its centre to a corner) ---
@@ -129,6 +135,11 @@ var basalt_base: ArrayMesh # a plain hex base in the tiles' basalt cliff texture
 var water_shade_mesh: ArrayMesh # a flat hex laid on the water to darken it (fog, territory)
 
 var skoll: Node3D
+var sunna: Node3D # rogue Sunna, out in the open (hidden while she shelters in a city)
+var sunna_anim: AnimationPlayer
+var sunna_cell := NO_CELL
+var sunna_from := Vector3.ZERO
+var sunna_walk := 0.0 # seconds left walking to her hex
 var skoll_anim: AnimationPlayer
 var skoll_feet := 0.0 # how far below the model's origin its feet are (after scaling)
 var skoll_cell := NO_CELL # the hex the model is standing on (or walking to)
@@ -145,6 +156,7 @@ func _ready() -> void:
 	build_board()
 	build_water()
 	build_skoll()
+	build_sunna()
 	# start over the middle of the map, nudged right so the side panel doesn't cover it
 	var last := cell_position(Vector2i(HexMap.COLS - 1, HexMap.ROWS - 1))
 	cam_target = Vector3(last.x * 0.5 + 3.0, 0.0, last.z * 0.5)
@@ -377,6 +389,7 @@ func _process(delta: float) -> void:
 	update_marks()
 	update_units(delta)
 	update_skoll(delta)
+	update_sunna(delta)
 
 # A glowing, unshaded colour (the rings under units and round cities), shared per colour.
 func glow_material(colour: Color, glow: float) -> StandardMaterial3D:
@@ -868,6 +881,52 @@ func pooled(pool: Array[MeshInstance3D], i: int, mesh: Mesh) -> MeshInstance3D:
 func hide_rest(pool: Array[MeshInstance3D], used: int) -> void:
 	for i in range(used, pool.size()):
 		pool[i].visible = false
+
+# --- Sunna, when she has gone rogue: she walks over the land, lit warm gold --------
+func build_sunna() -> void:
+	sunna = SUNNA_SCENE.instantiate()
+	add_child(sunna)
+	var box := model_bounds(sunna)
+	sunna.scale = Vector3.ONE * (SUNNA_HEIGHT / box.size.y if box.size.y > 0.0 else 1.0)
+	sunna_anim = sunna.find_child("AnimationPlayer", true, false)
+	if sunna_anim and sunna_anim.has_animation("walk"):
+		sunna_anim.get_animation("walk").loop_mode = Animation.LOOP_LINEAR
+		sunna_anim.play("walk")
+	var lamp := OmniLight3D.new()
+	lamp.light_color = SUNNA_LIGHT_COLOUR
+	lamp.light_energy = SUNNA_LIGHT_ENERGY
+	lamp.omni_range = SUNNA_LIGHT_RANGE
+	lamp.top_level = true # placed by update_sunna, not scaled with her
+	lamp.name = "Light"
+	sunna.add_child(lamp)
+	sunna.visible = false
+
+# She is shown only while rogue and in your sight. She always walks (Nathan: "show
+# rogue Sunna with the walk animation"), toward her new hex when she moves.
+func update_sunna(delta: float) -> void:
+	var d := state.daughter
+	if not d.is_rogue() or not state.player_can_see(d.pos):
+		sunna.visible = false
+		sunna_cell = NO_CELL
+		return
+	var target := cell_position(d.pos) + Vector3(0, hex_top(d.pos), 0)
+	if not sunna.visible or sunna_cell == NO_CELL:
+		sunna.visible = true
+		sunna.position = target
+		sunna_walk = 0.0
+	elif d.pos != sunna_cell:
+		sunna_from = sunna.position
+		sunna_walk = SUNNA_STEP_TIME * maxi(1, HexMap.hex_distance(sunna_cell, d.pos))
+		sunna.set_meta("walk_total", sunna_walk)
+		var dir := target - sunna_from
+		sunna.rotation.y = atan2(dir.x, dir.z)
+	sunna_cell = d.pos
+	if sunna_walk > 0.0:
+		sunna_walk = maxf(0.0, sunna_walk - delta)
+		sunna.position = sunna_from.lerp(target, 1.0 - sunna_walk / float(sunna.get_meta("walk_total")))
+	else:
+		sunna.position = target
+	(sunna.get_node("Light") as Node3D).global_position = sunna.global_position + Vector3(0, SUNNA_HEIGHT * 0.9, 0.2)
 
 # --- Sköll: idle while standing, walks from hex to hex when he moves ---------------
 func update_skoll(delta: float) -> void:
