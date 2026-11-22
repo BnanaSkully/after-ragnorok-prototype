@@ -48,7 +48,7 @@ const DEAD_LAND_TINT := Color(0.62, 0.6, 0.6) # dead land (under ash) is the ash
 # they showed pure white ("glints"). Painted here until the files carry their own colour.
 const TUFT_COLOURS := {"Plains tuft": Color(0.36, 0.4, 0.22), "Ash tuft": Color(0.4, 0.39, 0.37)}
 const MODEL_GROUND := 0.39 # how high the ground is on the models (units and banners stand on it)
-const CITY_UNIT_OFFSET := Vector3(0.0, 0, 0.5) # a unit in its city stands at the front of the settlement
+const CITY_UNIT_OFFSET := Vector3(0.0, 0, 0.78) # a unit in its city stands in front of the longhouse, toward the camera (at 0.5 it was hidden inside it)
 const WARRIOR := preload("res://assets/models/units/warrior.glb")
 const SCOUT := preload("res://assets/models/units/scout.glb")
 const UNIT_BAND_SHADER := preload("res://assets/shaders/unit_band.gdshader")
@@ -60,7 +60,16 @@ const WATER_SHADER := preload("res://assets/shaders/water.gdshader")
 const WATER_LEVEL := 0.25
 const WATER_REACH := 1.04 # water hexes reach a little under the land tiles' edges
 const WATER_STEPS := 4
-const UNIT_HEIGHT := 0.6 # about a third of a hex (a hex is 2.0 corner to corner)
+const UNIT_HEIGHT := 1.0 # half a hex (a hex is 2.0 corner to corner): readable at full-map zoom
+const UNIT_RING_RADIUS := 0.34 # the glowing ring in the owner's colour under every unit
+const UNIT_RING_GLOW := 1.4
+const CITY_RING_RADIUS := 0.92 # the glowing ring round every city hex you've found
+const CITY_RING_GLOW := 1.2
+const CITY_LIGHT_COLOUR := Color(1.0, 0.68, 0.38) # warm firelight at each settlement
+const CITY_LIGHT_ENERGY := 2.0
+const CITY_LIGHT_RANGE := 2.6
+const PEAK_DULL := 0.7 # mountain snow: albedo x0.7 and a little greyer, so it doesn't sparkle
+const PEAK_SPECULAR := 0.15
 const UNIT_MODEL_HEIGHT := 1.8 # how tall the warrior and scout are in their own files
 const UNIT_STEP_TIME := 0.45 # seconds to walk one hex
 const SKOLL_LENGTH_IN_HEXES := 1.0 # nose to tail, in hex widths
@@ -104,6 +113,12 @@ var materials := {} # colour -> StandardMaterial3D, shared
 var tile_materials := {} # tint -> material that keeps the tile's own colours, shared
 var figures := {} # Unit -> its model on the map (see update_units)
 var band_materials := {} # [scene, colour] -> ShaderMaterial, shared
+var glow_materials := {} # colour -> glowing unshaded material for the rings
+var peak_materials := {} # a peak's own material -> its duller copy
+var unit_ring_mesh: TorusMesh
+var city_ring_mesh: TorusMesh
+var city_ring_nodes: Array[MeshInstance3D] = []
+var city_lights: Array[OmniLight3D] = []
 var city_nodes: Array[MeshInstance3D] = [] # a banner in the owner's colour on each city
 var pole_nodes: Array[MeshInstance3D] = [] # the banners' poles
 var city_mesh: BoxMesh # the banner's cloth
@@ -226,6 +241,16 @@ func build_meshes() -> void:
 	pole_mesh.bottom_radius = 0.015
 	pole_mesh.height = 0.75
 	pole_mesh.radial_segments = 5
+	unit_ring_mesh = TorusMesh.new()
+	unit_ring_mesh.inner_radius = UNIT_RING_RADIUS - 0.08
+	unit_ring_mesh.outer_radius = UNIT_RING_RADIUS
+	unit_ring_mesh.rings = 24
+	unit_ring_mesh.ring_segments = 6
+	city_ring_mesh = TorusMesh.new()
+	city_ring_mesh.inner_radius = CITY_RING_RADIUS - 0.05
+	city_ring_mesh.outer_radius = CITY_RING_RADIUS
+	city_ring_mesh.rings = 6 # six sides: it follows the hex's edge
+	city_ring_mesh.ring_segments = 6
 
 func build_board() -> void:
 	for row in HexMap.ROWS:
@@ -353,6 +378,19 @@ func _process(delta: float) -> void:
 	update_units(delta)
 	update_skoll(delta)
 
+# A glowing, unshaded colour (the rings under units and round cities), shared per colour.
+func glow_material(colour: Color, glow: float) -> StandardMaterial3D:
+	var key := [colour, glow]
+	if not glow_materials.has(key):
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.albedo_color = colour
+		m.emission_enabled = true
+		m.emission = colour
+		m.emission_energy_multiplier = glow
+		glow_materials[key] = m
+	return glow_materials[key]
+
 func material(colour: Color) -> StandardMaterial3D:
 	if not materials.has(colour):
 		var m := StandardMaterial3D.new()
@@ -463,7 +501,29 @@ func make_mountain(c: Vector2i, key: String) -> Node3D:
 		peak.rotation.y = edge_rng.randf() * TAU
 		peak.scale = Vector3.ONE * PEAK_EDGE_SCALE
 		root.add_child(peak)
+	dull_peaks(root)
 	return root
+
+# The peaks' snow is bright white in the files and sparkles at night: a shared duller,
+# less shiny copy of each of their materials.
+func dull_peaks(root: Node3D) -> void:
+	for mi in root.find_children("*", "MeshInstance3D", true, false):
+		var m := mi as MeshInstance3D
+		if m.mesh == basalt_base:
+			continue
+		for i in m.mesh.get_surface_count():
+			var own := m.mesh.surface_get_material(i) as StandardMaterial3D
+			if own == null:
+				continue
+			if not peak_materials.has(own):
+				var dull := own.duplicate() as StandardMaterial3D
+				var c := own.albedo_color * PEAK_DULL
+				var grey := (c.r + c.g + c.b) / 3.0
+				dull.albedo_color = Color(lerpf(c.r, grey, 0.3), lerpf(c.g, grey, 0.3), lerpf(c.b, grey, 0.3), own.albedo_color.a)
+				dull.metallic_specular = PEAK_SPECULAR
+				dull.roughness = maxf(own.roughness, 0.85)
+				peak_materials[own] = dull
+			m.set_surface_override_material(i, peak_materials[own])
 
 # The basalt base under mountains: the plains tile's shape with its grass top and
 # tufts swapped for the cliff texture its sides already use.
@@ -621,6 +681,25 @@ func update_cities() -> void:
 		cloth.material_override = material(colour_of.call(f))
 		cloth.scale = Vector3.ONE
 		cloth.position = flag_at + Vector3(city_mesh.size.x / 2.0, pole_mesh.height - city_mesh.size.y / 2.0, 0)
+		var ring := pooled(city_ring_nodes, used - 1, city_ring_mesh)
+		ring.material_override = glow_material(colour_of.call(f), CITY_RING_GLOW)
+		ring.scale = Vector3.ONE * HEX_RADIUS
+		ring.rotation.y = PI / 6.0 # corners on the hex's corners
+		ring.position = cell_position(f.city_pos) + Vector3(0, MODEL_GROUND * HEX_RADIUS + 0.02, 0)
+		if used > city_lights.size():
+			var lamp := OmniLight3D.new()
+			lamp.light_color = CITY_LIGHT_COLOUR
+			lamp.light_energy = CITY_LIGHT_ENERGY
+			lamp.omni_range = CITY_LIGHT_RANGE
+			add_child(lamp)
+			city_lights.append(lamp)
+		var light := city_lights[used - 1]
+		light.visible = true
+		light.position = cell_position(f.city_pos) + Vector3(0, hex_top(f.city_pos) + 0.9, 0.3)
+	var cities := used
+	hide_rest(city_ring_nodes, cities)
+	for i in range(cities, city_lights.size()):
+		city_lights[i].visible = false
 	# outposts you know of: Nathan's model, and a smaller banner in the owner's colour
 	var known := {}
 	for f in state.factions:
@@ -708,6 +787,13 @@ func make_figure(is_scout: bool) -> Node3D:
 		if anim and anim.has_animation(anim_name):
 			anim.get_animation(anim_name).loop_mode = Animation.LOOP_LINEAR
 	add_child(fig)
+	var ring := MeshInstance3D.new()
+	ring.name = "Ring"
+	ring.mesh = unit_ring_mesh
+	ring.scale = Vector3.ONE / fig.scale.x # the ring keeps its own size, whatever the model's scale
+	ring.position = Vector3(0, 0.02 / fig.scale.x, 0)
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	fig.add_child(ring)
 	fig.rotation.y = randf() * TAU # (until it first walks somewhere)
 	if anim and anim.has_animation("idle"):
 		# each unit breathes at its own pace and from its own point in the loop
@@ -721,8 +807,13 @@ func paint_band(fig: Node3D, col: Color) -> void:
 	if fig.get_meta("band", Color.TRANSPARENT) == col:
 		return
 	fig.set_meta("band", col)
+	var ring := fig.get_node_or_null("Ring") as MeshInstance3D
+	if ring:
+		ring.material_override = glow_material(col, UNIT_RING_GLOW)
 	for mi in fig.find_children("*", "MeshInstance3D", true, false):
 		var m := mi as MeshInstance3D
+		if m == ring:
+			continue
 		for i in m.mesh.get_surface_count():
 			var own := m.mesh.surface_get_material(i) as StandardMaterial3D
 			if own == null:
