@@ -323,10 +323,10 @@ func place_rifts() -> void:
 			rift_city[spot] = f.name
 
 # Can a rift for city f go on hex c? 4-"reach" hexes from f, at least 4 from
-# every other city, not on ruins or impassable land, not on another rift.
+# every other city, not on ruins, an outpost or impassable land, not on another rift.
 func rift_spot_ok(c: Vector2i, f: Faction, reach: int) -> bool:
 	var d := HexMap.hex_distance(c, f.city_pos)
-	if d < RIFT_MIN_CITY_DISTANCE or d > reach or not game.passable(c) or c in rifts:
+	if d < RIFT_MIN_CITY_DISTANCE or d > reach or not game.passable(c) or c in rifts or game.outpost_owner(c) != null:
 		return false
 	for other in game.factions:
 		if other != f and other.is_alive() and HexMap.hex_distance(c, other.city_pos) < RIFT_MIN_CITY_DISTANCE:
@@ -335,6 +335,31 @@ func rift_spot_ok(c: Vector2i, f: Faction, reach: int) -> bool:
 		if r["cell"] == c:
 			return false
 	return true
+
+# An outpost was just founded on a hidden rift (nobody knew it was there): the
+# rift tears open somewhere else instead, by the same rules, for the same city.
+# Rifts and outposts never share a hex (Nathan: "outpost?????").
+func move_rift(cell: Vector2i) -> void:
+	var i := rifts.find(cell)
+	if i < 0:
+		return
+	var f := game.faction_named(rift_city.get(cell, ""))
+	rifts.remove_at(i)
+	rift_city.erase(cell)
+	if f == null:
+		return
+	for reach in range(RIFT_MAX_CITY_DISTANCE, HexMap.COLS + HexMap.ROWS + 2):
+		var options: Array[Vector2i] = []
+		for row in HexMap.ROWS:
+			for col in HexMap.COLS:
+				var c := Vector2i(col, row)
+				if rift_spot_ok(c, f, reach):
+					options.append(c)
+		if not options.is_empty():
+			var spot: Vector2i = options.pick_random()
+			rifts.insert(i, spot)
+			rift_city[spot] = f.name
+			return
 
 # Come out of a random free rift and hunt the city nearest to it.
 func come_through_rift() -> void:
