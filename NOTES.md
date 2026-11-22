@@ -110,6 +110,12 @@ CLAUDE.md holds the rules for working; this file holds the history.
 - Nathan picked the tuning: driving Sköll off near your city counts as holding. A player who chases her now reaches Dawn 15%; a passive one 3%. tests/active_sunna.gd measures the chasing player
 - The first baseline run used the stale local main branch (79 commits behind origin/main): always worktree from origin/main. Also: don't edit game scripts while a test runs from the same folder; run measurements from a copy
 
+## Production queue (2026-11-22)
+
+- Nathan picked it ("3 very important") from the list of what's left. Built as a standard 4X default without asking about details
+- Choices made: the queue takes each turn's Industry income (after upkeep and tribute), not the store, so the store stays for diplomacy and Sunna's requests; buying at once stays 1 to 1 with no premium (a premium would change the whole economy and every AI); the AIs keep buying at once, so simulations are unchanged unless the player queues (identical seeded output on main and the branch); outposts aren't queued (they need a hex)
+- Test lesson: a small event can cost population, which lowers supply below the armies you already have. queue_test first flagged that as "armies over supply"; it now only flags a NEW army built over supply
+
 ## Ideas parked (see CLAUDE.md "Later")
 
 Faction names, the Daughter's name, Crossing text, small-event and ruin text, a choice when you find a rift (e.g. seal it: changes Sköll, ask first), AIs using fog of war to chase a rogue Daughter, AI landing choice, AI-to-AI diplomacy and trading, combat defence bonus, paying an AI to join your war, mini-games, full rifts (Doom-creatures, seasons, underground travel). The old Long Night design (chain, rogues, warbands) is parked in CLAUDE.md "Later".

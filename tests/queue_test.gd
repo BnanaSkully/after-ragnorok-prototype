@@ -96,13 +96,15 @@ func _initialize() -> void:
 					elif want != "": s.player_build_building(want)
 				elif p.queue.is_empty() and want != "":
 					s.player_queue(want)
+				var armies_before: int = s.army_count(p)
 				s.end_turn()
 				if s.has_pending_offer(): s.pending_relation().answer(false)
+				# (an event can cost population and leave you over supply: only a NEW army over supply is wrong)
+				if s.army_count(p) > armies_before and s.army_count(p) > s.supply_cap(p): bad["army built over supply (%s)" % mode] = 1
 				if s.turn == 20:
 					armies20 += s.army_count(p) / float(n_games); built20 += p.buildings.size() / float(n_games); stored20 += p.industry / float(n_games)
 				if p.production < 0 or p.industry < 0: bad["negative Industry or production"] = 1
 				if p.queue.size() > GameState.QUEUE_MAX: bad["queue too long"] = 1
-				if s.army_count(p) > s.supply_cap(p) + 0 and p.is_alive(): bad["armies over supply"] = 1
 				if s.turn > 60: bad["game never ended"] = 1; break
 			ends[s.end_title] = ends.get(s.end_title, 0) + 1
 			m.queue_free()
