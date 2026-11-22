@@ -60,6 +60,7 @@ Run a test:
 | army_test.gd | the army snowball: a strong player's armies, Strength, Food/Industry and Sköll's fate at the end |
 | midgame_test.gd | Part 2: Sköll returning stronger, wounds and driving him back, ash, support against him, Sunna's requests and rising, swallowing, the endings; full 40-turn games (returns, ash, rising, endings, impossible states) |
 | zoc_test.gd | zone of control: each rule on a set-up game (stop next to an enemy army, no slipping past, attack allowed, peace, scouts, own city, the AI obeys it); full games with the rule off and on |
+| active_sunna.gd | not in run_all: full games with a player who chases Sunna's rising (grants her requests, keeps an oath): Dawn with you (target about 15%) |
 | helpers.gd | not a test: shared helpers (answer every pop-up, list landing hexes) |
 
 Screenshot scripts need a virtual screen and an output folder in `S`:
