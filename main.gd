@@ -24,6 +24,9 @@ const FACTION_COLOURS := {
 
 # Right-hand panel: one block per AI faction
 const PANEL_X := 820.0
+const PANEL_BACKING := Color(0.04, 0.05, 0.07, 0.72) # behind the side panel and the message log
+const LOG_MAX_LINES := 6 # message lines shown at the bottom (older ones scroll off)
+const TOP_BAR_BOTTOM := 92.0 # the top bar's three lines end here: hex tooltips stay below it
 const BLOCK_Y := 100.0 # top of the first faction's block
 const BLOCK_H := 100.0 # height of each block
 
@@ -939,6 +942,9 @@ func draw_overlay() -> void:
 	var daughter := s.daughter
 	var skoll := s.skoll
 	var font := ThemeDB.fallback_font
+	var screen := get_viewport_rect().size
+	# the side panel on a dark see-through backing, so its text reads over the map
+	draw_rect(Rect2(PANEL_X - 10, 0, screen.x - PANEL_X + 10, screen.y), PANEL_BACKING)
 	draw_top_bar(font)
 	var line2: Array[String] = [] # second line: tribute you pay, and where Sköll is
 	if player.overlord != "":
@@ -1019,11 +1025,17 @@ func draw_overlay() -> void:
 	for i in s.diplomacy_log.size():
 		draw_multiline_string(font, Vector2(PANEL_X, hy + 18 + i * 36), s.diplomacy_log[i], HORIZONTAL_ALIGNMENT_LEFT, 320, 12, 2, Color(0.8, 0.8, 0.75))
 
-	# Messages, newest at the bottom.
-	var screen := get_viewport_rect().size
-	for i in s.messages.size():
-		var y := screen.y - 18 - (s.messages.size() - 1 - i) * 22
-		draw_string(font, Vector2(20, y), s.messages[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.85, 0.4))
+	# Messages, newest at the bottom: wrapped to stay left of the side panel, the last
+	# LOG_MAX_LINES lines, on a dark backing.
+	var log_lines := wrap_lines(s.messages, font, PANEL_X - 50, 18)
+	if log_lines.size() > LOG_MAX_LINES:
+		log_lines = log_lines.slice(log_lines.size() - LOG_MAX_LINES)
+	if not log_lines.is_empty():
+		var log_h := log_lines.size() * 22 + 10
+		draw_rect(Rect2(10, screen.y - log_h - 4, PANEL_X - 30, log_h), PANEL_BACKING)
+		for i in log_lines.size():
+			var y := screen.y - 18 - (log_lines.size() - 1 - i) * 22
+			draw_string(font, Vector2(20, y), log_lines[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.85, 0.4))
 
 	draw_tooltip()
 	if s.game_over:
@@ -1098,7 +1110,10 @@ func draw_tooltip() -> void:
 	if lines.is_empty():
 		lines = hex_tooltip(hover_cell)
 		# above the hovered hex, so the units around it stay visible
-		at = HexView2D.hex_center(hover_cell) + Vector2(18, -HexView2D.HEX_SIZE - lines.size() * 17 + 6)
+		var hex_at := hover_pos if showing_3d else HexView2D.hex_center(hover_cell)
+		at = hex_at + Vector2(18, -HexView2D.HEX_SIZE - lines.size() * 17 + 6)
+		if at.y - 14 < TOP_BAR_BOTTOM:
+			at.y = hex_at.y + HexView2D.HEX_SIZE + 14 # no room above without covering the top bar: below it
 	if lines.is_empty():
 		return
 	var font := ThemeDB.fallback_font
@@ -1114,13 +1129,13 @@ func draw_tooltip() -> void:
 		draw_string(font, at + Vector2(0, i * 17), lines[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.95, 0.95, 0.85) if i == 0 else Color(0.8, 0.8, 0.75))
 
 # Breaks lines wider than max_w at spaces (continuations are indented).
-func wrap_lines(lines: Array[String], font: Font, max_w: float) -> Array[String]:
+func wrap_lines(lines: Array[String], font: Font, max_w: float, size := 13) -> Array[String]:
 	var out: Array[String] = []
 	for line in lines:
 		var current := ""
 		for word in line.split(" "):
 			var trial := word if current == "" else current + " " + word
-			if current != "" and font.get_string_size(trial, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x > max_w:
+			if current != "" and font.get_string_size(trial, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > max_w:
 				out.append(current)
 				current = "   " + word
 			else:
