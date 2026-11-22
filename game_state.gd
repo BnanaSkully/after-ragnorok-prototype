@@ -277,6 +277,7 @@ func end_turn() -> void:
 			if r.has_pending():
 				break
 		maybe_turn_event()
+		rifts.announce_season()
 		maybe_sunna_request()
 	maybe_rise()
 	eject_trespassers()

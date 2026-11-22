@@ -20,6 +20,17 @@ const RIFT_TURN := 2 # the turn the rifts are first rolled
 const MIN_CITY_DISTANCE := 4 # rifts stay at least this far from every city (was 3: he came out one step from a city's walls)
 const MAX_CITY_DISTANCE := 7 # ...and at most this far from the city they belong to
 
+# The dangerous season (full rifts step 3, Nathan's pick: a fixed calendar
+# "for now"): the roots of Yggdrasil stir and the rifts wake. SEASON_LENGTH
+# turns long, every SEASON_EVERY turns from SEASON_FIRST (turns 7-8, 14-15,
+# 21-22, 28-29, 35-36; 14 is Sköll's arrival on purpose). A message warns the
+# turn before. Nothing else happens in it yet: Rift Walkers (step 4) and
+# travelling between rifts (step 5) will use it.
+const SEASON_NAME := "the Root-tide" # placeholder name
+const SEASON_FIRST := 7
+const SEASON_EVERY := 7
+const SEASON_LENGTH := 2
+
 # The GameState (game_state.gd). A "weak" link: the game keeps this object alive,
 # but this object doesn't keep the game alive, so Godot can free both later.
 var game: GameState:
@@ -35,6 +46,38 @@ func _init(p_game: GameState) -> void:
 
 func has(cell: Vector2i) -> bool:
 	return cell in cells
+
+# The season's name at the start of a sentence ("The Root-tide").
+static func season_title() -> String:
+	return SEASON_NAME.left(1).to_upper() + SEASON_NAME.substr(1)
+
+# Is the season on during this turn?
+static func season_on(turn: int) -> bool:
+	return turn >= SEASON_FIRST and (turn - SEASON_FIRST) % SEASON_EVERY < SEASON_LENGTH
+
+# Turns of the season left, counting this one (0 if it isn't on).
+static func season_left(turn: int) -> int:
+	if not season_on(turn):
+		return 0
+	return SEASON_LENGTH - (turn - SEASON_FIRST) % SEASON_EVERY
+
+# The first turn of the next season after this turn.
+static func next_season(turn: int) -> int:
+	if turn < SEASON_FIRST:
+		return SEASON_FIRST
+	@warning_ignore("integer_division")
+	return SEASON_FIRST + ((turn - SEASON_FIRST) / SEASON_EVERY + 1) * SEASON_EVERY
+
+# The season's messages for the turn just begun: a warning the turn before,
+# then when it starts and when it ends.
+func announce_season() -> void:
+	var t: int = game.turn
+	if season_on(t) and not season_on(t - 1):
+		game.add_message("%s has begun: the roots of Yggdrasil stir and the rifts glow (%d turns)." % [season_title(), SEASON_LENGTH])
+	elif season_on(t - 1) and not season_on(t):
+		game.add_message("%s has passed: the rifts sleep until turn %d." % [season_title(), next_season(t)])
+	elif season_on(t + 1):
+		game.add_message("The ground hums: %s begins next turn." % SEASON_NAME)
 
 # Forget every rift (a new game's Crossing).
 func clear() -> void:

@@ -72,6 +72,7 @@ var ov: Node2D # the layer the HUD overlay is drawn on (draw_overlay), above the
 var active_icons := {} # icon button -> it shows the open panel
 
 const ASH_COLOUR := Color(0.36, 0.34, 0.33) # land Sköll turned to ash
+const SEASON_COLOUR := Color(0.55, 0.75, 1.0) # the season (Rifts.season_on): rifts glow cold blue
 # How each kind of land looks (index = Terrain.Type)
 const TERRAIN_COLOURS := [Color(0.42, 0.58, 0.32), Color(0.2, 0.4, 0.22), Color(0.58, 0.5, 0.32), Color(0.5, 0.5, 0.53), Color(0.2, 0.36, 0.62)]
 
@@ -1708,6 +1709,8 @@ func goal_line() -> Array:
 	var need := sunna_need()
 	if need != "":
 		return [need, Color(1.0, 0.88, 0.55)]
+	if Rifts.season_on(s.turn):
+		return ["%s is on: %d turn%s left" % [Rifts.season_title(), Rifts.season_left(s.turn), "" if Rifts.season_left(s.turn) == 1 else "s"], SEASON_COLOUR]
 	return [next_action(), TEXT]
 
 # What Sunna still needs from you, in a few words ("" = nothing to say).
@@ -1760,8 +1763,16 @@ func status_lines() -> Array[String]:
 		lines.append("Sköll is in the void: he returns on turn %d, stronger (Strength %d)." % [skoll.away_until, skoll.strength + Skoll.STRENGTH_PER_RETURN])
 	elif s.turn < Skoll.ARRIVAL_TURN:
 		lines.append("Sköll arrives on turn %d (his howling starts on turn %d)." % [Skoll.ARRIVAL_TURN, Skoll.WARNING_TURN])
+	lines.append(season_line())
 	lines.append(sunna_line())
 	return lines
+
+# One line on the season (Rifts.season_on): on now, or when it next comes.
+func season_line() -> String:
+	var t := state.turn
+	if Rifts.season_on(t):
+		return "%s: the rifts glow. %d turn%s left." % [Rifts.season_title(), Rifts.season_left(t), "" if Rifts.season_left(t) == 1 else "s"]
+	return "%s comes on turn %d (%d turns, every %d)." % [Rifts.season_title(), Rifts.next_season(t), Rifts.SEASON_LENGTH, Rifts.SEASON_EVERY]
 
 # One line on where Sunna is and how she feels (status tooltip and the Sunna panel).
 func sunna_line() -> String:
@@ -2142,6 +2153,7 @@ func hex_tooltip(c: Vector2i) -> Array[String]:
 		lines.append("%s outpost: +%d Food, +%d Industry a turn (from its %s)" % ["Your" if post == s.player else "The %s" % post.name, Terrain.OUTPOST_FOOD[t], Terrain.OUTPOST_INDUSTRY[t], Terrain.NAMES[t].to_lower()])
 	if s.player.known_rifts.has(c) or (c == s.rifts.revealed and seen):
 		lines.append("A rift in the void: Sköll can come through here.")
+		lines.append("   " + ("It glows: %s is on." % Rifts.SEASON_NAME if Rifts.season_on(s.turn) else "It sleeps until %s (turn %d)." % [Rifts.SEASON_NAME, Rifts.next_season(s.turn)]))
 	for r in s.ruins:
 		if r["cell"] == c and not r["taken"]:
 			lines.append("Ruins: move a unit here to search them.")
@@ -2182,9 +2194,13 @@ func draw_hp_bar(at: Vector2, hp: int) -> void:
 
 # A rift in the void: a dark swirl.
 func draw_rift(rc: Vector2) -> void:
+	var glow := Rifts.season_on(state.turn) # the season: the rifts glow
+	if glow:
+		draw_circle(rc, HexView2D.HEX_SIZE * 0.8, Color(SEASON_COLOUR, 0.5))
+	var ring := SEASON_COLOUR if glow else Color(0.6, 0.3, 0.8)
 	draw_circle(rc, HexView2D.HEX_SIZE * 0.5, Color(0.12, 0.05, 0.18))
-	draw_arc(rc, HexView2D.HEX_SIZE * 0.5, 0, TAU, 24, Color(0.6, 0.3, 0.8), 2.0)
-	draw_arc(rc, HexView2D.HEX_SIZE * 0.28, 0.5, TAU * 0.8, 16, Color(0.6, 0.3, 0.8), 2.0)
+	draw_arc(rc, HexView2D.HEX_SIZE * 0.5, 0, TAU, 24, ring, 3.0 if glow else 2.0)
+	draw_arc(rc, HexView2D.HEX_SIZE * 0.28, 0.5, TAU * 0.8, 16, ring, 2.0)
 
 # Ruins: three broken grey columns on a slab.
 func draw_ruins(c: Vector2) -> void:

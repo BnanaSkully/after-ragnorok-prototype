@@ -37,6 +37,9 @@ const TILE_MODEL_PATH := "res://assets/models/tiles/%s.glb"
 # Nathan's outpost prop (base at y = 0, sized in hex units), at the back of its hex so a
 # unit can stand in the middle, with a small banner in the owner's colour.
 const RIFT_OVERLAY_SCALE := 0.75 # the rift laid into its land tile: this big
+const SEASON_GLOW_COLOUR := Color(0.55, 0.75, 1.0) # the season: a cold blue light over each rift you can see
+const SEASON_GLOW_ENERGY := 6.0
+const SEASON_GLOW_RANGE := 3.0 # world units (a hex is about 1.7 across): lights the hexes around it too
 # The rift model is a whole crater (floor at y 0, rim 0.4-0.7 high). It sinks this far
 # (in its own height units) below the land's ground so only its rim shows, and the land
 # tile gets a round hole cut where it sits (RIFT_HOLE, cut_hole) so the land never covers
@@ -804,6 +807,17 @@ func update_rifts() -> void:
 		var overlay := tint_overlay(dim)
 		for part in model.find_children("*", "GeometryInstance3D", true, false):
 			(part as GeometryInstance3D).material_overlay = overlay
+		# The season (Rifts.season_on): the rifts glow with a cold blue light.
+		var glow: OmniLight3D = model.get_node_or_null("SeasonGlow")
+		if glow == null:
+			glow = OmniLight3D.new()
+			glow.name = "SeasonGlow"
+			glow.light_color = SEASON_GLOW_COLOUR
+			glow.omni_range = SEASON_GLOW_RANGE / model.scale.x
+			glow.position = Vector3(0, 0.6, 0)
+			model.add_child(glow)
+		glow.light_energy = SEASON_GLOW_ENERGY
+		glow.visible = Rifts.season_on(state.turn) and state.player_can_see(c)
 	for c in rift_models.keys():
 		if not rifts_now.has(c):
 			rift_models[c].queue_free()

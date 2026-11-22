@@ -46,6 +46,8 @@ Run a test:
 | scared_test.gd | How often a scared AI offers her to the player |
 | sight_test.gd | Sköll's 2-hex sight (fog of war) on a rogue Daughter |
 | seed_fingerprint.gd | refactor check: 12 seeded games, one line per turn (Sköll, rifts, ash, every faction). Run before and after a refactor and diff the output: it must be identical |
+| season_test.gd | the season calendar for turns 1-40 and a real game's messages (warning, start, end) |
+| season_screenshot.gd | (screenshot) the season: goal line, rift tooltip, glowing rifts in 2D and 3D, the 3D light off after it |
 | rift_timing_test.gd | Rifts: none before turn 2, hidden, reveal on arrival, re-roll on return |
 | balance_state.gd | 1000 games: how often your city falls with/without her, first-attack fairness |
 | early_game_test.gd | 300 games with a player who explores and builds: impossible states (units, outposts, fog), decisions on turns 1-10, ruins, outposts taken, events |
