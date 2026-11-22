@@ -28,7 +28,7 @@ var known_rifts := {} # rifts it has found (hex -> true); forgotten when the rif
 # and can't be at war with it until it rises up. (A name, not a link, so two
 # factions never hold each other.)
 var overlord := ""
-var skoll_held := 0 # how many of Sköll's attacks its city has held against (Sunna rises only where a city has held: GameState.rise_missing)
+var skoll_held := 0 # how many times its city held against Sköll, or its armies drove him back near it (Skoll.HELD_RANGE; Sunna rises only where a city has held: GameState.rise_missing)
 
 # (How a faction looks on screen, its colours, is up to the view: see main.gd.)
 func _init(p_name: String, p_city: Vector2i, p_pact_word := "oath") -> void:
