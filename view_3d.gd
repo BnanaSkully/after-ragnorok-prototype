@@ -772,7 +772,7 @@ func update_cities() -> void:
 		var ring := pooled(city_ring_nodes, used - 1, city_ring_mesh)
 		ring.material_override = glow_material(colour_of.call(f), CITY_RING_GLOW)
 		ring.scale = Vector3.ONE * HEX_RADIUS
-		ring.rotation.y = PI / 6.0 # corners on the hex's corners
+		ring.rotation.y = 0.0 # the torus already puts its corners at 30° + 60°k: on the pointy-top hex's corners (PI / 6 turned it flat-top)
 		ring.position = cell_position(f.city_pos) + Vector3(0, MODEL_GROUND * HEX_RADIUS + 0.02, 0)
 		if used > city_lights.size():
 			var lamp := OmniLight3D.new()
