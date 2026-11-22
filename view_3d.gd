@@ -51,6 +51,8 @@ const TILE_MODEL_RADIUS := 0.98 # made for hexes 1.0 apart (centre to corner), s
 const ASHEN_RIFT_RANGE := 2
 const LIVING_MODELS := {Terrain.Type.PLAINS: "plains_living", Terrain.Type.FOREST: "forest_living"}
 const DEAD_LAND_TINT := Color(0.62, 0.6, 0.6) # dead land (under ash) is the ashen look, greyed further
+const ASH_TINT := Color(0.6, 0.52, 0.42) # the ashen plains and forest: warm charcoal, not icy (Nathan, v13)
+const HILLS_TINT := Color(0.6, 0.8, 0.4) # hills toward the plains' green: grassy hills with rock, not ash
 # The grass tufts in the tile files carry no colour (Blender's colour didn't export), so
 # they showed pure white ("glints"). Painted here until the files carry their own colour.
 const TUFT_COLOURS := {"Plains tuft": Color(0.36, 0.4, 0.22), "Ash tuft": Color(0.4, 0.39, 0.37)}
@@ -75,7 +77,7 @@ const CITY_RING_GLOW := 1.2
 const CITY_LIGHT_COLOUR := Color(1.0, 0.68, 0.38) # warm firelight at each settlement
 const CITY_LIGHT_ENERGY := 2.0
 const CITY_LIGHT_RANGE := 2.6
-const PEAK_DULL := 0.7 # mountain snow: albedo x0.7 and a little greyer, so it doesn't sparkle
+const PEAK_DULL := 0.56 # mountain snow: albedo x0.56 (0.7, then 20% less, Nathan v13) and a little greyer, so it doesn't sparkle
 const PEAK_SPECULAR := 0.15
 const UNIT_MODEL_HEIGHT := 1.8 # how tall the warrior and scout are in their own files
 const UNIT_STEP_TIME := 0.45 # seconds to walk one hex
@@ -449,6 +451,10 @@ func update_board() -> void:
 			var land_owner := s.territory_owner(c)
 			if land_owner != null:
 				tint = tint.lerp(territory_colour_of.call(land_owner), 0.45)
+		if key is int and LIVING_MODELS.has(key):
+			tint = tint * ASH_TINT # the ashen look
+		elif key is int and key == Terrain.Type.HILLS:
+			tint = tint * HILLS_TINT
 		if not landing and s.is_ash(c):
 			tint = tint * DEAD_LAND_TINT
 		if dark:
