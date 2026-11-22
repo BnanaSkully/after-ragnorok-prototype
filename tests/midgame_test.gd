@@ -100,6 +100,7 @@ func _initialize() -> void:
 		s.daughter.join(s.player) # (keep her even if she'd walk out)
 	print("5. Sunna asked on turns %s (expect every %d from %d)" % [asked, SunDaughter.REQUEST_GAP, SunDaughter.REQUEST_FROM])
 	s.player.favour = SunDaughter.RISE_FAVOUR; sk.strength = 20; s.skoll.active = true
+	s.relation(s.ais[0]).trust = SunDaughter.RECOGNISE_TRUST + SunDaughter.CLAIM_TRUST_MAX; s.player.skoll_held = 1 # (recognised even after the claims drain Trust, and her city has held: step 4)
 	var ash_before = s.ash.size()
 	while s.turn < GameState.RISE_TURN + 1 and not s.daughter.is_risen(): play_turn(s)
 	print("   turn %d, her Favour %d: risen=%s with you=%s; Sköll mortal=%s, Strength %d (expect 20: he keeps it, enraged), knows her=%s" % [s.turn, s.player.favour, s.daughter.is_risen(), s.daughter.risen_with(s.player), sk.is_mortal(), sk.strength, sk.knows_her])
