@@ -25,7 +25,8 @@ const FACTION_COLOURS := {
 # Right-hand panel: one block per AI faction
 const PANEL_X := 820.0
 const PANEL_BACKING := Color(0.04, 0.05, 0.07, 0.72) # behind the side panel and the message log
-const LOG_MAX_LINES := 6 # message lines shown at the bottom (older ones scroll off)
+const LOG_LINES := 3 # message lines shown at the bottom (older ones scroll off)
+const LOG_MAX_LINES := 6 # ...after clicking/tapping the log to open it (again closes it)
 const TOP_BAR_BOTTOM := 92.0 # the top bar's three lines end here: hex tooltips stay below it
 const BLOCK_Y := 100.0 # top of the first faction's block
 const BLOCK_H := 100.0 # height of each block
@@ -42,6 +43,8 @@ func unit_colour(f: Faction) -> Color:
 
 # What the player is doing on screen (not part of the game rules)
 const CLICK_SLOP_3D := 12.0 # pixels the pointer may move between press and release and still click (3D view)
+var log_open := false # the message log shows LOG_MAX_LINES instead of LOG_LINES
+var log_rect := Rect2() # where the log was drawn (a click there opens or closes it)
 var press_pos_3d := Vector2.ZERO # where the last left press started (3D view)
 var hover_cell := NO_CELL # the hex under the mouse (landing highlight, tooltips)
 var hover_pos := Vector2(-1, -1) # the mouse, for tooltips on the top bar
@@ -663,6 +666,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		var click := event.duplicate() as InputEventMouseButton
 		click.pressed = true
 		event = click
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT and log_rect.has_point(get_local_mouse_position()):
+		log_open = not log_open # a click on the message log opens/closes it, never the map under it
+		queue_redraw()
+		return
 	if state.phase == GameState.Phase.LANDING:
 		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 			if state.try_land(cell_under_mouse()):
@@ -1029,13 +1036,20 @@ func draw_overlay() -> void:
 		draw_multiline_string(font, Vector2(PANEL_X, hy + 18 + i * 36), s.diplomacy_log[i], HORIZONTAL_ALIGNMENT_LEFT, 320, 12, 2, Color(0.8, 0.8, 0.75))
 
 	# Messages, newest at the bottom: wrapped to stay left of the side panel, the last
-	# LOG_MAX_LINES lines, on a dark backing.
+	# LOG_LINES lines (LOG_MAX_LINES once clicked open), on a dark backing.
 	var log_lines := wrap_lines(s.messages, font, PANEL_X - 50, 18)
-	if log_lines.size() > LOG_MAX_LINES:
-		log_lines = log_lines.slice(log_lines.size() - LOG_MAX_LINES)
+	var keep := LOG_MAX_LINES if log_open else LOG_LINES
+	var hidden_lines := maxi(0, mini(log_lines.size(), LOG_MAX_LINES) - keep)
+	if log_lines.size() > keep:
+		log_lines = log_lines.slice(log_lines.size() - keep)
+	log_rect = Rect2()
 	if not log_lines.is_empty():
 		var log_h := log_lines.size() * 22 + 10
-		draw_rect(Rect2(10, screen.y - log_h - 4, PANEL_X - 30, log_h), PANEL_BACKING)
+		log_rect = Rect2(10, screen.y - log_h - 4, PANEL_X - 30, log_h)
+		draw_rect(log_rect, PANEL_BACKING)
+		if hidden_lines > 0 or log_open:
+			var hint := "tap for %d more" % hidden_lines if hidden_lines > 0 else "tap to shrink"
+			draw_string(font, Vector2(log_rect.end.x - 120, log_rect.position.y - 4), hint, HORIZONTAL_ALIGNMENT_RIGHT, 110, 12, Color(0.75, 0.75, 0.75))
 		for i in log_lines.size():
 			var y := screen.y - 18 - (log_lines.size() - 1 - i) * 22
 			draw_string(font, Vector2(20, y), log_lines[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.85, 0.4))
