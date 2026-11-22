@@ -62,6 +62,21 @@ const RISE_FAVOUR := 8
 const RISEN_FOOD := 3
 const RISEN_INDUSTRY := 3
 
+# Rival claims (contested Sunna, step 3): every people believes she is its
+# own lost sun, and resents whoever holds her. Every CLAIM_GAP turns, each AI's
+# Trust toward the player -1 while the player shelters her (at most
+# CLAIM_TRUST_MAX in a game from this; AIs keep no Trust toward each other).
+# Holding her is a reason for war (diplomacy.gd rival_consider_war,
+# GameState.ai_wars_turn), an AI may demand her (diplomacy.gd "claim"), and
+# taking her holder's city carries her off (GameState.make_tributary).
+const CLAIM_NAMES := {"Norse": "Sól", "Japanese": "Amaterasu", "Greek": "Helios", "Celtic": "Belenus"}
+const CLAIM_GAP := 4
+const CLAIM_TRUST := -1
+const CLAIM_TRUST_MAX := 4
+const CLAIM_DEMAND_CHANCE := 0.5 # when an AI makes an offer and wants her, chance it demands her
+const CLAIM_VALUE_MIN := -3 # it only demands her while she's worth at least this to it (daughter_value): a terrified people doesn't
+const CLAIM_SIEGE_PULL := 3 # an AI at war with her holder marches on that city as if it were this much nearer
+
 enum State { SHELTERED, ROGUE, SWALLOWED, RISEN }
 
 var state := State.SHELTERED
@@ -126,6 +141,10 @@ func join(f: Faction) -> void:
 
 func change_favour(f: Faction, amount: int) -> void:
 	f.favour = clampi(f.favour + amount, 0, MAX_FAVOUR)
+
+# What faction f calls her: its own lost sun (Sól, Amaterasu, Helios, Belenus).
+static func claim_name(f: Faction) -> String:
+	return CLAIM_NAMES.get(f.name, NAME)
 
 func whose(f: Faction) -> String:
 	return "your" if f.is_player else f.name + "'s"

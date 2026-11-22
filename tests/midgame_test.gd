@@ -126,7 +126,7 @@ func _initialize() -> void:
 	# Part 2: full games
 	var n_games: int = H.games(300)
 	var ends := {}; var bad := {}
-	var st := {"returns": 0.0, "ash": 0.0, "rose": 0.0, "rose with you": 0.0, "swallowed": 0.0, "requests": 0.0, "game length": 0.0, "factions devoured": 0.0, "you hold her on turn 10": 0.0}
+	var st := {"returns": 0.0, "ash": 0.0, "rose": 0.0, "rose with you": 0.0, "swallowed": 0.0, "requests": 0.0, "game length": 0.0, "factions devoured": 0.0, "you hold her on turn 10": 0.0, "AIs demand her": 0.0, "wars on you over her": 0.0, "AI wars over her": 0.0, "carried off by a conquest": 0.0}
 	for g in n_games:
 		m = load("res://main.tscn").instantiate()
 		root.add_child(m)
@@ -145,7 +145,12 @@ func _initialize() -> void:
 			for key in GameState.Buildings.LIST: s.player_build_building(key)
 			s.end_turn()
 			if s.turn == 10 and s.daughter.shelters_with(s.player): st["you hold her on turn 10"] += 1
-			if s.has_pending_offer(): s.pending_relation().answer(randf() < 0.5)
+			for msg in s.messages:
+				if "their lost sun)" in msg: st["wars on you over her" if "on you" in msg else "AI wars over her"] += 1
+				if "carried" in msg and "off from" in msg: st["carried off by a conquest"] += 1
+			if s.has_pending_offer():
+				if s.pending_relation().pending.get("type") == "claim": st["AIs demand her"] += 1
+				s.pending_relation().answer(randf() < 0.5)
 			for c in s.ash:
 				if s.next_to_a_city(c): bad["ash next to a city"] = 1
 				if s.outpost_owner(c) != null: bad["outpost on ash"] = 1

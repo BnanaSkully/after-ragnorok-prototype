@@ -258,6 +258,7 @@ func end_turn() -> void:
 				u.hp = mini(Unit.MAX_HP, u.hp + (HEAL_HOME if territory_owner(u.pos) == f else HEAL_REST))
 			u.acted = false
 	judge_readiness()
+	rival_claims()
 	check_daughter_leaving()
 	for f in ais:
 		ai_build(f)
@@ -417,6 +418,20 @@ func check_daughter_leaving() -> void:
 	daughter.go_rogue(spot)
 	var whose := "your" if holder == player else holder.name + "'s"
 	add_message("%s has lost faith and walked out of %s city! She is alone in the open." % [SunDaughter.NAME.capitalize(), whose])
+
+# Every people believes she is its own lost sun: every CLAIM_GAP turns, while
+# you shelter her, each AI's Trust toward you falls (at most CLAIM_TRUST_MAX).
+func rival_claims() -> void:
+	if turn % SunDaughter.CLAIM_GAP != 0 or not daughter.shelters_with(player):
+		return
+	var who: Array[String] = []
+	for r in relations:
+		if r.other.is_alive() and r.claim_trust_lost < SunDaughter.CLAIM_TRUST_MAX:
+			r.change_trust(SunDaughter.CLAIM_TRUST)
+			r.claim_trust_lost -= SunDaughter.CLAIM_TRUST
+			who.append("the %s (%s)" % [r.other.name, SunDaughter.claim_name(r.other)])
+	if not who.is_empty():
+		add_message("Each people says %s is its own lost sun and resents that you hold her: Trust %+d with %s." % [SunDaughter.NAME, SunDaughter.CLAIM_TRUST, ", ".join(who)])
 
 # In the open she moves one hex away from Sköll each turn.
 func daughter_flee() -> void:
@@ -1045,14 +1060,19 @@ func ai_wars_turn() -> void:
 						ai_war_since.erase(key)
 						ai_truce_until[key] = turn + Diplomacy.TRUCE_TURNS
 						add_message("The %s and the %s made peace." % [a.name, b.name])
-			elif turn >= ai_truce_until.get(key, 0) and not tribute_bound(a, b) and army_power(a) - army_power(b) >= AI_WAR_GAP and randf() < AI_WAR_CHANCE:
-				ai_declare_war(a, b)
+			elif turn >= ai_truce_until.get(key, 0) and not tribute_bound(a, b) and randf() < AI_WAR_CHANCE:
+				var gap := army_power(a) - army_power(b)
+				# a much weaker neighbour, or one holding the sun a believes is its own
+				if gap >= AI_WAR_GAP:
+					ai_declare_war(a, b)
+				elif daughter.shelters_with(b) and gap >= 0:
+					ai_declare_war(a, b, "they want %s, their lost sun" % SunDaughter.claim_name(a))
 
-func ai_declare_war(a: Faction, b: Faction) -> void:
+func ai_declare_war(a: Faction, b: Faction, why := "") -> void:
 	if tribute_bound(a, b):
 		return
 	ai_war_since[pair_key(a, b)] = turn
-	add_message("The %s declared war on the %s." % [a.name, b.name])
+	add_message("The %s declared war on the %s%s." % [a.name, b.name, " (%s)" % why if why != "" else ""])
 	# Your ally was attacked: your oath says you join the war. You decide (pop-up).
 	var r := relation(b)
 	if r.pact_active() and not at_war(player, a):
@@ -1220,6 +1240,9 @@ func make_tributary(f: Faction, conqueror: Faction) -> void:
 	if conqueror.overlord == f.name:
 		conqueror.overlord = ""
 	f.overlord = conqueror.name
+	if daughter.shelters_with(f):
+		daughter.join(conqueror) # she goes with the city's new overlord
+		add_message("%s carried %s off from %s. They call her %s." % ["You" if conqueror == player else "The " + conqueror.name, SunDaughter.NAME, "your city" if f == player else "the %s city" % f.name, SunDaughter.claim_name(conqueror)])
 	if f == player or conqueror == player:
 		var r := relation(conqueror if f == player else f)
 		r.at_war = false
@@ -1282,6 +1305,8 @@ func ai_siege_target(f: Faction) -> Faction:
 	for g in factions:
 		if g.is_alive() and at_war(f, g):
 			var d := HexMap.hex_distance(f.city_pos, g.city_pos)
+			if daughter.shelters_with(g):
+				d -= SunDaughter.CLAIM_SIEGE_PULL # take her holder's city and she is yours
 			if d < best_d:
 				best_d = d
 				best = g

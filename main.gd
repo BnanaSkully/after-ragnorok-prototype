@@ -501,7 +501,7 @@ func show_offer() -> void:
 	offer_heading.text = "A MESSAGE FROM THE %s" % r.other.name.to_upper()
 	offer_label.text = r.pending_text()
 	var kind: String = r.pending.get("type")
-	offer_accept_button.text = {"demand": "Pay", "daughter": "Take her", "peace": "Make peace", "trade": "Trade", "borders": "Open borders"}.get(kind, "Accept")
+	offer_accept_button.text = {"demand": "Pay", "claim": "Hand her over", "daughter": "Take her", "peace": "Make peace", "trade": "Trade", "borders": "Open borders"}.get(kind, "Accept")
 	offer_panel.visible = true
 	update_buttons()
 
