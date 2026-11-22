@@ -13,6 +13,13 @@ extends Node3D
 # the blue arm band repainted in the faction's colour). Sköll is units/skoll.glb.
 
 const SKOLL_SCENE := preload("res://assets/models/units/skoll.glb")
+const SUNNA_SCENE := preload("res://assets/models/units/sunna.glb") # Nathan's model: walk, run
+const SUNNA_HEIGHT := 1.0 # as tall as a unit
+const SUNNA_MODEL_HEIGHT := 1.6 # her height in the file (a skinned mesh: its bones undo the armature's 0.01 scale, so model_bounds can't measure her)
+const SUNNA_STEP_TIME := 0.6 # seconds to walk one hex
+const SUNNA_LIGHT_COLOUR := Color(1.0, 0.78, 0.4) # warm gold, so her grey cloak stands out on ash and hills
+const SUNNA_LIGHT_ENERGY := 2.5
+const SUNNA_LIGHT_RANGE := 2.2
 const NO_CELL := HexMap.NO_CELL
 
 # --- Sizes (in 3D units; one hex is HEX_RADIUS from its centre to a corner) ---
@@ -29,6 +36,8 @@ const TILE_MODEL_PATH := "res://assets/models/tiles/%s.glb"
 # mountain hexes join into ranges (see make_mountain). Peaks: base at y = 0, sized in hex units.
 # Nathan's outpost prop (base at y = 0, sized in hex units), at the back of its hex so a
 # unit can stand in the middle, with a small banner in the owner's colour.
+const RIFT_OVERLAY_SCALE := 0.75 # the rift laid over its land tile: this big
+const RIFT_SINK := 0.0 # how far its base sinks into the land (0: it stands on the land, so the land never covers its pit)
 const OUTPOST := preload("res://assets/models/props/outpost.glb")
 const OUTPOST_OFFSET := Vector3(0.0, 0.0, -0.42)
 const PEAK_TALL := preload("res://assets/models/props/peak_tall.glb")
@@ -44,8 +53,11 @@ const TILE_MODEL_RADIUS := 0.98 # made for hexes 1.0 apart (centre to corner), s
 const ASHEN_RIFT_RANGE := 2
 const LIVING_MODELS := {Terrain.Type.PLAINS: "plains_living", Terrain.Type.FOREST: "forest_living"}
 const DEAD_LAND_TINT := Color(0.62, 0.6, 0.6) # dead land (under ash) is the ashen look, greyed further
+const ASH_TINT := Color(0.6, 0.52, 0.42) # the ashen plains and forest: warm charcoal, not icy (Nathan, v13)
+const HILLS_TINT := Color(0.6, 0.8, 0.4) # hills toward the plains' green: grassy hills with rock, not ash
 # The grass tufts in the tile files carry no colour (Blender's colour didn't export), so
 # they showed pure white ("glints"). Painted here until the files carry their own colour.
+const TUFT_VISIBLE_DISTANCE := 15.0 # grass tufts are hidden beyond this camera distance (they shimmered far away)
 const TUFT_COLOURS := {"Plains tuft": Color(0.36, 0.4, 0.22), "Ash tuft": Color(0.4, 0.39, 0.37)}
 const MODEL_GROUND := 0.39 # how high the ground is on the models (units and banners stand on it)
 const CITY_UNIT_OFFSET := Vector3(0.0, 0, 0.78) # a unit in its city stands in front of the longhouse, toward the camera (at 0.5 it was hidden inside it)
@@ -68,7 +80,7 @@ const CITY_RING_GLOW := 1.2
 const CITY_LIGHT_COLOUR := Color(1.0, 0.68, 0.38) # warm firelight at each settlement
 const CITY_LIGHT_ENERGY := 2.0
 const CITY_LIGHT_RANGE := 2.6
-const PEAK_DULL := 0.7 # mountain snow: albedo x0.7 and a little greyer, so it doesn't sparkle
+const PEAK_DULL := 0.56 # mountain snow: albedo x0.56 (0.7, then 20% less, Nathan v13) and a little greyer, so it doesn't sparkle
 const PEAK_SPECULAR := 0.15
 const UNIT_MODEL_HEIGHT := 1.8 # how tall the warrior and scout are in their own files
 const UNIT_STEP_TIME := 0.45 # seconds to walk one hex
@@ -82,6 +94,13 @@ const SKOLL_MODEL_YAW := 0.0
 # --- Camera ---
 const CAMERA_PITCH := 60.0 # degrees down from the horizon
 const ZOOM_MIN := 6.0
+# Map pins: a faction-coloured pin above every unit (gold for Sköll and Sunna), always
+# facing the camera and drawn over trees, so armies can be found when zoomed out.
+# Hidden when the camera is close (the models read on their own there).
+const MARKER_SHOW_DISTANCE := 13.0 # camera distance from which pins show (it starts at 22)
+const MARKER_SIZE := 0.032 # pin height per unit of camera distance: they grow as you zoom out
+const SKOLL_MARKER := Color(1.0, 0.72, 0.2)
+const SUNNA_MARKER := Color(1.0, 0.92, 0.55)
 const ZOOM_MAX := 40.0
 const PAN_SPEED := 0.9 # map units a second, per unit of zoom distance
 
@@ -106,6 +125,7 @@ var touches := {} # finger index -> where it is on the screen (phones and touch 
 
 var hexes := {} # Vector2i -> MeshInstance3D
 var rifts_now: Array = [] # shown_rifts(), worked out once a frame
+var rift_models := {} # hex -> the rift drawn over its land (update_rifts)
 var tiles := {} # the tile models, from TileKit3D.build_all(), shared by all hexes
 var tile_scenes := {} # tile key (a land, "settlement", "ruins", "rift") -> PackedScene
 var overlays := {} # tint -> material that multiplies a real model's colours by the tint
@@ -129,6 +149,16 @@ var basalt_base: ArrayMesh # a plain hex base in the tiles' basalt cliff texture
 var water_shade_mesh: ArrayMesh # a flat hex laid on the water to darken it (fog, territory)
 
 var skoll: Node3D
+var markers := {} # a unit's (or Sköll's, Sunna's) model -> its pin
+var marker_materials := {} # colour -> pin material
+var split_meshes := {} # a tile mesh -> [its ground, its tufts] (see paint_tufts)
+var marker_mesh: QuadMesh
+var marker_texture: ImageTexture
+var sunna: Node3D # rogue Sunna, out in the open (hidden while she shelters in a city)
+var sunna_anim: AnimationPlayer
+var sunna_cell := NO_CELL
+var sunna_from := Vector3.ZERO
+var sunna_walk := 0.0 # seconds left walking to her hex
 var skoll_anim: AnimationPlayer
 var skoll_feet := 0.0 # how far below the model's origin its feet are (after scaling)
 var skoll_cell := NO_CELL # the hex the model is standing on (or walking to)
@@ -136,6 +166,7 @@ var skoll_from := Vector3.ZERO
 var skoll_to := Vector3.ZERO
 var skoll_walk_time := 0.0 # seconds left walking (0 = standing still)
 var skoll_walk_total := 0.0
+var skoll_height := 0.6 # how tall he stands (set in build_skoll)
 var skoll_scale := 1.0 # his size on the map (set in build_skoll)
 var skoll_vanish := 0.0 # seconds he has been sinking away after being beaten
 
@@ -145,6 +176,7 @@ func _ready() -> void:
 	build_board()
 	build_water()
 	build_skoll()
+	build_sunna()
 	# start over the middle of the map, nudged right so the side panel doesn't cover it
 	var last := cell_position(Vector2i(HexMap.COLS - 1, HexMap.ROWS - 1))
 	cam_target = Vector3(last.x * 0.5 + 3.0, 0.0, last.z * 0.5)
@@ -180,8 +212,6 @@ func tile_key(c: Vector2i) -> Variant:
 		for r in s.ruins:
 			if r["cell"] == c and not r["taken"]:
 				return "ruins"
-		if rifts_now.has(c):
-			return "rift"
 	var land := s.terrain_at(c)
 	if land == Terrain.Type.MOUNTAINS and basalt_base != null:
 		return mountain_key(c)
@@ -324,6 +354,7 @@ func build_skoll() -> void:
 	skoll_scale = k
 	skoll.scale = Vector3.ONE * k
 	skoll_feet = -box.position.y * k
+	skoll_height = box.size.y * k
 	skoll.visible = false
 	gild_skoll()
 
@@ -374,9 +405,12 @@ func _process(delta: float) -> void:
 	rifts_now = shown_rifts()
 	update_board()
 	update_cities()
+	update_rifts()
 	update_marks()
 	update_units(delta)
 	update_skoll(delta)
+	update_sunna(delta)
+	update_markers()
 
 # A glowing, unshaded colour (the rings under units and round cities), shared per colour.
 func glow_material(colour: Color, glow: float) -> StandardMaterial3D:
@@ -421,6 +455,10 @@ func update_board() -> void:
 			var land_owner := s.territory_owner(c)
 			if land_owner != null:
 				tint = tint.lerp(territory_colour_of.call(land_owner), 0.45)
+		if key is int and LIVING_MODELS.has(key):
+			tint = tint * ASH_TINT # the ashen look
+		elif key is int and key == Terrain.Type.HILLS:
+			tint = tint * HILLS_TINT
 		if not landing and s.is_ash(c):
 			tint = tint * DEAD_LAND_TINT
 		if dark:
@@ -592,15 +630,43 @@ func height_at_centre(a: Vector3, b: Vector3, c: Vector3) -> float:
 		return -1.0
 	return wa * a.y + wb * b.y + wc * c.y
 
+# The tufts share a mesh with their tile's ground, so each such mesh is split once into
+# the ground (and bedrock) and the tufts (split_meshes), and the tufts get their own node:
+# painted (TUFT_COLOURS) and hidden beyond TUFT_VISIBLE_DISTANCE, where they shimmered.
 func paint_tufts(model: Node3D) -> void:
 	for part in model.find_children("*", "MeshInstance3D", true, false):
-		var mesh: Mesh = (part as MeshInstance3D).mesh
-		for i in mesh.get_surface_count():
-			var mat := mesh.surface_get_material(i)
-			if mat != null and TUFT_COLOURS.has(mat.resource_name):
-				var paint := material(TUFT_COLOURS[mat.resource_name])
-				paint.cull_mode = BaseMaterial3D.CULL_DISABLED # thin blades: seen from both sides
-				(part as MeshInstance3D).set_surface_override_material(i, paint)
+		var mi := part as MeshInstance3D
+		var mesh: Mesh = mi.mesh
+		if not split_meshes.has(mesh):
+			split_meshes[mesh] = split_tufts(mesh)
+		var split: Array = split_meshes[mesh]
+		if split.is_empty():
+			continue
+		mi.mesh = split[0]
+		var tufts := MeshInstance3D.new()
+		tufts.mesh = split[1]
+		tufts.visibility_range_end = TUFT_VISIBLE_DISTANCE
+		tufts.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.add_child(tufts)
+
+# [ground mesh, tuft mesh] made from a tile mesh, or [] if it has no tufts.
+func split_tufts(mesh: Mesh) -> Array:
+	var ground := ArrayMesh.new()
+	var tufts := ArrayMesh.new()
+	for i in mesh.get_surface_count():
+		var mat := mesh.surface_get_material(i)
+		var is_tuft := mat != null and TUFT_COLOURS.has(mat.resource_name)
+		var into := tufts if is_tuft else ground
+		into.add_surface_from_arrays(mesh.surface_get_primitive_type(i), mesh.surface_get_arrays(i))
+		if is_tuft:
+			var paint := material(TUFT_COLOURS[mat.resource_name])
+			paint.cull_mode = BaseMaterial3D.CULL_DISABLED # thin blades: seen from both sides
+			into.surface_set_material(into.get_surface_count() - 1, paint)
+		else:
+			into.surface_set_material(into.get_surface_count() - 1, mat)
+	if tufts.get_surface_count() == 0:
+		return []
+	return [ground, tufts]
 
 func tint_overlay(tint: Color) -> StandardMaterial3D:
 	if tint == Color.WHITE:
@@ -666,6 +732,28 @@ func cell_at_screen(screen_pos: Vector2) -> Vector2i:
 	return cell_at_point(from + dir * t)
 
 # Whose city: a banner in the owner's colour on each settlement you've found.
+# Rifts you know of: the rift model laid over the hex's own land tile (Nathan: "draw the
+# rift as an overlay on the hex's own land tile instead of replacing it"), smaller
+# (RIFT_OVERLAY_SCALE) and lifted so its pit sits on the land's ground.
+func update_rifts() -> void:
+	for c in rifts_now:
+		var model: Node3D = rift_models.get(c)
+		if model == null:
+			model = tile_scenes["rift"].instantiate()
+			model.scale = Vector3.ONE * HEX_RADIUS * RIFT_OVERLAY_SCALE
+			model.rotation.y = hexes[c].rotation.y if hexes.has(c) else 0.0
+			add_child(model)
+			rift_models[c] = model
+		model.position = cell_position(c) + Vector3(0, hex_top(c) - RIFT_SINK * HEX_RADIUS * RIFT_OVERLAY_SCALE, 0)
+		var dim := Color.WHITE if state.player_can_see(c) else Color.WHITE.darkened(FOG_MEMORY_DARKEN)
+		var overlay := tint_overlay(dim)
+		for part in model.find_children("*", "GeometryInstance3D", true, false):
+			(part as GeometryInstance3D).material_overlay = overlay
+	for c in rift_models.keys():
+		if not rifts_now.has(c):
+			rift_models[c].queue_free()
+			rift_models.erase(c)
+
 func update_cities() -> void:
 	var used := 0
 	for f in state.factions:
@@ -807,6 +895,7 @@ func paint_band(fig: Node3D, col: Color) -> void:
 	if fig.get_meta("band", Color.TRANSPARENT) == col:
 		return
 	fig.set_meta("band", col)
+	fig.set_meta("marker", col)
 	var ring := fig.get_node_or_null("Ring") as MeshInstance3D
 	if ring:
 		ring.material_override = glow_material(col, UNIT_RING_GLOW)
@@ -868,6 +957,120 @@ func pooled(pool: Array[MeshInstance3D], i: int, mesh: Mesh) -> MeshInstance3D:
 func hide_rest(pool: Array[MeshInstance3D], used: int) -> void:
 	for i in range(used, pool.size()):
 		pool[i].visible = false
+
+# A pin's picture, made once: a round head on a point, white with a dark edge (the
+# material colours it).
+func make_marker_texture() -> ImageTexture:
+	var w := 48
+	var h := 72
+	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	var head := Vector2(w / 2.0, w / 2.0)
+	var r := w / 2.0 - 2.0
+	for y in h:
+		for x in w:
+			var p := Vector2(x + 0.5, y + 0.5)
+			# inside the round head, or the triangle from the head down to the tip
+			var half := r * clampf(1.0 - (p.y - head.y) / (h - 2.0 - head.y), 0.0, 1.0) * 0.75
+			var d_head := p.distance_to(head)
+			var in_tip := p.y >= head.y and absf(p.x - head.x) <= half
+			if d_head <= r or in_tip:
+				var edge := d_head > r - 4.0 and not (in_tip and absf(p.x - head.x) <= half - 4.0 and p.y < h - 6.0)
+				if in_tip and d_head > r - 4.0 and absf(p.x - head.x) <= half - 4.0:
+					edge = false
+				img.set_pixel(x, y, Color(0.08, 0.06, 0.05) if edge else Color.WHITE)
+	return ImageTexture.create_from_image(img)
+
+func marker_material(colour: Color) -> StandardMaterial3D:
+	if not marker_materials.has(colour):
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+		m.no_depth_test = true # seen through trees and peaks
+		m.render_priority = 10
+		m.albedo_texture = marker_texture
+		m.albedo_color = colour
+		marker_materials[colour] = m
+	return marker_materials[colour]
+
+# Places a pin above every model that has one (units, Sköll, Sunna), sized by how far
+# away the camera is; none when the camera is close.
+func update_markers() -> void:
+	if marker_mesh == null:
+		marker_texture = make_marker_texture()
+		marker_mesh = QuadMesh.new()
+		marker_mesh.size = Vector2(2.0 / 3.0, 1.0)
+	var pins_on := cam_distance >= MARKER_SHOW_DISTANCE
+	var size := MARKER_SIZE * cam_distance
+	var wanted := {}
+	for fig in figures.values():
+		wanted[fig] = [fig.get_meta("marker", Color.WHITE), UNIT_HEIGHT]
+	wanted[skoll] = [SKOLL_MARKER, skoll_height]
+	wanted[sunna] = [SUNNA_MARKER, SUNNA_HEIGHT]
+	for node in wanted:
+		var pin: MeshInstance3D = markers.get(node)
+		if pin == null or not is_instance_valid(pin):
+			pin = MeshInstance3D.new()
+			pin.mesh = marker_mesh
+			pin.top_level = true
+			pin.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			(node as Node3D).add_child(pin)
+			markers[node] = pin
+		var colour: Color = wanted[node][0]
+		var height: float = wanted[node][1]
+		pin.visible = pins_on and (node as Node3D).visible
+		if pin.visible:
+			pin.material_override = marker_material(colour)
+			pin.scale = Vector3.ONE * size
+			pin.global_position = (node as Node3D).global_position + Vector3(0, height + size * 0.55, 0)
+	for node in markers.keys():
+		if not is_instance_valid(node):
+			markers.erase(node)
+
+# --- Sunna, when she has gone rogue: she walks over the land, lit warm gold --------
+func build_sunna() -> void:
+	sunna = SUNNA_SCENE.instantiate()
+	add_child(sunna)
+	sunna.scale = Vector3.ONE * SUNNA_HEIGHT / SUNNA_MODEL_HEIGHT
+	sunna_anim = sunna.find_child("AnimationPlayer", true, false)
+	if sunna_anim and sunna_anim.has_animation("walk"):
+		sunna_anim.get_animation("walk").loop_mode = Animation.LOOP_LINEAR
+		sunna_anim.play("walk")
+	var lamp := OmniLight3D.new()
+	lamp.light_color = SUNNA_LIGHT_COLOUR
+	lamp.light_energy = SUNNA_LIGHT_ENERGY
+	lamp.omni_range = SUNNA_LIGHT_RANGE
+	lamp.top_level = true # placed by update_sunna, not scaled with her
+	lamp.name = "Light"
+	sunna.add_child(lamp)
+	sunna.visible = false
+
+# She is shown only while rogue and in your sight. She always walks (Nathan: "show
+# rogue Sunna with the walk animation"), toward her new hex when she moves.
+func update_sunna(delta: float) -> void:
+	var d := state.daughter
+	if not d.is_rogue() or not state.player_can_see(d.pos):
+		sunna.visible = false
+		sunna_cell = NO_CELL
+		return
+	var target := cell_position(d.pos) + Vector3(0, hex_top(d.pos), 0)
+	if not sunna.visible or sunna_cell == NO_CELL:
+		sunna.visible = true
+		sunna.position = target
+		sunna_walk = 0.0
+	elif d.pos != sunna_cell:
+		sunna_from = sunna.position
+		sunna_walk = SUNNA_STEP_TIME * maxi(1, HexMap.hex_distance(sunna_cell, d.pos))
+		sunna.set_meta("walk_total", sunna_walk)
+		var dir := target - sunna_from
+		sunna.rotation.y = atan2(dir.x, dir.z)
+	sunna_cell = d.pos
+	if sunna_walk > 0.0:
+		sunna_walk = maxf(0.0, sunna_walk - delta)
+		sunna.position = sunna_from.lerp(target, 1.0 - sunna_walk / float(sunna.get_meta("walk_total")))
+	else:
+		sunna.position = target
+	(sunna.get_node("Light") as Node3D).global_position = sunna.global_position + Vector3(0, SUNNA_HEIGHT * 0.9, 0.2)
 
 # --- Sköll: idle while standing, walks from hex to hex when he moves ---------------
 func update_skoll(delta: float) -> void:
