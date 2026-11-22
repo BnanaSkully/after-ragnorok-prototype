@@ -76,6 +76,12 @@ func _initialize() -> void:
 	if not spots.is_empty():
 		await click(spots[0])
 	check(s.player.outposts.size() == before + 1, "clicking an outpost spot founds an outpost (%d spots)" % spots.size())
+	for i in 3: await process_frame
+	check(not spots.is_empty() and v.outpost_models.has(spots[0]), "the new outpost shows its model")
+	if not spots.is_empty():
+		v.cam_target = v.cell_position(spots[0]); v.cam_distance = 4.0; v.place_camera()
+		for i in 5: await process_frame
+		await shot("click3d_outpost_model.png")
 	# a drag (press here, release far away) is not a click
 	m.selected = null
 	var at: Vector2 = v.camera.unproject_position(v.cell_position(s.player.units[0].pos))

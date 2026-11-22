@@ -27,6 +27,10 @@ const TILE_MODELS := {
 const TILE_MODEL_PATH := "res://assets/models/tiles/%s.glb"
 # Mountains are built from peak props on a plain basalt hex base, so neighbouring
 # mountain hexes join into ranges (see make_mountain). Peaks: base at y = 0, sized in hex units.
+# Nathan's outpost prop (base at y = 0, sized in hex units), at the back of its hex so a
+# unit can stand in the middle, with a small banner in the owner's colour.
+const OUTPOST := preload("res://assets/models/props/outpost.glb")
+const OUTPOST_OFFSET := Vector3(0.0, 0.0, -0.42)
 const PEAK_TALL := preload("res://assets/models/props/peak_tall.glb")
 const PEAK_MEDIUM := preload("res://assets/models/props/peak_medium.glb")
 const PEAK_LOW := preload("res://assets/models/props/peak_low.glb")
@@ -104,6 +108,7 @@ var pole_nodes: Array[MeshInstance3D] = [] # the banners' poles
 var city_mesh: BoxMesh # the banner's cloth
 var pole_mesh: CylinderMesh
 var stand_heights := {} # tile key -> how high the ground is in the middle of that model (a hill's top)
+var outpost_models := {} # hex -> its outpost model (made when it appears, freed when it's gone)
 var basalt_base: ArrayMesh # a plain hex base in the tiles' basalt cliff texture (under mountains)
 var water_shade_mesh: ArrayMesh # a flat hex laid on the water to darken it (fog, territory)
 
@@ -588,11 +593,47 @@ func update_cities() -> void:
 		var flag_at := cell_position(f.city_pos) + Vector3(0.55, hex_top(f.city_pos), 0.3)
 		var pole := pooled(pole_nodes, used, pole_mesh)
 		pole.material_override = material(Color(0.3, 0.22, 0.15))
+		pole.scale = Vector3.ONE
 		pole.position = flag_at + Vector3(0, pole_mesh.height / 2.0, 0)
 		var cloth := pooled(city_nodes, used, city_mesh)
 		used += 1
 		cloth.material_override = material(colour_of.call(f))
+		cloth.scale = Vector3.ONE
 		cloth.position = flag_at + Vector3(city_mesh.size.x / 2.0, pole_mesh.height - city_mesh.size.y / 2.0, 0)
+	# outposts you know of: Nathan's model, and a smaller banner in the owner's colour
+	var known := {}
+	for f in state.factions:
+		for c in f.outposts:
+			if not state.player_has_explored(c):
+				continue
+			known[c] = true
+			var model: Node3D = outpost_models.get(c)
+			if model == null:
+				model = OUTPOST.instantiate()
+				model.scale = Vector3.ONE * HEX_RADIUS
+				model.rotation.y = PI # its door toward the middle of the hex
+				add_child(model)
+				outpost_models[c] = model
+			var base := cell_position(c) + OUTPOST_OFFSET * HEX_RADIUS
+			model.position = base + Vector3(0, hex_top(c), 0)
+			var dim := Color.WHITE if state.player_can_see(c) else Color.WHITE.darkened(FOG_MEMORY_DARKEN)
+			var overlay := tint_overlay(dim)
+			for part in model.find_children("*", "GeometryInstance3D", true, false):
+				(part as GeometryInstance3D).material_overlay = overlay
+			var flag_at := base + Vector3(0.3, hex_top(c), 0)
+			var pole := pooled(pole_nodes, used, pole_mesh)
+			pole.material_override = material(Color(0.3, 0.22, 0.15))
+			pole.scale = Vector3.ONE * 0.7
+			pole.position = flag_at + Vector3(0, pole_mesh.height * 0.35, 0)
+			var cloth := pooled(city_nodes, used, city_mesh)
+			used += 1
+			cloth.material_override = material(colour_of.call(f))
+			cloth.scale = Vector3.ONE * 0.7
+			cloth.position = flag_at + Vector3(city_mesh.size.x * 0.35, pole_mesh.height * 0.7 - city_mesh.size.y * 0.35, 0)
+	for c in outpost_models.keys():
+		if not known.has(c):
+			outpost_models[c].queue_free()
+			outpost_models.erase(c)
 	hide_rest(city_nodes, used)
 	hide_rest(pole_nodes, used)
 
