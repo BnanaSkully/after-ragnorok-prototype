@@ -61,6 +61,7 @@ Run a test:
 | midgame_test.gd | Part 2: Sköll returning stronger, wounds and driving him back, ash, support against him, Sunna's requests and rising, swallowing, the endings; full 40-turn games (returns, ash, rising, endings, impossible states) |
 | zoc_test.gd | zone of control: each rule on a set-up game (stop next to an enemy army, no slipping past, attack allowed, peace, scouts, own city, the AI obeys it); full games with the rule off and on |
 | hud_screenshot.gd | (screenshot) the HUD at 1152x648: landing, turn 1 and turn 16 with every panel open in turn, a pop-up put aside with its badge, toasts, 2D and 3D. Takes about 4 minutes (3D on a software renderer) |
+| active_sunna.gd | not in run_all: full games with a player who chases Sunna's rising (grants her requests, keeps an oath): Dawn with you (target about 15%) |
 | helpers.gd | not a test: shared helpers (answer every pop-up, list landing hexes) |
 
 Screenshot scripts need a virtual screen and an output folder in `S`:
