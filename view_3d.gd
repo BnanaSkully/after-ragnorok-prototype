@@ -55,6 +55,7 @@ const ASH_TINT := Color(0.6, 0.52, 0.42) # the ashen plains and forest: warm cha
 const HILLS_TINT := Color(0.6, 0.8, 0.4) # hills toward the plains' green: grassy hills with rock, not ash
 # The grass tufts in the tile files carry no colour (Blender's colour didn't export), so
 # they showed pure white ("glints"). Painted here until the files carry their own colour.
+const TUFT_VISIBLE_DISTANCE := 15.0 # grass tufts are hidden beyond this camera distance (they shimmered far away)
 const TUFT_COLOURS := {"Plains tuft": Color(0.36, 0.4, 0.22), "Ash tuft": Color(0.4, 0.39, 0.37)}
 const MODEL_GROUND := 0.39 # how high the ground is on the models (units and banners stand on it)
 const CITY_UNIT_OFFSET := Vector3(0.0, 0, 0.78) # a unit in its city stands in front of the longhouse, toward the camera (at 0.5 it was hidden inside it)
@@ -147,6 +148,7 @@ var water_shade_mesh: ArrayMesh # a flat hex laid on the water to darken it (fog
 var skoll: Node3D
 var markers := {} # a unit's (or Sköll's, Sunna's) model -> its pin
 var marker_materials := {} # colour -> pin material
+var split_meshes := {} # a tile mesh -> [its ground, its tufts] (see paint_tufts)
 var marker_mesh: QuadMesh
 var marker_texture: ImageTexture
 var sunna: Node3D # rogue Sunna, out in the open (hidden while she shelters in a city)
@@ -626,15 +628,43 @@ func height_at_centre(a: Vector3, b: Vector3, c: Vector3) -> float:
 		return -1.0
 	return wa * a.y + wb * b.y + wc * c.y
 
+# The tufts share a mesh with their tile's ground, so each such mesh is split once into
+# the ground (and bedrock) and the tufts (split_meshes), and the tufts get their own node:
+# painted (TUFT_COLOURS) and hidden beyond TUFT_VISIBLE_DISTANCE, where they shimmered.
 func paint_tufts(model: Node3D) -> void:
 	for part in model.find_children("*", "MeshInstance3D", true, false):
-		var mesh: Mesh = (part as MeshInstance3D).mesh
-		for i in mesh.get_surface_count():
-			var mat := mesh.surface_get_material(i)
-			if mat != null and TUFT_COLOURS.has(mat.resource_name):
-				var paint := material(TUFT_COLOURS[mat.resource_name])
-				paint.cull_mode = BaseMaterial3D.CULL_DISABLED # thin blades: seen from both sides
-				(part as MeshInstance3D).set_surface_override_material(i, paint)
+		var mi := part as MeshInstance3D
+		var mesh: Mesh = mi.mesh
+		if not split_meshes.has(mesh):
+			split_meshes[mesh] = split_tufts(mesh)
+		var split: Array = split_meshes[mesh]
+		if split.is_empty():
+			continue
+		mi.mesh = split[0]
+		var tufts := MeshInstance3D.new()
+		tufts.mesh = split[1]
+		tufts.visibility_range_end = TUFT_VISIBLE_DISTANCE
+		tufts.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.add_child(tufts)
+
+# [ground mesh, tuft mesh] made from a tile mesh, or [] if it has no tufts.
+func split_tufts(mesh: Mesh) -> Array:
+	var ground := ArrayMesh.new()
+	var tufts := ArrayMesh.new()
+	for i in mesh.get_surface_count():
+		var mat := mesh.surface_get_material(i)
+		var is_tuft := mat != null and TUFT_COLOURS.has(mat.resource_name)
+		var into := tufts if is_tuft else ground
+		into.add_surface_from_arrays(mesh.surface_get_primitive_type(i), mesh.surface_get_arrays(i))
+		if is_tuft:
+			var paint := material(TUFT_COLOURS[mat.resource_name])
+			paint.cull_mode = BaseMaterial3D.CULL_DISABLED # thin blades: seen from both sides
+			into.surface_set_material(into.get_surface_count() - 1, paint)
+		else:
+			into.surface_set_material(into.get_surface_count() - 1, mat)
+	if tufts.get_surface_count() == 0:
+		return []
+	return [ground, tufts]
 
 func tint_overlay(tint: Color) -> StandardMaterial3D:
 	if tint == Color.WHITE:
