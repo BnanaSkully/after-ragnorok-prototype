@@ -36,8 +36,6 @@ const TILE_MODEL_PATH := "res://assets/models/tiles/%s.glb"
 # mountain hexes join into ranges (see make_mountain). Peaks: base at y = 0, sized in hex units.
 # Nathan's outpost prop (base at y = 0, sized in hex units), at the back of its hex so a
 # unit can stand in the middle, with a small banner in the owner's colour.
-const RIFT_OVERLAY_SCALE := 0.75 # the rift laid over its land tile: this big
-const RIFT_SINK := 0.0 # how far its base sinks into the land (0: it stands on the land, so the land never covers its pit)
 const OUTPOST := preload("res://assets/models/props/outpost.glb")
 const OUTPOST_OFFSET := Vector3(0.0, 0.0, -0.42)
 const PEAK_TALL := preload("res://assets/models/props/peak_tall.glb")
@@ -60,7 +58,7 @@ const HILLS_TINT := Color(0.6, 0.8, 0.4) # hills toward the plains' green: grass
 const TUFT_VISIBLE_DISTANCE := 15.0 # grass tufts are hidden beyond this camera distance (they shimmered far away)
 const TUFT_COLOURS := {"Plains tuft": Color(0.36, 0.4, 0.22), "Ash tuft": Color(0.4, 0.39, 0.37)}
 const MODEL_GROUND := 0.39 # how high the ground is on the models (units and banners stand on it)
-const CITY_UNIT_OFFSET := Vector3(0.0, 0, 0.78) # a unit in its city stands in front of the longhouse, toward the camera (at 0.5 it was hidden inside it)
+const CITY_UNIT_OFFSET := Vector3(0.0, 0, 0.92) # a unit in its city stands in front of the longhouse, toward the camera, clear of its wall and ring (0.5 hid it inside, 0.78 overlapped the wall; the hex corner is at 0.98)
 const WARRIOR := preload("res://assets/models/units/warrior.glb")
 const SCOUT := preload("res://assets/models/units/scout.glb")
 const UNIT_BAND_SHADER := preload("res://assets/shaders/unit_band.gdshader")
@@ -100,7 +98,8 @@ const ZOOM_MIN := 6.0
 const MARKER_SHOW_DISTANCE := 13.0 # camera distance from which pins show (it starts at 22)
 const MARKER_SIZE := 0.032 # pin height per unit of camera distance: they grow as you zoom out
 const SKOLL_MARKER := Color(1.0, 0.72, 0.2)
-const SUNNA_MARKER := Color(1.0, 0.92, 0.55)
+const SUNNA_MARKER := Color.WHITE # white with a small gold sun in its head (SUN_DISC_COLOUR)
+const SUN_DISC_COLOUR := Color(1.0, 0.7, 0.1)
 const ZOOM_MAX := 40.0
 const PAN_SPEED := 0.9 # map units a second, per unit of zoom distance
 
@@ -125,7 +124,6 @@ var touches := {} # finger index -> where it is on the screen (phones and touch 
 
 var hexes := {} # Vector2i -> MeshInstance3D
 var rifts_now: Array = [] # shown_rifts(), worked out once a frame
-var rift_models := {} # hex -> the rift drawn over its land (update_rifts)
 var tiles := {} # the tile models, from TileKit3D.build_all(), shared by all hexes
 var tile_scenes := {} # tile key (a land, "settlement", "ruins", "rift") -> PackedScene
 var overlays := {} # tint -> material that multiplies a real model's colours by the tint
@@ -150,10 +148,11 @@ var water_shade_mesh: ArrayMesh # a flat hex laid on the water to darken it (fog
 
 var skoll: Node3D
 var markers := {} # a unit's (or Sköll's, Sunna's) model -> its pin
-var marker_materials := {} # colour -> pin material
+var marker_materials := {} # [colour, sun] -> pin material
 var split_meshes := {} # a tile mesh -> [its ground, its tufts] (see paint_tufts)
 var marker_mesh: QuadMesh
 var marker_texture: ImageTexture
+var sun_marker_texture: ImageTexture # Sunna's pin: a sun disc with rays in the head
 var sunna: Node3D # rogue Sunna, out in the open (hidden while she shelters in a city)
 var sunna_anim: AnimationPlayer
 var sunna_cell := NO_CELL
@@ -212,6 +211,8 @@ func tile_key(c: Vector2i) -> Variant:
 		for r in s.ruins:
 			if r["cell"] == c and not r["taken"]:
 				return "ruins"
+		if rifts_now.has(c):
+			return "rift" # Nathan's rift tile, whole: it replaces the land (it is modelled as a tile)
 	var land := s.terrain_at(c)
 	if land == Terrain.Type.MOUNTAINS and basalt_base != null:
 		return mountain_key(c)
@@ -405,7 +406,6 @@ func _process(delta: float) -> void:
 	rifts_now = shown_rifts()
 	update_board()
 	update_cities()
-	update_rifts()
 	update_marks()
 	update_units(delta)
 	update_skoll(delta)
@@ -732,28 +732,6 @@ func cell_at_screen(screen_pos: Vector2) -> Vector2i:
 	return cell_at_point(from + dir * t)
 
 # Whose city: a banner in the owner's colour on each settlement you've found.
-# Rifts you know of: the rift model laid over the hex's own land tile (Nathan: "draw the
-# rift as an overlay on the hex's own land tile instead of replacing it"), smaller
-# (RIFT_OVERLAY_SCALE) and lifted so its pit sits on the land's ground.
-func update_rifts() -> void:
-	for c in rifts_now:
-		var model: Node3D = rift_models.get(c)
-		if model == null:
-			model = tile_scenes["rift"].instantiate()
-			model.scale = Vector3.ONE * HEX_RADIUS * RIFT_OVERLAY_SCALE
-			model.rotation.y = hexes[c].rotation.y if hexes.has(c) else 0.0
-			add_child(model)
-			rift_models[c] = model
-		model.position = cell_position(c) + Vector3(0, hex_top(c) - RIFT_SINK * HEX_RADIUS * RIFT_OVERLAY_SCALE, 0)
-		var dim := Color.WHITE if state.player_can_see(c) else Color.WHITE.darkened(FOG_MEMORY_DARKEN)
-		var overlay := tint_overlay(dim)
-		for part in model.find_children("*", "GeometryInstance3D", true, false):
-			(part as GeometryInstance3D).material_overlay = overlay
-	for c in rift_models.keys():
-		if not rifts_now.has(c):
-			rift_models[c].queue_free()
-			rift_models.erase(c)
-
 func update_cities() -> void:
 	var used := 0
 	for f in state.factions:
@@ -772,7 +750,7 @@ func update_cities() -> void:
 		var ring := pooled(city_ring_nodes, used - 1, city_ring_mesh)
 		ring.material_override = glow_material(colour_of.call(f), CITY_RING_GLOW)
 		ring.scale = Vector3.ONE * HEX_RADIUS
-		ring.rotation.y = PI / 6.0 # corners on the hex's corners
+		ring.rotation.y = 0.0 # the torus already puts its corners at 30° + 60°k: on the pointy-top hex's corners (PI / 6 turned it flat-top)
 		ring.position = cell_position(f.city_pos) + Vector3(0, MODEL_GROUND * HEX_RADIUS + 0.02, 0)
 		if used > city_lights.size():
 			var lamp := OmniLight3D.new()
@@ -959,8 +937,9 @@ func hide_rest(pool: Array[MeshInstance3D], used: int) -> void:
 		pool[i].visible = false
 
 # A pin's picture, made once: a round head on a point, white with a dark edge (the
-# material colours it).
-func make_marker_texture() -> ImageTexture:
+# material colours it). With sun, the head holds a gold disc with eight short rays
+# (Sunna's pin, drawn white so it never looks like Sköll's gold one).
+func make_marker_texture(sun := false) -> ImageTexture:
 	var w := 48
 	var h := 72
 	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
@@ -977,27 +956,42 @@ func make_marker_texture() -> ImageTexture:
 				var edge := d_head > r - 4.0 and not (in_tip and absf(p.x - head.x) <= half - 4.0 and p.y < h - 6.0)
 				if in_tip and d_head > r - 4.0 and absf(p.x - head.x) <= half - 4.0:
 					edge = false
-				img.set_pixel(x, y, Color(0.08, 0.06, 0.05) if edge else Color.WHITE)
+				var c := Color(0.08, 0.06, 0.05) if edge else Color.WHITE
+				if sun and not edge and is_sun(p - head):
+					c = SUN_DISC_COLOUR
+				img.set_pixel(x, y, c)
 	return ImageTexture.create_from_image(img)
 
-func marker_material(colour: Color) -> StandardMaterial3D:
-	if not marker_materials.has(colour):
+# Inside the sun drawn in Sunna's pin head: a disc, and eight rays around it.
+func is_sun(v: Vector2) -> bool:
+	var d := v.length()
+	if d <= 7.5:
+		return true
+	if d < 10.0 or d > 15.0:
+		return false
+	var a := fposmod(v.angle(), PI / 4.0)
+	return minf(a, PI / 4.0 - a) * d <= 1.6
+
+func marker_material(colour: Color, sun := false) -> StandardMaterial3D:
+	var key := [colour, sun]
+	if not marker_materials.has(key):
 		var m := StandardMaterial3D.new()
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
 		m.no_depth_test = true # seen through trees and peaks
 		m.render_priority = 10
-		m.albedo_texture = marker_texture
+		m.albedo_texture = sun_marker_texture if sun else marker_texture
 		m.albedo_color = colour
-		marker_materials[colour] = m
-	return marker_materials[colour]
+		marker_materials[key] = m
+	return marker_materials[key]
 
 # Places a pin above every model that has one (units, Sköll, Sunna), sized by how far
 # away the camera is; none when the camera is close.
 func update_markers() -> void:
 	if marker_mesh == null:
 		marker_texture = make_marker_texture()
+		sun_marker_texture = make_marker_texture(true)
 		marker_mesh = QuadMesh.new()
 		marker_mesh.size = Vector2(2.0 / 3.0, 1.0)
 	var pins_on := cam_distance >= MARKER_SHOW_DISTANCE
@@ -1020,7 +1014,7 @@ func update_markers() -> void:
 		var height: float = wanted[node][1]
 		pin.visible = pins_on and (node as Node3D).visible
 		if pin.visible:
-			pin.material_override = marker_material(colour)
+			pin.material_override = marker_material(colour, node == sunna)
 			pin.scale = Vector3.ONE * size
 			pin.global_position = (node as Node3D).global_position + Vector3(0, height + size * 0.55, 0)
 	for node in markers.keys():

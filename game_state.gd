@@ -258,6 +258,7 @@ func end_turn() -> void:
 				u.hp = mini(Unit.MAX_HP, u.hp + (HEAL_HOME if territory_owner(u.pos) == f else HEAL_REST))
 			u.acted = false
 	judge_readiness()
+	rival_claims()
 	check_daughter_leaving()
 	for f in ais:
 		ai_build(f)
@@ -417,6 +418,20 @@ func check_daughter_leaving() -> void:
 	daughter.go_rogue(spot)
 	var whose := "your" if holder == player else holder.name + "'s"
 	add_message("%s has lost faith and walked out of %s city! She is alone in the open." % [SunDaughter.NAME.capitalize(), whose])
+
+# Every people believes she is its own lost sun: every CLAIM_GAP turns, while
+# you shelter her, each AI's Trust toward you falls (at most CLAIM_TRUST_MAX).
+func rival_claims() -> void:
+	if turn % SunDaughter.CLAIM_GAP != 0 or not daughter.shelters_with(player):
+		return
+	var who: Array[String] = []
+	for r in relations:
+		if r.other.is_alive() and r.claim_trust_lost < SunDaughter.CLAIM_TRUST_MAX:
+			r.change_trust(SunDaughter.CLAIM_TRUST)
+			r.claim_trust_lost -= SunDaughter.CLAIM_TRUST
+			who.append("the %s (%s)" % [r.other.name, SunDaughter.claim_name(r.other)])
+	if not who.is_empty():
+		add_message("Each people says %s is its own lost sun and resents that you hold her: Trust %+d with %s." % [SunDaughter.NAME, SunDaughter.CLAIM_TRUST, ", ".join(who)])
 
 # In the open she moves one hex away from Sköll each turn.
 func daughter_flee() -> void:
@@ -810,13 +825,19 @@ func player_trade_daughter(f: Faction) -> bool:
 	var deal := "you paid them %d Industry" % q["you_pay"]
 	if q["you_pay"] == 0:
 		deal = "they paid you %d Industry" % q["they_pay"] if q["they_pay"] > 0 else "for nothing"
-	remember("Turn %d: you handed %s to the %s (%s). Her Favour toward you %+d." % [turn, SunDaughter.NAME, f.name, deal, SunDaughter.TRADED_FAVOUR])
+	remember("Turn %d: you handed %s to the %s (%s), who call her %s. Her Favour toward you %+d. Their Trust %+d, and they accept your next %s or deal." % [turn, SunDaughter.NAME, f.name, deal, SunDaughter.claim_name(f), SunDaughter.TRADED_FAVOUR, SunDaughter.GIVEN_TRUST, f.pact_word])
 	return true
 
 # She moves from giver's city to receiver's. Being traded costs Favour toward the giver.
+# You giving her to an AI (a trade, or its claim): its Trust +GIVEN_TRUST and it
+# accepts your next oath or deal (contested Sunna, step 4).
 func hand_over_daughter(giver: Faction, receiver: Faction) -> void:
 	daughter.join(receiver)
 	giver.favour = clampi(giver.favour + SunDaughter.TRADED_FAVOUR, 0, SunDaughter.MAX_FAVOUR)
+	if giver == player and receiver != player:
+		var r := relation(receiver)
+		r.change_trust(SunDaughter.GIVEN_TRUST)
+		r.owes_you = true
 
 # --- Diplomacy helpers -----------------------------------------------------------
 # The player's relationship with this AI faction.
@@ -1045,14 +1066,19 @@ func ai_wars_turn() -> void:
 						ai_war_since.erase(key)
 						ai_truce_until[key] = turn + Diplomacy.TRUCE_TURNS
 						add_message("The %s and the %s made peace." % [a.name, b.name])
-			elif turn >= ai_truce_until.get(key, 0) and not tribute_bound(a, b) and army_power(a) - army_power(b) >= AI_WAR_GAP and randf() < AI_WAR_CHANCE:
-				ai_declare_war(a, b)
+			elif turn >= ai_truce_until.get(key, 0) and not tribute_bound(a, b) and randf() < AI_WAR_CHANCE:
+				var gap := army_power(a) - army_power(b)
+				# a much weaker neighbour, or one holding the sun a believes is its own
+				if gap >= AI_WAR_GAP:
+					ai_declare_war(a, b)
+				elif daughter.shelters_with(b) and gap >= 0:
+					ai_declare_war(a, b, "they want %s, their lost sun" % SunDaughter.claim_name(a))
 
-func ai_declare_war(a: Faction, b: Faction) -> void:
+func ai_declare_war(a: Faction, b: Faction, why := "") -> void:
 	if tribute_bound(a, b):
 		return
 	ai_war_since[pair_key(a, b)] = turn
-	add_message("The %s declared war on the %s." % [a.name, b.name])
+	add_message("The %s declared war on the %s%s." % [a.name, b.name, " (%s)" % why if why != "" else ""])
 	# Your ally was attacked: your oath says you join the war. You decide (pop-up).
 	var r := relation(b)
 	if r.pact_active() and not at_war(player, a):
@@ -1220,6 +1246,9 @@ func make_tributary(f: Faction, conqueror: Faction) -> void:
 	if conqueror.overlord == f.name:
 		conqueror.overlord = ""
 	f.overlord = conqueror.name
+	if daughter.shelters_with(f):
+		daughter.join(conqueror) # she goes with the city's new overlord
+		add_message("%s carried %s off from %s. They call her %s." % ["You" if conqueror == player else "The " + conqueror.name, SunDaughter.NAME, "your city" if f == player else "the %s city" % f.name, SunDaughter.claim_name(conqueror)])
 	if f == player or conqueror == player:
 		var r := relation(conqueror if f == player else f)
 		r.at_war = false
@@ -1282,6 +1311,8 @@ func ai_siege_target(f: Faction) -> Faction:
 	for g in factions:
 		if g.is_alive() and at_war(f, g):
 			var d := HexMap.hex_distance(f.city_pos, g.city_pos)
+			if daughter.shelters_with(g):
+				d -= SunDaughter.CLAIM_SIEGE_PULL # take her holder's city and she is yours
 			if d < best_d:
 				best_d = d
 				best = g
@@ -1430,8 +1461,8 @@ func maybe_sunna_request() -> void:
 func maybe_rise() -> void:
 	if turn < RISE_TURN or daughter.state != SunDaughter.State.SHELTERED or daughter.holder == null or not daughter.holder.is_alive():
 		return
-	if daughter.holder.favour < SunDaughter.RISE_FAVOUR:
-		return
+	if not rise_missing(daughter.holder).is_empty():
+		return # Favour, another people's recognition, and a city that has held against Sköll
 	daughter.state = SunDaughter.State.RISEN
 	# Mortal now, but enraged (Nathan's playtest: "the game just ends with Sunna
 	# rising"): he keeps his Strength, knows where she is and runs at her city.
@@ -1444,6 +1475,29 @@ func maybe_rise() -> void:
 		diplomacy_log.pop_front()
 	add_message("Turn %d: SUNNA HAS RISEN and stands with %s (+%d Food, +%d Industry a turn). The ash stops." % [turn, who, SunDaughter.RISEN_FOOD, SunDaughter.RISEN_INDUSTRY])
 	add_message("Sköll is MORTAL now, but enraged (Strength %d): he runs %d hexes a turn at her city. If it stands on turn %d it is Dawn; if it falls, he swallows her." % [skoll.strength, Skoll.RAGE_SPEED, END_TURN])
+
+# Does another people recognise her as f's? (Trust RECOGNISE_TRUST+ or an oath.)
+# AIs keep no Trust toward each other, so for an AI holder it is you who
+# recognise it: its relationship with you.
+func recognised(f: Faction) -> bool:
+	if f == player:
+		for r in relations:
+			if r.other.is_alive() and (r.trust >= SunDaughter.RECOGNISE_TRUST or r.pact_active()):
+				return true
+		return false
+	var rel := relation(f)
+	return rel != null and (rel.trust >= SunDaughter.RECOGNISE_TRUST or rel.pact_active())
+
+# What she still needs before she can rise with f (empty = ready, from RISE_TURN).
+func rise_missing(f: Faction) -> Array[String]:
+	var missing: Array[String] = []
+	if f.favour < SunDaughter.RISE_FAVOUR:
+		missing.append("Favour %d/%d" % [f.favour, SunDaughter.RISE_FAVOUR])
+	if not recognised(f):
+		missing.append("recognition (Trust %d+ or an oath)" % SunDaughter.RECOGNISE_TRUST)
+	if f.skoll_held < 1:
+		missing.append("her city to hold off Sköll")
+	return missing
 
 # Every few turns after the Landing, a small event asks the player to choose.
 func maybe_turn_event() -> void:

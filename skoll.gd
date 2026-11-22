@@ -36,6 +36,8 @@ const CITY_DAMAGE := 2.0 # he tears at a city's HP this many times as hard as an
 const RIFT_TURN := 2 # the turn the rifts are first rolled
 const RIFT_MIN_CITY_DISTANCE := 4 # rifts stay at least this far from every city (was 3: he came out one step from a city's walls)
 const RIFT_MAX_CITY_DISTANCE := 7 # ...and at most this far from the city they belong to
+const SCENT_WEIGHT := 2 # he scents Sunna: her protector's rift is this many times as likely as any other (pick_rift)
+const HELD_RANGE := 3 # driving him back within this many hexes of your city counts as your city holding against him (Nathan's pick, 22 Nov)
 const SIGHT_RANGE := 2 # fog of war: he only sees this far; a rogue Daughter further away is hidden from him
 const SPEED := 2 # hexes a turn he walks toward the city he hunts (was 1; Nathan's playtest: "he isn't scary anymore")
 const RAGE_SPEED := 3 # once Sunna has risen he is mortal but enraged: he runs this fast at her city
@@ -164,6 +166,7 @@ func attack_city(f: Faction) -> void:
 			drive_back()
 	else:
 		game.add_message("%s's city (defence %d) held: it lost %d HP (%d left) and wounded Sköll by %d." % [f.name, defence, dealt, f.city_hp, taken])
+		f.skoll_held += 1
 		wound(taken, f)
 
 # She's out in the open: he sprints toward her (SPRINT hexes a turn), and if
@@ -278,6 +281,10 @@ func wound(amount: int, by: Faction = null, hunted := false) -> void:
 		return
 	if wounds * 2 >= strength:
 		game.add_message("Badly wounded (%d of his %d Strength), Sköll flees into the void." % [mini(wounds, strength), strength])
+		# Driving him off near your own city counts as your city holding against him
+		# (Sunna rises only where a city has held: GameState.rise_missing).
+		if by != null and by.is_alive() and HexMap.hex_distance(pos, by.city_pos) <= HELD_RANGE:
+			by.skoll_held += 1
 		drive_back()
 	else:
 		game.add_message("Sköll is wounded: Strength %d for now (heals %d a turn)." % [effective_strength(), WOUND_HEAL])
@@ -367,13 +374,31 @@ func come_through_rift() -> void:
 	for r in rifts:
 		if not game.is_blocked(r) and not game.is_city(r):
 			free.append(r)
-	pos = free.pick_random() if not free.is_empty() else random_edge_cell()
+	pos = pick_rift(free) if not free.is_empty() else random_edge_cell()
 	revealed_rift = pos
 	var owner: Faction = game.faction_named(rift_city.get(pos, ""))
 	if owner != null and owner.is_alive():
 		target = owner # he hunts the city this rift opened toward
 	else:
 		pick_target()
+
+# He scents Sunna: the rift of the city sheltering her counts SCENT_WEIGHT
+# times (about 40% with 4 cities instead of 25%). Not while she's rogue (her
+# trail leads nowhere) or once she has risen or been swallowed.
+func pick_rift(free: Array[Vector2i]) -> Vector2i:
+	var d: SunDaughter = game.daughter
+	var her_rift := HexMap.NO_CELL
+	if d.state == SunDaughter.State.SHELTERED and d.holder != null:
+		for r in free:
+			if rift_city.get(r, "") == d.holder.name:
+				her_rift = r
+	if her_rift == HexMap.NO_CELL:
+		return free.pick_random()
+	var roll := randi_range(1, free.size() - 1 + SCENT_WEIGHT)
+	if roll <= SCENT_WEIGHT:
+		return her_rift
+	var others := free.filter(func(r): return r != her_rift)
+	return others.pick_random()
 
 # (Used when his rift belongs to no standing city, or his target fell.) He
 # doesn't know which city hides the Daughter: he hunts the nearest city (ties

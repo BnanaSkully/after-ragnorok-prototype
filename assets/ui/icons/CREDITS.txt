@@ -1,0 +1,17 @@
+Icons from game-icons.net (https://game-icons.net), by Lorc, Delapouite and other contributors.
+Licensed CC BY 3.0: https://creativecommons.org/licenses/by/3.0/
+Taken from the @iconify-json/game-icons package; recoloured white (the HUD tints them gold).
+
+diplomacy.svg = shaking-hands
+build.svg = mining
+chronicle.svg = open-book
+settings.svg = cog
+pop.svg = three-friends
+food.svg = wheat
+industry.svg = anvil
+army.svg = crossed-swords
+land.svg = mountains
+offer.svg = envelope
+request.svg = sun
+popup.svg = scroll-unfurled
+peace.svg = peace-dove
