@@ -36,8 +36,13 @@ const TILE_MODEL_PATH := "res://assets/models/tiles/%s.glb"
 # mountain hexes join into ranges (see make_mountain). Peaks: base at y = 0, sized in hex units.
 # Nathan's outpost prop (base at y = 0, sized in hex units), at the back of its hex so a
 # unit can stand in the middle, with a small banner in the owner's colour.
-const RIFT_OVERLAY_SCALE := 0.75 # the rift laid over its land tile: this big
-const RIFT_SINK := 0.0 # how far its base sinks into the land (0: it stands on the land, so the land never covers its pit)
+const RIFT_OVERLAY_SCALE := 0.75 # the rift laid into its land tile: this big
+# The rift model is a whole crater (floor at y 0, rim 0.4-0.7 high). It sinks this far
+# (in its own height units) below the land's ground so only its rim shows, and the land
+# tile gets a round hole cut where it sits (RIFT_HOLE, cut_hole) so the land never covers
+# its pit. Standing on the land (Nathan's phone, v15) it read as a blue box.
+const RIFT_SINK := 0.45
+const RIFT_HOLE := 0.66 # the hole's radius, in hex units (inside the rim's 0.64-0.74)
 const OUTPOST := preload("res://assets/models/props/outpost.glb")
 const OUTPOST_OFFSET := Vector3(0.0, 0.0, -0.42)
 const PEAK_TALL := preload("res://assets/models/props/peak_tall.glb")
@@ -152,6 +157,7 @@ var water_shade_mesh: ArrayMesh # a flat hex laid on the water to darken it (fog
 var skoll: Node3D
 var markers := {} # a unit's (or Sköll's, Sunna's) model -> its pin
 var marker_materials := {} # [colour, sun] -> pin material
+var holed_meshes := {} # a tile mesh -> the same mesh with a hole for a rift (cut_hole)
 var split_meshes := {} # a tile mesh -> [its ground, its tufts] (see paint_tufts)
 var marker_mesh: QuadMesh
 var marker_texture: ImageTexture
@@ -473,7 +479,7 @@ func update_board() -> void:
 			tint = tint.darkened(0.6)
 		if tile_scenes.has(key) or is_mountain_key(key):
 			mi.mesh = null
-			show_model(mi, key, tint, c)
+			show_model(mi, key, tint, c, rifts_now.has(c) and not is_mountain_key(key))
 		elif key is int and key == Terrain.Type.WATER:
 			show_model(mi, null, tint) # no tile: the water plane shows through
 			mi.mesh = null if tint == Color.WHITE else water_shade_mesh
@@ -488,9 +494,9 @@ func update_board() -> void:
 
 # Puts a tile model on a hex (made once, remade only when what the hex shows changes),
 # or takes it away (key null). The tint is laid over it like the made-in-code tiles.
-func show_model(mi: MeshInstance3D, key, tint: Color, cell := NO_CELL) -> void:
+func show_model(mi: MeshInstance3D, key, tint: Color, cell := NO_CELL, holed := false) -> void:
 	var model: Node3D = mi.get_node_or_null("Model")
-	if model != null and (key == null or var_to_str(model.get_meta("key")) != var_to_str(key)):
+	if model != null and (key == null or var_to_str(model.get_meta("key")) != var_to_str(key) or model.get_meta("holed", false) != holed):
 		mi.remove_child(model)
 		model.queue_free()
 		model = null
@@ -505,7 +511,10 @@ func show_model(mi: MeshInstance3D, key, tint: Color, cell := NO_CELL) -> void:
 		model.scale = Vector3.ONE * HEX_RADIUS # the models are already sized for hexes 1.0 apart
 		model.name = "Model"
 		model.set_meta("key", key)
+		model.set_meta("holed", holed)
 		paint_tufts(model)
+		if holed:
+			cut_hole(model)
 		mi.add_child(model)
 	var overlay := tint_overlay(tint)
 	for part in model.find_children("*", "GeometryInstance3D", true, false):
@@ -632,6 +641,49 @@ func height_at_centre(a: Vector3, b: Vector3, c: Vector3) -> float:
 		return -1.0
 	return wa * a.y + wb * b.y + wc * c.y
 
+# A known rift's hex: a round hole (RIFT_HOLE) cut in the middle of its land tile for the
+# rift's crater to sit in. Every triangle of the ground (and the soil under it) inside
+# the hole goes; trees standing in it are hidden. Each mesh is cut once (holed_meshes).
+func cut_hole(model: Node3D) -> void:
+	for part in model.find_children("*", "MeshInstance3D", true, false):
+		var mi := part as MeshInstance3D
+		var xf := Transform3D.IDENTITY # where this part sits in the tile
+		var node: Node = mi
+		while node != model:
+			xf = (node as Node3D).transform * xf
+			node = node.get_parent()
+		if Vector2(xf.origin.x, xf.origin.z).length() < RIFT_HOLE + 0.04 and xf.origin.y > 0.2:
+			mi.visible = false # a tree in the hole
+			continue
+		if not holed_meshes.has(mi.mesh):
+			holed_meshes[mi.mesh] = holed_mesh(mi.mesh, xf)
+		mi.mesh = holed_meshes[mi.mesh]
+
+func holed_mesh(mesh: Mesh, xf: Transform3D) -> ArrayMesh:
+	var out := ArrayMesh.new()
+	for i in mesh.get_surface_count():
+		var arrays := mesh.surface_get_arrays(i)
+		var v: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		var idx: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+		if idx.is_empty():
+			idx = PackedInt32Array(range(v.size()))
+		var kept := PackedInt32Array()
+		for t in range(0, idx.size(), 3):
+			var inside := true
+			var y := 0.0
+			for k in 3:
+				var p := xf * v[idx[t + k]]
+				y += p.y / 3.0
+				if Vector2(p.x, p.z).length() >= RIFT_HOLE:
+					inside = false
+			if inside and y > 0.1:
+				continue
+			kept.append_array([idx[t], idx[t + 1], idx[t + 2]])
+		arrays[Mesh.ARRAY_INDEX] = kept
+		out.add_surface_from_arrays(mesh.surface_get_primitive_type(i), arrays)
+		out.surface_set_material(i, mesh.surface_get_material(i))
+	return out
+
 # The tufts share a mesh with their tile's ground, so each such mesh is split once into
 # the ground (and bedrock) and the tufts (split_meshes), and the tufts get their own node:
 # painted (TUFT_COLOURS) and hidden beyond TUFT_VISIBLE_DISTANCE, where they shimmered.
@@ -736,7 +788,7 @@ func cell_at_screen(screen_pos: Vector2) -> Vector2i:
 # Whose city: a banner in the owner's colour on each settlement you've found.
 # Rifts you know of: the rift model laid over the hex's own land tile (Nathan: "draw the
 # rift as an overlay on the hex's own land tile instead of replacing it"), smaller
-# (RIFT_OVERLAY_SCALE) and lifted so its pit sits on the land's ground.
+# (RIFT_OVERLAY_SCALE), sunk into a hole cut in the land (RIFT_SINK, cut_hole).
 func update_rifts() -> void:
 	for c in rifts_now:
 		var model: Node3D = rift_models.get(c)
@@ -746,7 +798,8 @@ func update_rifts() -> void:
 			model.rotation.y = hexes[c].rotation.y if hexes.has(c) else 0.0
 			add_child(model)
 			rift_models[c] = model
-		model.position = cell_position(c) + Vector3(0, hex_top(c) - RIFT_SINK * HEX_RADIUS * RIFT_OVERLAY_SCALE, 0)
+		# its rim at the land's ground (not a hill's top: the hole takes the hill's middle)
+		model.position = cell_position(c) + Vector3(0, (MODEL_GROUND - RIFT_SINK * RIFT_OVERLAY_SCALE) * HEX_RADIUS, 0)
 		var dim := Color.WHITE if state.player_can_see(c) else Color.WHITE.darkened(FOG_MEMORY_DARKEN)
 		var overlay := tint_overlay(dim)
 		for part in model.find_children("*", "GeometryInstance3D", true, false):
