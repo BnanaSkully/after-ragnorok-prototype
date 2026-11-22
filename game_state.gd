@@ -103,6 +103,7 @@ var ais: Array[Faction] = [
 var factions: Array[Faction] = []
 var daughter := SunDaughter.new()
 var skoll: Skoll
+var rifts: Rifts # the rifts in the void Sköll comes through (rifts.gd)
 var relations: Array[Diplomacy] = [] # the player's relationship with each AI faction
 var diplomacy_action_used := false # the player's one diplomatic action this turn (shared)
 var diplomacy_log: Array[String] = [] # what the factions remember, newest last
@@ -134,6 +135,7 @@ var ash := {} # hexes turned to ash by Sköll (hex -> true): dead land, see "Ash
 func _init() -> void:
 	terrain = Terrain.generate(ais.map(func(f): return f.city_pos))
 	skoll = Skoll.new(self)
+	rifts = Rifts.new(self)
 	player.is_player = true
 	factions.append(player)
 	for f in ais:
@@ -151,8 +153,7 @@ func start_crossing() -> void:
 	player.food = Crossing.START_FOOD
 	player.industry = Crossing.START_INDUSTRY
 	daughter.reset(player, ais)
-	skoll.rifts.clear() # rolled on Skoll.RIFT_TURN, after both cities exist
-	skoll.revealed_rift = NO_CELL
+	rifts.clear() # rolled on Rifts.RIFT_TURN, after every city exists
 	messages.clear()
 
 # Apply a choice's effects. Nothing can drop below 0 (Strength below 1).
@@ -226,8 +227,8 @@ func end_turn() -> void:
 	for f in ais:
 		ai_take_turn(f)
 	turn += 1
-	if turn == Skoll.RIFT_TURN:
-		skoll.place_rifts() # hidden until Sköll comes through one
+	if turn == Rifts.RIFT_TURN:
+		rifts.place() # hidden until Sköll comes through one
 	skoll.take_turn()
 	if game_over: # Sköll may have destroyed the player's city or found the Daughter
 		eject_trespassers()
@@ -1603,7 +1604,7 @@ func can_place_outpost(f: Faction, c: Vector2i) -> bool:
 	for r in ruins:
 		if r["cell"] == c and not r["taken"]:
 			return false
-	if f.known_rifts.has(c) or c == skoll.revealed_rift:
+	if f.known_rifts.has(c) or c == rifts.revealed:
 		return false # never on a rift you know of (a hidden one moves away: build_outpost)
 	var u := unit_at(c)
 	return (u == null or u.faction == f) and not skoll.is_at(c) and not (daughter.is_rogue() and daughter.pos == c)
@@ -1613,7 +1614,7 @@ func build_outpost(f: Faction, cell: Vector2i) -> bool:
 		return false
 	f.industry -= OUTPOST_COST
 	f.outposts.append(cell)
-	skoll.move_rift(cell) # a hidden rift under it tears open elsewhere
+	rifts.move(cell) # a hidden rift under it tears open elsewhere
 	return true
 
 # Whose outpost stands on this hex (null if none).
@@ -1742,7 +1743,7 @@ func update_sight_for(f: Faction) -> void:
 				f.explored[c] = true
 				if f == player:
 					discover(c)
-			if c in skoll.rifts and not f.known_rifts.has(c):
+			if rifts.has(c) and not f.known_rifts.has(c):
 				f.known_rifts[c] = true
 				if f == player:
 					add_message("You found a rift in the void: torn earth that hums at night. Sköll could come through here.")

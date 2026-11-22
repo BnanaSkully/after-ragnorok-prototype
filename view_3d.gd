@@ -886,7 +886,7 @@ func shown_rifts() -> Array:
 	if s.phase == GameState.Phase.LANDING:
 		return []
 	var rifts: Array = s.player.known_rifts.keys()
-	var w := s.skoll.revealed_rift
+	var w := s.rifts.revealed
 	if w != NO_CELL and s.player_can_see(w) and not rifts.has(w):
 		rifts.append(w)
 	return rifts

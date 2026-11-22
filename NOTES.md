@@ -110,6 +110,11 @@ CLAUDE.md holds the rules for working; this file holds the history.
 - Nathan picked the tuning: driving Sköll off near your city counts as holding. A player who chases her now reaches Dawn 15%; a passive one 3%. tests/active_sunna.gd measures the chasing player
 - The first baseline run used the stale local main branch (79 commits behind origin/main): always worktree from origin/main. Also: don't edit game scripts while a test runs from the same folder; run measurements from a copy
 
+## Full rifts (started 2026-11-22)
+
+- Plan written 2026-11-18 (https://claude.ai/artifact/KeBmGLExp4SuRjLBjj27oZ). Nathan's answers on 22 Nov: rifts become permanent; the season runs on a fixed calendar for now; the creatures are "Rift Walkers" and kept simple (his words on the first design: "confusing, maybe too much"), so their only land effect is -1 Food per Walker on your land; then "yes" to starting now
+- Step 1: the rifts moved out of skoll.gd into rifts.gd (class Rifts, GameState.rifts), since the season, Rift Walkers and travel will all use them, not only Sköll. No change in play: tests/seed_fingerprint.gd (12 seeded games, 428 turns) printed identical lines before and after
+
 ## Ideas parked (see CLAUDE.md "Later")
 
 Faction names, the Daughter's name, Crossing text, small-event and ruin text, a choice when you find a rift (e.g. seal it: changes Sköll, ask first), AIs using fog of war to chase a rogue Daughter, AI landing choice, AI-to-AI diplomacy and trading, combat defence bonus, paying an AI to join your war, mini-games, full rifts (Doom-creatures, seasons, underground travel). The old Long Night design (chain, rogues, warbands) is parked in CLAUDE.md "Later".

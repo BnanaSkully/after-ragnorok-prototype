@@ -19,8 +19,8 @@ func _initialize() -> void:
 	seed(21)
 	var ok := true
 	var m = new_game(); var s = m.state
-	s.skoll.place_rifts()
-	var rift: Vector2i = s.skoll.rifts[0]
+	s.rifts.place()
+	var rift: Vector2i = s.rifts.cells[0]
 	s.player.industry = 50
 	s.reveal_area(s.player, rift, 1)
 	s.player.known_rifts[rift] = true
@@ -30,14 +30,14 @@ func _initialize() -> void:
 	s.player.known_rifts.erase(rift)
 	# put a hidden rift on a hex where the player may found an outpost
 	var spot: Vector2i = s.outpost_spots(s.player)[0]
-	var owner_name: String = s.skoll.rift_city[rift]
-	s.skoll.rift_city.erase(rift)
-	s.skoll.rifts[0] = spot
-	s.skoll.rift_city[spot] = owner_name
-	var before: int = s.skoll.rifts.size()
+	var owner_name: String = s.rifts.city[rift]
+	s.rifts.city.erase(rift)
+	s.rifts.cells[0] = spot
+	s.rifts.city[spot] = owner_name
+	var before: int = s.rifts.cells.size()
 	var placed: bool = s.build_outpost(s.player, spot)
-	var moved: bool = placed and not (spot in s.skoll.rifts) and s.skoll.rifts.size() == before and s.skoll.rift_city.get(s.skoll.rifts[0], "") == owner_name
-	print("2. outpost founded on a hidden rift: founded=%s, rift moved for the same city=%s, rifts still %d (expect true, true, %d)" % [placed, moved, s.skoll.rifts.size(), before])
+	var moved: bool = placed and not (spot in s.rifts.cells) and s.rifts.cells.size() == before and s.rifts.city.get(s.rifts.cells[0], "") == owner_name
+	print("2. outpost founded on a hidden rift: founded=%s, rift moved for the same city=%s, rifts still %d (expect true, true, %d)" % [placed, moved, s.rifts.cells.size(), before])
 	ok = ok and moved
 	m.queue_free()
 	var games := int(OS.get_environment("GAMES")) if OS.get_environment("GAMES") != "" else 100
@@ -50,13 +50,13 @@ func _initialize() -> void:
 			H.answer_choices(s)
 			for c in s.outpost_spots(s.player):
 				if s.player.industry >= s.OUTPOST_COST:
-					if c in s.skoll.rifts: on_hidden += 1
+					if c in s.rifts.cells: on_hidden += 1
 					if s.build_outpost(s.player, c): founded += 1
 			s.end_turn()
 			if s.has_pending_offer(): s.pending_relation().answer(false)
 			for f in s.factions:
 				for o in f.outposts:
-					if o in s.skoll.rifts: shared += 1
+					if o in s.rifts.cells: shared += 1
 		m.queue_free()
 	print("3. %d games: outposts you founded %d (%d on a hidden rift, which moved), turns ending with an outpost on a rift: %d (expect 0)" % [games, founded, on_hidden, shared])
 	ok = ok and shared == 0

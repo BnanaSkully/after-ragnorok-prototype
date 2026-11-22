@@ -119,7 +119,7 @@ func _initialize() -> void:
 					for col in HexMap.COLS:
 						var c := Vector2i(col, row)
 						if s.can_see(f, c) and not f.explored.has(c): bad["seen but not explored"] = bad.get("seen but not explored", 0) + 1
-			for r in s.skoll.rifts:
+			for r in s.rifts.cells:
 				if not s.passable(r): bad["rift on mountain or water"] = 1
 			for r in s.ruins:
 				if not s.passable(r["cell"]): bad["ruins on mountain or water"] = 1

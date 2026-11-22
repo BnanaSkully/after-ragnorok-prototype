@@ -1459,8 +1459,8 @@ func draw_map() -> void:
 	# Rifts you have found (a dark swirl), and the one Sköll last came through.
 	for rift in player.known_rifts:
 		draw_rift(HexView2D.hex_center(rift))
-	if skoll.revealed_rift != NO_CELL and s.player_can_see(skoll.revealed_rift) and not player.known_rifts.has(skoll.revealed_rift):
-		draw_rift(HexView2D.hex_center(skoll.revealed_rift))
+	if s.rifts.revealed != NO_CELL and s.player_can_see(s.rifts.revealed) and not player.known_rifts.has(s.rifts.revealed):
+		draw_rift(HexView2D.hex_center(s.rifts.revealed))
 
 	# Ruins not yet searched, once you've seen them: broken columns.
 	for r in s.ruins:
@@ -2140,7 +2140,7 @@ func hex_tooltip(c: Vector2i) -> Array[String]:
 	if post != null:
 		var t: int = s.terrain_at(c)
 		lines.append("%s outpost: +%d Food, +%d Industry a turn (from its %s)" % ["Your" if post == s.player else "The %s" % post.name, Terrain.OUTPOST_FOOD[t], Terrain.OUTPOST_INDUSTRY[t], Terrain.NAMES[t].to_lower()])
-	if s.player.known_rifts.has(c) or (c == s.skoll.revealed_rift and seen):
+	if s.player.known_rifts.has(c) or (c == s.rifts.revealed and seen):
 		lines.append("A rift in the void: Sköll can come through here.")
 	for r in s.ruins:
 		if r["cell"] == c and not r["taken"]:
