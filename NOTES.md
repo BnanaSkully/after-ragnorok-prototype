@@ -107,6 +107,7 @@ CLAUDE.md holds the rules for working; this file holds the history.
 - Nathan's design (agreed 22 Nov), built in 4 steps, one commit and one 300-game midgame_test run each. Full numbers in CLAUDE.md "Sunna, the contested sun"
 - Interpretations made while building (AIs keep no Trust toward each other): the Trust drain only applies when you hold her; for an AI holder, "another people recognises her" means its relationship with you (Trust 2+ or an oath); AIs at war with her holder march on that city first; "accepts your next oath or deal" covers an oath, open borders, a demand and peace
 - Result: with every step in, a passive test player gets Dawn under 1% (target about 15%), and an active one (grants every request, keeps an oath; scratch test, 150 games) about 9%. The biggest single blocker for the active player is Sköll never attacking her city (10% of games). Tuning options were offered to Nathan with the PR
+- Nathan picked the tuning: driving Sköll off near your city counts as holding. A player who chases her now reaches Dawn 15%; a passive one 3%. tests/active_sunna.gd measures the chasing player
 - The first baseline run used the stale local main branch (79 commits behind origin/main): always worktree from origin/main. Also: don't edit game scripts while a test runs from the same folder; run measurements from a copy
 
 ## Ideas parked (see CLAUDE.md "Later")

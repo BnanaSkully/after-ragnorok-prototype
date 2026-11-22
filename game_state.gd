@@ -1496,7 +1496,7 @@ func rise_missing(f: Faction) -> Array[String]:
 	if not recognised(f):
 		missing.append("recognition (Trust %d+ or an oath)" % SunDaughter.RECOGNISE_TRUST)
 	if f.skoll_held < 1:
-		missing.append("her city to hold vs Sköll")
+		missing.append("her city to hold off Sköll")
 	return missing
 
 # Every few turns after the Landing, a small event asks the player to choose.
