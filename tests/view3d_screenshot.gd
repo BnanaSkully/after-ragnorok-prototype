@@ -32,6 +32,11 @@ func _initialize() -> void:
 	print("3D view shown: %s" % m.showing_3d)
 	for i in 30: await process_frame
 	await shot("view3d.png")
+	var v = m.view_3d
+	v.cam_target = v.cell_position(s.skoll.pos); v.cam_distance = 5.0; v.place_camera()
+	for i in 5: await process_frame
+	await shot("view3d_skoll.png") # close up: his colour texture should show (not grey)
+	v.cam_distance = 22.0; v.place_camera()
 	s.skoll.pos = s.skoll.pos + Vector2i(-1, 0) # one hex toward the city
 	for i in 15: await process_frame # partway through his walk
 	await shot("view3d_walk.png")
