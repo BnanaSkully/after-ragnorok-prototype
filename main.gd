@@ -501,7 +501,7 @@ func show_offer() -> void:
 	offer_heading.text = "A MESSAGE FROM THE %s" % r.other.name.to_upper()
 	offer_label.text = r.pending_text()
 	var kind: String = r.pending.get("type")
-	offer_accept_button.text = {"demand": "Pay", "daughter": "Take her", "peace": "Make peace", "trade": "Trade", "borders": "Open borders"}.get(kind, "Accept")
+	offer_accept_button.text = {"demand": "Pay", "claim": "Hand her over", "daughter": "Take her", "peace": "Make peace", "trade": "Trade", "borders": "Open borders"}.get(kind, "Accept")
 	offer_panel.visible = true
 	update_buttons()
 
@@ -611,7 +611,7 @@ func build_trade_ui() -> void:
 func on_open_trade() -> void:
 	if not state.can_trade_daughter():
 		return
-	trade_label.text = "Her worth depends on her Favour toward them, their fear of Sköll and how strong they already are. If she's worth too little, you must pay them to take her. Being traded costs her Favour toward you (%+d). Uses your diplomatic action." % SunDaughter.TRADED_FAVOUR
+	trade_label.text = "Her worth depends on her Favour toward them, their fear of Sköll and how strong they already are. If she's worth too little, you must pay them to take her. Being traded costs her Favour toward you (%+d); whoever takes her trusts you more (%+d) and accepts your next oath or deal. Uses your diplomatic action." % [SunDaughter.TRADED_FAVOUR, SunDaughter.GIVEN_TRUST]
 	for f in state.ais:
 		var b: Button = trade_choices[f]
 		var q := state.trade_quote(f)
@@ -965,13 +965,16 @@ func draw_overlay() -> void:
 		daughter_info = "%s has RISEN with %s. Sköll is mortal but enraged and hunts her city: it must stand until turn %d." % [SunDaughter.NAME, "you" if daughter.holder == player else "the " + daughter.holder.name, GameState.END_TURN]
 	elif daughter.holder != null:
 		var note := "(Sköll knows: he hunts her city)" if skoll.knows_her else "(Sköll doesn't know which city)"
-		if daughter.holder == player and s.turn >= GameState.RISE_TURN:
-			note = "(she rises at Favour %d)" % SunDaughter.RISE_FAVOUR
+		if daughter.holder == player and s.turn >= Skoll.ARRIVAL_TURN:
+			var missing := s.rise_missing(player)
+			note = "(ready to rise on turn %d)" % GameState.RISE_TURN if missing.is_empty() else "(to rise: %s)" % ", ".join(missing)
 		if daughter.holder == player and player.favour <= SunDaughter.WARN_FAVOUR:
 			note = "(UNHAPPY: at Favour %d she leaves)" % SunDaughter.LEAVE_FAVOUR
 		elif daughter.holder == player and s.turn < Skoll.ARRIVAL_TURN:
 			note = "(for turn %d: defence %d/%d, army %d/%d)" % [Skoll.ARRIVAL_TURN, s.city_defence(player), SunDaughter.READY_DEFENCE, s.army_power(player), SunDaughter.READY_ARMY]
-		daughter_info = "%s %s %s    Her Favour toward you: %d" % ["You shelter" if daughter.holder == player else "The " + daughter.holder.name + " shelter", SunDaughter.NAME, note, player.favour]
+		daughter_info = "%s %s %s" % ["You shelter" if daughter.holder == player else "The " + daughter.holder.name + " shelter", SunDaughter.NAME, note]
+		if not note.begins_with("(to rise"): # (that note already shows her Favour)
+			daughter_info += "    Her Favour toward you: %d" % player.favour
 	if daughter.is_rogue():
 		var seen := "" if s.player_can_see(daughter.pos) else " You can't see where she is."
 		daughter_info = "She is ALONE IN THE OPEN! Move a unit onto her to persuade her (your chance %d%%).%s" % [roundi(daughter.persuade_chance(player) * 100), seen]

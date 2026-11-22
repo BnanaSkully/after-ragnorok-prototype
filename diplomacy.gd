@@ -68,6 +68,7 @@ const RIVAL_BROKEN_OATH_FAVOUR := -2 # the Sun's Daughter sees the rival's betra
 const SCARED_OFFER_CHANCE := 0.5 # each turn, a faction sheltering her that fears Sköll tries to give her to you
 const TRUST_TOOK_THE_DAUGHTER := 1 # you took her off their hands
 const TRUST_REFUSED_THE_DAUGHTER := -1
+const TRUST_REFUSED_CLAIM := -1 # you refused their claim on her
 
 # What the rival says when you demand something it doesn't have. Costs nothing.
 # %s is the resource (e.g. "Industry"). Rewrite or add lines freely.
@@ -95,6 +96,8 @@ var borders_until := 0 # open-borders agreement in force before this turn
 var oathbreaker_until := 0 # the player counts as an oathbreaker with them before this turn
 var pending: Dictionary = {} # their offer waiting for the player's answer, e.g. {"type": "demand", "resource": "food"}
 var rival_broken_oaths := 0 # how many agreements they have broken
+var owes_you := false # you gave them Sunna: they accept your next oath or deal (oath, open borders, demand, peace)
+var claim_trust_lost := 0 # Trust lost because you hold Sunna, their lost sun (at most SunDaughter.CLAIM_TRUST_MAX)
 
 func _init(p_game: GameState, p_other: Faction) -> void:
 	_game = weakref(p_game)
@@ -122,6 +125,8 @@ func can_ask_borders() -> bool:
 
 # The chance (0 to 1) that they agree to open borders: 40% + 10% per Trust.
 func borders_chance() -> float:
+	if owes_you:
+		return 1.0
 	return clampf(0.4 + trust * 0.1, 0.05, 0.95)
 
 # The player's diplomatic action: ask for open borders. Returns true if agreed.
@@ -130,6 +135,7 @@ func ask_open_borders() -> bool:
 		return false
 	action_used = true
 	var chance := borders_chance()
+	owes_you = false
 	if randf() < chance:
 		borders_until = game.turn + BORDERS_LENGTH
 		remember("Turn %d: %s opened their borders to you for %d turns (%d%% chance). Yours are open to them too." % [game.turn, other.name, BORDERS_LENGTH, roundi(chance * 100)])
@@ -156,6 +162,8 @@ func a_pact() -> String:
 func accept_chance() -> float:
 	if is_oathbreaker() or at_war:
 		return 0.0
+	if owes_you:
+		return 1.0
 	var chance := 0.5 + trust * 0.1
 	if game.turn >= Skoll.WARNING_TURN:
 		chance += 0.2 # the howling makes allies
@@ -171,6 +179,8 @@ func demand_chance(resource: String) -> float:
 	var rival: Faction = other
 	if rival.get(resource) < DEMAND_AMOUNT:
 		return 0.0 # it doesn't have that much
+	if owes_you:
+		return 1.0
 	var gap := army_power(game.player) - army_power(rival)
 	return clampf(0.5 + gap * 0.1, 0.05, 0.95)
 
@@ -192,6 +202,7 @@ func demand(resource: String) -> bool:
 		return false
 	action_used = true
 	var chance := demand_chance(resource)
+	owes_you = false
 	if randf() < chance:
 		rival.set(resource, rival.get(resource) - DEMAND_AMOUNT)
 		player.set(resource, player.get(resource) + DEMAND_AMOUNT)
@@ -271,7 +282,7 @@ func gift(res: String) -> bool:
 	return true
 
 func tribute_peace_chance() -> float:
-	return clampf(peace_chance() + PEACE_TRIBUTE_BONUS, 0.05, 0.95)
+	return 1.0 if owes_you else clampf(peace_chance() + PEACE_TRIBUTE_BONUS, 0.05, 0.95)
 
 func can_offer_tribute() -> bool:
 	return can_propose_peace() and game.player.industry >= PEACE_TRIBUTE
@@ -282,6 +293,7 @@ func offer_tribute_for_peace() -> bool:
 		return false
 	action_used = true
 	var chance := tribute_peace_chance()
+	owes_you = false
 	if randf() < chance:
 		game.player.industry -= PEACE_TRIBUTE
 		other.industry += PEACE_TRIBUTE
@@ -297,6 +309,8 @@ func can_propose_peace() -> bool:
 # The chance (0 to 1) that the rival makes peace right now: Trust, who's winning,
 # and the fear of Sköll all count.
 func peace_chance() -> float:
+	if owes_you:
+		return 1.0
 	var chance := 0.3 + trust * 0.1 + (army_power(game.player) - army_power(other)) * 0.05
 	if game.turn >= Skoll.WARNING_TURN:
 		chance += 0.2 # the howling makes enemies think again
@@ -308,6 +322,7 @@ func propose_peace() -> bool:
 		return false
 	action_used = true
 	var chance := peace_chance()
+	owes_you = false
 	if randf() < chance:
 		make_peace()
 		remember("Turn %d: you made peace with %s (%d%% chance). Truce for %d turns, Trust %+d." % [game.turn, other.name, roundi(chance * 100), TRUCE_TURNS, TRUST_PEACE_MADE])
@@ -380,6 +395,7 @@ func propose_pact() -> bool:
 		remember("Turn %d: %s refused your %s. You broke your word before." % [game.turn, other.name, word])
 		return false
 	var chance := accept_chance()
+	owes_you = false
 	if randf() < chance:
 		pact_turns_left = PACT_LENGTH
 		remember("Turn %d: you and %s swore %s for %d turns." % [game.turn, other.name, a_pact(), PACT_LENGTH])
@@ -432,6 +448,8 @@ func rival_consider_war() -> void:
 		why = "they despise you"
 	elif gap >= RIVAL_WAR_GAP and trust < 2:
 		why = "their army is far stronger"
+	elif game.daughter.shelters_with(game.player) and trust < 2 and gap >= 0:
+		why = "they want %s back, their lost sun" % SunDaughter.claim_name(rival)
 	elif starving:
 		why = "they are starving and want your stores"
 	if why != "" and randf() < RIVAL_WAR_CHANCE:
@@ -459,6 +477,10 @@ func rival_make_offer() -> void:
 			pending = {"type": "peace"}
 		return
 	if randf() >= RIVAL_OFFER_CHANCE:
+		return
+	# You hold the sun they believe is theirs: they may demand her.
+	if game.daughter.shelters_with(player) and game.turn >= SunDaughter.TRADE_TURN and game.daughter_value(rival) >= SunDaughter.CLAIM_VALUE_MIN and gap >= 0 and randf() < SunDaughter.CLAIM_DEMAND_CHANCE:
+		pending = {"type": "claim"}
 		return
 	# Trusting enough, and borders still closed: it may offer to open them.
 	if not borders_open() and trust >= RIVAL_BORDERS_TRUST and randf() < 0.4:
@@ -500,6 +522,8 @@ func pending_text() -> String:
 	if pending.get("type") == "demand":
 		var res: String = String(pending["resource"]).capitalize()
 		return "%s demands %d %s from you. Their army is stronger than yours.\n\nPay: you lose %d %s, Trust %+d.\nRefuse: Trust %+d." % [rival.name, DEMAND_AMOUNT, res, DEMAND_AMOUNT, res, TRUST_PAID_THEIR_DEMAND, TRUST_REFUSED_THEIR_DEMAND]
+	if pending.get("type") == "claim":
+		return "The %s say %s is %s, their own lost sun, and demand that you give her back.\n\nHand her over: she shelters with them (you lose +%d Food, +%d Industry, +%d defence; Sköll scents them instead). Her Favour toward you %+d. Trust %+d, and they accept your next %s or deal.\nRefuse: Trust %+d." % [rival.name, SunDaughter.NAME, SunDaughter.claim_name(rival), SunDaughter.FOOD, SunDaughter.INDUSTRY, SunDaughter.DEFENCE, SunDaughter.TRADED_FAVOUR, SunDaughter.GIVEN_TRUST, pact_word(), TRUST_REFUSED_CLAIM]
 	if pending.get("type") == "daughter":
 		var deal := "and will pay you %d Industry to take her" % pending["pay"] if pending["pay"] > 0 else "for nothing"
 		return "The %s fear Sköll and want %s gone. They offer her to you, %s.\n\nTake her: she shelters in your city (+%d Food, +%d Industry a turn, +%d defence, but Sköll hunts her). Trust %+d.\nRefuse: Trust %+d." % [rival.name, SunDaughter.NAME, deal, SunDaughter.FOOD, SunDaughter.INDUSTRY, SunDaughter.DEFENCE, TRUST_TOOK_THE_DAUGHTER, TRUST_REFUSED_THE_DAUGHTER]
@@ -557,6 +581,13 @@ func answer(accept: bool) -> void:
 		else:
 			change_trust(TRUST_REFUSED_THE_DAUGHTER)
 			remember("Turn %d: you refused to take %s from the %s. Trust %+d." % [game.turn, SunDaughter.NAME, rival.name, TRUST_REFUSED_THE_DAUGHTER])
+	elif offer["type"] == "claim":
+		if accept and game.daughter.shelters_with(player):
+			game.hand_over_daughter(player, rival)
+			remember("Turn %d: you gave %s back to the %s, who call her %s. Trust %+d; they will accept your next %s or deal." % [game.turn, SunDaughter.NAME, rival.name, SunDaughter.claim_name(rival), SunDaughter.GIVEN_TRUST, pact_word()])
+		else:
+			change_trust(TRUST_REFUSED_CLAIM)
+			remember("Turn %d: you refused to give %s to the %s. Trust %+d." % [game.turn, SunDaughter.claim_name(rival), rival.name, TRUST_REFUSED_CLAIM])
 	elif offer["type"] == "demand":
 		var resource: String = offer["resource"]
 		if accept and player.get(resource) >= DEMAND_AMOUNT:

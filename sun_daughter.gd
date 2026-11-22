@@ -8,14 +8,14 @@ extends RefCounted
 
 const NAME := "Sunna" # the Sun's Daughter (Nathan named her in the middle-game playtest)
 const PLAYER_START_FAVOUR := 3
-const RIVAL_FAVOUR_MIN := 3 # each AI faction's Favour is hidden and random in this range
-const RIVAL_FAVOUR_MAX := 6
+const RIVAL_FAVOUR_MIN := 4 # each AI faction's Favour is hidden and random in this range
+const RIVAL_FAVOUR_MAX := 7 # (was 3-6; contested Sunna design, 22 Nov)
 const MAX_FAVOUR := 10
 
 # What sheltering her gives
-const FOOD := 2 # extra Food per turn
-const INDUSTRY := 2 # extra Industry per turn
-const DEFENCE := 3 # extra city defence
+const FOOD := 1 # extra Food per turn (was 2: she is a prize to fight over, not an economy)
+const INDUSTRY := 1 # extra Industry per turn (was 2)
+const DEFENCE := 1 # extra city defence (was 3)
 
 # How she judges whoever shelters her: is the kingdom fed, and is it ready
 # when Sköll arrives?
@@ -59,8 +59,31 @@ const REQUEST_REFUSED := -2
 # them: they get RISEN_FOOD and RISEN_INDUSTRY a turn (and her defence), Sköll
 # becomes mortal at his normal Strength, and the ash stops.
 const RISE_FAVOUR := 8
+# (contested Sunna, step 4) Favour alone is not enough: another people must
+# recognise her protector (Trust RECOGNISE_TRUST+ with it, or an oath), and her
+# city must have held against Sköll at least once (Faction.skoll_held).
+const RECOGNISE_TRUST := 2
+# Giving her away (trading her, or handing her to a people that claims her):
+# the receiver's Trust GIVEN_TRUST, and it accepts your next oath or deal
+# (Diplomacy.owes_you).
+const GIVEN_TRUST := 3
 const RISEN_FOOD := 3
 const RISEN_INDUSTRY := 3
+
+# Rival claims (contested Sunna, step 3): every people believes she is its
+# own lost sun, and resents whoever holds her. Every CLAIM_GAP turns, each AI's
+# Trust toward the player -1 while the player shelters her (at most
+# CLAIM_TRUST_MAX in a game from this; AIs keep no Trust toward each other).
+# Holding her is a reason for war (diplomacy.gd rival_consider_war,
+# GameState.ai_wars_turn), an AI may demand her (diplomacy.gd "claim"), and
+# taking her holder's city carries her off (GameState.make_tributary).
+const CLAIM_NAMES := {"Norse": "Sól", "Japanese": "Amaterasu", "Greek": "Helios", "Celtic": "Belenus"}
+const CLAIM_GAP := 4
+const CLAIM_TRUST := -1
+const CLAIM_TRUST_MAX := 4
+const CLAIM_DEMAND_CHANCE := 0.5 # when an AI makes an offer and wants her, chance it demands her
+const CLAIM_VALUE_MIN := -3 # it only demands her while she's worth at least this to it (daughter_value): a terrified people doesn't
+const CLAIM_SIEGE_PULL := 3 # an AI at war with her holder marches on that city as if it were this much nearer
 
 enum State { SHELTERED, ROGUE, SWALLOWED, RISEN }
 
@@ -126,6 +149,10 @@ func join(f: Faction) -> void:
 
 func change_favour(f: Faction, amount: int) -> void:
 	f.favour = clampi(f.favour + amount, 0, MAX_FAVOUR)
+
+# What faction f calls her: its own lost sun (Sól, Amaterasu, Helios, Belenus).
+static func claim_name(f: Faction) -> String:
+	return CLAIM_NAMES.get(f.name, NAME)
 
 func whose(f: Faction) -> String:
 	return "your" if f.is_player else f.name + "'s"

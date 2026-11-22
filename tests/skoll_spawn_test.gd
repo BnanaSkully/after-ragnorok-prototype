@@ -9,6 +9,7 @@ func _initialize() -> void:
 	seed(61)
 	var no_rift := {}; var first_target := {}
 	var dist := {}; var yours := {}; var rift_counts := {}; var bad := 0; var outs := 0
+	var her_arrivals := 0; var hunts_her := 0 # first arrivals while she is sheltered: does he come for her protector?
 	var n_games: int = H.games(300)
 	for g in n_games:
 		var m = load("res://main.tscn").instantiate()
@@ -42,11 +43,15 @@ func _initialize() -> void:
 					var d: int = HexMap.hex_distance(s.skoll.pos, s.player.city_pos)
 					yours[d] = yours.get(d, 0) + 1
 				if watched == 0 and s.skoll.target != null: first_target[s.skoll.target.name] = first_target.get(s.skoll.target.name, 0) + 1
+				if watched == 0 and s.daughter.state == SunDaughter.State.SHELTERED and s.daughter.holder != null:
+					her_arrivals += 1
+					if s.skoll.target == s.daughter.holder: hunts_her += 1
 				outs += 1; watched += 1
 		m.queue_free()
 	var keys = dist.keys(); keys.sort()
 	print("Rifts per map on turn 3: %s; cities without exactly one rift of their own: %s" % [rift_counts, no_rift])
 	print("Who he hunts when he first arrives: %s" % first_target)
+	print("First arrival hunts her protector's city: %d%% of %d (he scents her: expect about 40%%)" % [roundi(100.0 * hunts_her / maxi(1, her_arrivals)), her_arrivals])
 	print("%d appearances; distance to the nearest city: %s" % [outs, ", ".join(keys.map(func(k): return "%d: %d%%" % [k, roundi(100.0 * dist[k] / outs)]))])
 	var yk = yours.keys(); yk.sort()
 	print("distance to YOUR city: %s" % ", ".join(yk.map(func(k): return "%d: %d%%" % [k, roundi(100.0 * yours[k] / outs)])))
