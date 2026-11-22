@@ -15,6 +15,7 @@ extends Node3D
 const SKOLL_SCENE := preload("res://assets/models/units/skoll.glb")
 const SUNNA_SCENE := preload("res://assets/models/units/sunna.glb") # Nathan's model: walk, run
 const SUNNA_HEIGHT := 1.0 # as tall as a unit
+const SUNNA_MODEL_HEIGHT := 1.6 # her height in the file (a skinned mesh: its bones undo the armature's 0.01 scale, so model_bounds can't measure her)
 const SUNNA_STEP_TIME := 0.6 # seconds to walk one hex
 const SUNNA_LIGHT_COLOUR := Color(1.0, 0.78, 0.4) # warm gold, so her grey cloak stands out on ash and hills
 const SUNNA_LIGHT_ENERGY := 2.5
@@ -88,6 +89,13 @@ const SKOLL_MODEL_YAW := 0.0
 # --- Camera ---
 const CAMERA_PITCH := 60.0 # degrees down from the horizon
 const ZOOM_MIN := 6.0
+# Map pins: a faction-coloured pin above every unit (gold for Sköll and Sunna), always
+# facing the camera and drawn over trees, so armies can be found when zoomed out.
+# Hidden when the camera is close (the models read on their own there).
+const MARKER_SHOW_DISTANCE := 13.0 # camera distance from which pins show (it starts at 22)
+const MARKER_SIZE := 0.032 # pin height per unit of camera distance: they grow as you zoom out
+const SKOLL_MARKER := Color(1.0, 0.72, 0.2)
+const SUNNA_MARKER := Color(1.0, 0.92, 0.55)
 const ZOOM_MAX := 40.0
 const PAN_SPEED := 0.9 # map units a second, per unit of zoom distance
 
@@ -135,6 +143,10 @@ var basalt_base: ArrayMesh # a plain hex base in the tiles' basalt cliff texture
 var water_shade_mesh: ArrayMesh # a flat hex laid on the water to darken it (fog, territory)
 
 var skoll: Node3D
+var markers := {} # a unit's (or Sköll's, Sunna's) model -> its pin
+var marker_materials := {} # colour -> pin material
+var marker_mesh: QuadMesh
+var marker_texture: ImageTexture
 var sunna: Node3D # rogue Sunna, out in the open (hidden while she shelters in a city)
 var sunna_anim: AnimationPlayer
 var sunna_cell := NO_CELL
@@ -147,6 +159,7 @@ var skoll_from := Vector3.ZERO
 var skoll_to := Vector3.ZERO
 var skoll_walk_time := 0.0 # seconds left walking (0 = standing still)
 var skoll_walk_total := 0.0
+var skoll_height := 0.6 # how tall he stands (set in build_skoll)
 var skoll_scale := 1.0 # his size on the map (set in build_skoll)
 var skoll_vanish := 0.0 # seconds he has been sinking away after being beaten
 
@@ -336,6 +349,7 @@ func build_skoll() -> void:
 	skoll_scale = k
 	skoll.scale = Vector3.ONE * k
 	skoll_feet = -box.position.y * k
+	skoll_height = box.size.y * k
 	skoll.visible = false
 	gild_skoll()
 
@@ -390,6 +404,7 @@ func _process(delta: float) -> void:
 	update_units(delta)
 	update_skoll(delta)
 	update_sunna(delta)
+	update_markers()
 
 # A glowing, unshaded colour (the rings under units and round cities), shared per colour.
 func glow_material(colour: Color, glow: float) -> StandardMaterial3D:
@@ -820,6 +835,7 @@ func paint_band(fig: Node3D, col: Color) -> void:
 	if fig.get_meta("band", Color.TRANSPARENT) == col:
 		return
 	fig.set_meta("band", col)
+	fig.set_meta("marker", col)
 	var ring := fig.get_node_or_null("Ring") as MeshInstance3D
 	if ring:
 		ring.material_override = glow_material(col, UNIT_RING_GLOW)
@@ -882,12 +898,80 @@ func hide_rest(pool: Array[MeshInstance3D], used: int) -> void:
 	for i in range(used, pool.size()):
 		pool[i].visible = false
 
+# A pin's picture, made once: a round head on a point, white with a dark edge (the
+# material colours it).
+func make_marker_texture() -> ImageTexture:
+	var w := 48
+	var h := 72
+	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	var head := Vector2(w / 2.0, w / 2.0)
+	var r := w / 2.0 - 2.0
+	for y in h:
+		for x in w:
+			var p := Vector2(x + 0.5, y + 0.5)
+			# inside the round head, or the triangle from the head down to the tip
+			var half := r * clampf(1.0 - (p.y - head.y) / (h - 2.0 - head.y), 0.0, 1.0) * 0.75
+			var d_head := p.distance_to(head)
+			var in_tip := p.y >= head.y and absf(p.x - head.x) <= half
+			if d_head <= r or in_tip:
+				var edge := d_head > r - 4.0 and not (in_tip and absf(p.x - head.x) <= half - 4.0 and p.y < h - 6.0)
+				if in_tip and d_head > r - 4.0 and absf(p.x - head.x) <= half - 4.0:
+					edge = false
+				img.set_pixel(x, y, Color(0.08, 0.06, 0.05) if edge else Color.WHITE)
+	return ImageTexture.create_from_image(img)
+
+func marker_material(colour: Color) -> StandardMaterial3D:
+	if not marker_materials.has(colour):
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+		m.no_depth_test = true # seen through trees and peaks
+		m.render_priority = 10
+		m.albedo_texture = marker_texture
+		m.albedo_color = colour
+		marker_materials[colour] = m
+	return marker_materials[colour]
+
+# Places a pin above every model that has one (units, Sköll, Sunna), sized by how far
+# away the camera is; none when the camera is close.
+func update_markers() -> void:
+	if marker_mesh == null:
+		marker_texture = make_marker_texture()
+		marker_mesh = QuadMesh.new()
+		marker_mesh.size = Vector2(2.0 / 3.0, 1.0)
+	var pins_on := cam_distance >= MARKER_SHOW_DISTANCE
+	var size := MARKER_SIZE * cam_distance
+	var wanted := {}
+	for fig in figures.values():
+		wanted[fig] = [fig.get_meta("marker", Color.WHITE), UNIT_HEIGHT]
+	wanted[skoll] = [SKOLL_MARKER, skoll_height]
+	wanted[sunna] = [SUNNA_MARKER, SUNNA_HEIGHT]
+	for node in wanted:
+		var pin: MeshInstance3D = markers.get(node)
+		if pin == null or not is_instance_valid(pin):
+			pin = MeshInstance3D.new()
+			pin.mesh = marker_mesh
+			pin.top_level = true
+			pin.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			(node as Node3D).add_child(pin)
+			markers[node] = pin
+		var colour: Color = wanted[node][0]
+		var height: float = wanted[node][1]
+		pin.visible = pins_on and (node as Node3D).visible
+		if pin.visible:
+			pin.material_override = marker_material(colour)
+			pin.scale = Vector3.ONE * size
+			pin.global_position = (node as Node3D).global_position + Vector3(0, height + size * 0.55, 0)
+	for node in markers.keys():
+		if not is_instance_valid(node):
+			markers.erase(node)
+
 # --- Sunna, when she has gone rogue: she walks over the land, lit warm gold --------
 func build_sunna() -> void:
 	sunna = SUNNA_SCENE.instantiate()
 	add_child(sunna)
-	var box := model_bounds(sunna)
-	sunna.scale = Vector3.ONE * (SUNNA_HEIGHT / box.size.y if box.size.y > 0.0 else 1.0)
+	sunna.scale = Vector3.ONE * SUNNA_HEIGHT / SUNNA_MODEL_HEIGHT
 	sunna_anim = sunna.find_child("AnimationPlayer", true, false)
 	if sunna_anim and sunna_anim.has_animation("walk"):
 		sunna_anim.get_animation("walk").loop_mode = Animation.LOOP_LINEAR
