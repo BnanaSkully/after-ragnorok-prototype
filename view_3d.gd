@@ -53,11 +53,15 @@ const WATER_SHADER := preload("res://assets/shaders/water.gdshader")
 # the land tiles' ground (MODEL_GROUND) and the never-seen blocks' top, so neighbouring
 # water hexes read as one lake or sea and the land tiles' sides are the shore.
 const WATER_LEVEL := 0.25
+const WATER_REACH := 1.04 # water hexes reach a little under the land tiles' edges
+const WATER_STEPS := 4
 const UNIT_HEIGHT := 0.6 # about a third of a hex (a hex is 2.0 corner to corner)
 const UNIT_MODEL_HEIGHT := 1.8 # how tall the warrior and scout are in their own files
 const UNIT_STEP_TIME := 0.45 # seconds to walk one hex
-const SKOLL_LENGTH_IN_HEXES := 1.25 # nose to tail, in hex widths
+const SKOLL_LENGTH_IN_HEXES := 1.0 # nose to tail, in hex widths
 const SKOLL_STEP_TIME := 0.6 # seconds to walk one hex
+const SKOLL_VANISH_TIME := 1.0 # seconds he takes to sink away when beaten
+const SKOLL_MAX_WALK := Skoll.RAGE_SPEED # the most hexes he runs in a turn; farther than that he reappears instead
 # Which way the model faces before we turn it: 0 if its nose points along +Z.
 const SKOLL_MODEL_YAW := 0.0
 
@@ -75,6 +79,10 @@ var state: GameState # set by main.gd before the view is added
 var terrain_colours: Array = [] # set by main.gd (its TERRAIN_COLOURS)
 var colour_of: Callable # main.gd's unit_colour(faction)
 var territory_colour_of: Callable # main.gd's territory_colour(faction)
+var marks_of: Callable # main.gd's marked_hexes(): hex -> colour (where the selected unit can go, outpost spots...)
+var selected_of: Callable # main.gd's selected unit (or null)
+var mark_nodes: Array[MeshInstance3D] = [] # a see-through hex laid on each marked hex
+var mark_mesh: ArrayMesh
 
 @onready var camera: Camera3D = $Camera
 var cam_target := Vector3.ZERO # the point on the ground the camera looks at
@@ -95,6 +103,7 @@ var city_nodes: Array[MeshInstance3D] = [] # a banner in the owner's colour on e
 var pole_nodes: Array[MeshInstance3D] = [] # the banners' poles
 var city_mesh: BoxMesh # the banner's cloth
 var pole_mesh: CylinderMesh
+var stand_heights := {} # tile key -> how high the ground is in the middle of that model (a hill's top)
 var basalt_base: ArrayMesh # a plain hex base in the tiles' basalt cliff texture (under mountains)
 var water_shade_mesh: ArrayMesh # a flat hex laid on the water to darken it (fog, territory)
 
@@ -106,6 +115,8 @@ var skoll_from := Vector3.ZERO
 var skoll_to := Vector3.ZERO
 var skoll_walk_time := 0.0 # seconds left walking (0 = standing still)
 var skoll_walk_total := 0.0
+var skoll_scale := 1.0 # his size on the map (set in build_skoll)
+var skoll_vanish := 0.0 # seconds he has been sinking away after being beaten
 
 func _ready() -> void:
 	$Sun.rotation_degrees = Vector3(-50, -30, 0) # low sun from the upper left, for shadows
@@ -126,6 +137,8 @@ func cell_position(cell: Vector2i) -> Vector3:
 # How high the ground is on a hex: the tile models are thicker than the code-made tiles.
 func hex_top(cell: Vector2i) -> float:
 	var key: Variant = tile_key(cell)
+	if stand_heights.has(key):
+		return stand_heights[key] * HEX_RADIUS
 	if tile_scenes.has(key) or is_mountain_key(key):
 		return MODEL_GROUND * HEX_RADIUS
 	if not hex_is_explored(cell):
@@ -197,6 +210,9 @@ func build_meshes() -> void:
 		if ResourceLoader.exists(path):
 			tile_scenes[key] = load(path)
 	basalt_base = make_basalt_base()
+	for key in tile_scenes:
+		if not key is String or not key in ["settlement", "rift"]:
+			stand_heights[key] = centre_height(tile_scenes[key])
 	city_mesh = BoxMesh.new()
 	city_mesh.size = Vector3(0.2, 0.26, 0.02)
 	pole_mesh = CylinderMesh.new()
@@ -220,25 +236,47 @@ func build_board() -> void:
 			mi.set_meta("variant", rng.randi_range(0, TileKit3D.VARIANTS - 1))
 			hexes[c] = mi
 
-# One plane of water under the whole map (and a hex past its edges).
+# The water: one mesh made of every water hex (a little wider than a hex, so it reaches
+# under the land tiles' edges and neighbouring water hexes join into one lake or sea).
+# Only water hexes: a plane under the whole map showed up inside the rift's hollow.
 func build_water() -> void:
-	var last := cell_position(Vector2i(HexMap.COLS - 1, HexMap.ROWS - 1))
-	var plane := PlaneMesh.new()
-	plane.size = Vector2(last.x + 4.0 * HEX_RADIUS, last.z + 4.0 * HEX_RADIUS)
-	plane.subdivide_width = 80 # enough corners for the waves to move
-	plane.subdivide_depth = 60
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var r := HEX_RADIUS * WATER_REACH
+	for c in hexes:
+		if state.terrain_at(c) != Terrain.Type.WATER:
+			continue
+		var centre := cell_position(c) + Vector3(0, WATER_LEVEL, 0)
+		for i in 6:
+			var a0 := TAU * i / 6.0
+			var a1 := TAU * (i + 1) / 6.0
+			add_water_triangle(st, centre, centre + Vector3(sin(a0), 0, cos(a0)) * r, centre + Vector3(sin(a1), 0, cos(a1)) * r)
+	st.generate_normals()
 	var m := ShaderMaterial.new()
 	m.shader = WATER_SHADER
 	var water := MeshInstance3D.new()
 	water.name = "Water"
-	water.mesh = plane
+	water.mesh = st.commit()
 	water.material_override = m
-	water.position = Vector3(last.x / 2.0, WATER_LEVEL, last.z / 2.0)
 	add_child(water)
 	# a full-size hex (no gap) so neighbouring darkened water hexes join up
 	var b := TileKit3D.Builder.new()
 	b.prism(HEX_RADIUS, 0.002, WATER_LEVEL + 0.03, Color.WHITE)
 	water_shade_mesh = b.commit()
+
+# One triangle of a water hex, cut into WATER_STEPS x WATER_STEPS small ones so the
+# waves (moved corner by corner in the shader) have corners to move.
+func add_water_triangle(st: SurfaceTool, p0: Vector3, p1: Vector3, p2: Vector3) -> void:
+	var n := WATER_STEPS
+	var at := func(i: int, j: int) -> Vector3: # i steps toward p1, j toward p2
+		return p0 + (p1 - p0) * (float(i) / n) + (p2 - p0) * (float(j) / n)
+	for i in n:
+		for j in n - i:
+			for v in [at.call(i, j), at.call(i, j + 1), at.call(i + 1, j)]:
+				st.add_vertex(v)
+			if i + j < n - 1:
+				for v in [at.call(i + 1, j), at.call(i, j + 1), at.call(i + 1, j + 1)]:
+					st.add_vertex(v)
 
 func build_skoll() -> void:
 	skoll = SKOLL_SCENE.instantiate()
@@ -252,6 +290,7 @@ func build_skoll() -> void:
 	var longest := maxf(box.size.x, box.size.z)
 	var hex_width := sqrt(3.0) * HEX_RADIUS
 	var k := SKOLL_LENGTH_IN_HEXES * hex_width / longest if longest > 0.0 else 1.0
+	skoll_scale = k
 	skoll.scale = Vector3.ONE * k
 	skoll_feet = -box.position.y * k
 	skoll.visible = false
@@ -284,6 +323,7 @@ func _process(delta: float) -> void:
 	rifts_now = shown_rifts()
 	update_board()
 	update_cities()
+	update_marks()
 	update_units(delta)
 	update_skoll(delta)
 
@@ -426,6 +466,46 @@ func make_basalt_base() -> ArrayMesh:
 	tile.free()
 	return result
 
+# How high a tile model's ground is at its middle, where a unit stands: the highest
+# surface straight above the centre, leaving out the grass tufts (and the tree trunks,
+# which have no surface right at the middle). Worked out once per model from its triangles.
+# Cities and rifts keep MODEL_GROUND: a unit stands in front of the longhouse, and
+# beside the rift's hollow rather than down in it.
+func centre_height(scene: PackedScene) -> float:
+	var root: Node3D = scene.instantiate()
+	var best := -1.0
+	for part in root.find_children("*", "MeshInstance3D", true, false):
+		var xf := Transform3D()
+		var node: Node = part
+		while node != root:
+			xf = (node as Node3D).transform * xf
+			node = node.get_parent()
+		var mesh: Mesh = (part as MeshInstance3D).mesh
+		for si in mesh.get_surface_count():
+			var mat := mesh.surface_get_material(si)
+			if mat != null and TUFT_COLOURS.has(mat.resource_name):
+				continue
+			var arrays := mesh.surface_get_arrays(si)
+			var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+			var index: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+			for t in range(0, index.size(), 3):
+				var h := height_at_centre(xf * verts[index[t]], xf * verts[index[t + 1]], xf * verts[index[t + 2]])
+				best = maxf(best, h)
+	root.free()
+	return best if best > 0.0 else MODEL_GROUND
+
+# The height of a triangle straight above (0, 0), or -1 if it isn't above it.
+func height_at_centre(a: Vector3, b: Vector3, c: Vector3) -> float:
+	var d := (b.z - c.z) * (a.x - c.x) + (c.x - b.x) * (a.z - c.z)
+	if absf(d) < 1e-9:
+		return -1.0
+	var wa := ((b.z - c.z) * (0.0 - c.x) + (c.x - b.x) * (0.0 - c.z)) / d
+	var wb := ((c.z - a.z) * (0.0 - c.x) + (a.x - c.x) * (0.0 - c.z)) / d
+	var wc := 1.0 - wa - wb
+	if wa < 0.0 or wb < 0.0 or wc < 0.0:
+		return -1.0
+	return wa * a.y + wb * b.y + wc * c.y
+
 func paint_tufts(model: Node3D) -> void:
 	for part in model.find_children("*", "MeshInstance3D", true, false):
 		var mesh: Mesh = (part as MeshInstance3D).mesh
@@ -446,6 +526,58 @@ func tint_overlay(tint: Color) -> StandardMaterial3D:
 		m.albedo_color = tint
 		overlays[tint] = m
 	return overlays[tint]
+
+# Marked hexes (the same colours as the 2D view) and a white hex under the selected unit.
+func update_marks() -> void:
+	if mark_mesh == null:
+		var b := TileKit3D.Builder.new()
+		b.prism(HEX_RADIUS * 0.9, 0.01, 0.0, Color.WHITE)
+		mark_mesh = b.commit()
+	var marks: Dictionary = marks_of.call() if marks_of.is_valid() else {}
+	var chosen = selected_of.call() if selected_of.is_valid() else null
+	if chosen != null:
+		marks[chosen.pos] = Color.WHITE
+	var used := 0
+	for c in marks:
+		var node := pooled(mark_nodes, used, mark_mesh)
+		used += 1
+		node.material_override = mark_material(marks[c])
+		node.position = cell_position(c) + Vector3(0, hex_top(c) + 0.04, 0)
+	hide_rest(mark_nodes, used)
+
+func mark_material(colour: Color) -> StandardMaterial3D:
+	var key := Color(colour, 0.45)
+	if not materials.has(key):
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.albedo_color = key
+		m.no_depth_test = false
+		materials[key] = m
+	return materials[key]
+
+# The hex whose middle is nearest a point on the map (NO_CELL off the map).
+func cell_at_point(p: Vector3) -> Vector2i:
+	var best := NO_CELL
+	var best_d := INF
+	for c in hexes:
+		var d := Vector2(p.x, p.z).distance_to(Vector2(cell_position(c).x, cell_position(c).z))
+		if d < best_d:
+			best_d = d
+			best = c
+	return best if best_d <= HEX_RADIUS else NO_CELL
+
+# The hex under a point on the screen (where the mouse points, through the camera
+# onto the ground), or NO_CELL off the map. main.gd uses it for clicks in 3D.
+func cell_at_screen(screen_pos: Vector2) -> Vector2i:
+	var from := camera.project_ray_origin(screen_pos)
+	var dir := camera.project_ray_normal(screen_pos)
+	if absf(dir.y) < 0.0001:
+		return NO_CELL
+	var t := (MODEL_GROUND * HEX_RADIUS - from.y) / dir.y
+	if t < 0.0:
+		return NO_CELL
+	return cell_at_point(from + dir * t)
 
 # Whose city: a banner in the owner's colour on each settlement you've found.
 func update_cities() -> void:
@@ -515,6 +647,11 @@ func make_figure(is_scout: bool) -> Node3D:
 			anim.get_animation(anim_name).loop_mode = Animation.LOOP_LINEAR
 	add_child(fig)
 	fig.rotation.y = randf() * TAU # (until it first walks somewhere)
+	if anim and anim.has_animation("idle"):
+		# each unit breathes at its own pace and from its own point in the loop
+		anim.speed_scale = randf_range(0.85, 1.15)
+		anim.play("idle")
+		anim.seek(randf() * anim.get_animation("idle").length, true)
 	return fig
 
 # Repaints the blue arm band in the faction's colour (a shared material per colour).
@@ -584,14 +721,30 @@ func update_skoll(delta: float) -> void:
 	var w := state.skoll
 	var shown := w.active and state.player_can_see(w.pos)
 	if not shown:
+		if not w.active and skoll.visible and skoll_cell != NO_CELL and skoll_vanish < SKOLL_VANISH_TIME:
+			# beaten (or sated): he sinks into the ground where he stood and is gone; he
+			# never walks or drifts back to a rift
+			skoll_vanish += delta
+			var t := minf(1.0, skoll_vanish / SKOLL_VANISH_TIME)
+			skoll.scale = Vector3.ONE * skoll_scale * (1.0 - 0.6 * t)
+			skoll.position.y -= delta * 0.8
+			return
 		skoll.visible = false
+		skoll.scale = Vector3.ONE * skoll_scale
 		skoll_cell = NO_CELL
 		skoll_walk_time = 0.0
 		return
+	skoll_vanish = 0.0
 	var target := cell_position(w.pos) + Vector3(0, hex_top(w.pos) + skoll_feet, 0)
 	if not skoll.visible or skoll_cell == NO_CELL:
 		# he just came into view: stand him on his hex
 		skoll.visible = true
+		skoll.position = target
+		skoll_cell = w.pos
+		skoll_walk_time = 0.0
+	elif w.pos != skoll_cell and HexMap.hex_distance(skoll_cell, w.pos) > SKOLL_MAX_WALK:
+		# farther than he can run in a turn: he came out of a rift somewhere else, so
+		# he appears there instead of drifting across the map
 		skoll.position = target
 		skoll_cell = w.pos
 		skoll_walk_time = 0.0
@@ -606,11 +759,19 @@ func update_skoll(delta: float) -> void:
 		skoll_walk_time = maxf(0.0, skoll_walk_time - delta)
 		var t := 1.0 - skoll_walk_time / skoll_walk_total
 		skoll.position = skoll_from.lerp(skoll_to, t)
+		# feet on the ground of whichever hex he is crossing (not a straight line through the air)
+		var under := cell_at_point(skoll.position)
+		if under != NO_CELL:
+			skoll.position.y = hex_top(under) + skoll_feet
 		face(skoll_to - skoll_from)
 		play("walk")
 	else:
 		skoll.position = target # (the hex can change height when it turns to ash or comes into view)
-		face(camera.global_position - skoll.position) # standing still: he looks at you
+		# standing still: he faces the city he is hunting (he used to turn to the camera,
+		# which looked like he followed it around)
+		var prey: Faction = w.target
+		if prey != null and prey.city_pos != NO_CELL and prey.city_pos != w.pos:
+			face(cell_position(prey.city_pos) - cell_position(w.pos))
 		play("idle")
 
 # Turns him (only around the vertical axis) to look along a direction.
