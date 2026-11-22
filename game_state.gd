@@ -1549,6 +1549,8 @@ func can_place_outpost(f: Faction, c: Vector2i) -> bool:
 	for r in ruins:
 		if r["cell"] == c and not r["taken"]:
 			return false
+	if f.known_rifts.has(c) or c == skoll.revealed_rift:
+		return false # never on a rift you know of (a hidden one moves away: build_outpost)
 	var u := unit_at(c)
 	return (u == null or u.faction == f) and not skoll.is_at(c) and not (daughter.is_rogue() and daughter.pos == c)
 
@@ -1557,6 +1559,7 @@ func build_outpost(f: Faction, cell: Vector2i) -> bool:
 		return false
 	f.industry -= OUTPOST_COST
 	f.outposts.append(cell)
+	skoll.move_rift(cell) # a hidden rift under it tears open elsewhere
 	return true
 
 # Whose outpost stands on this hex (null if none).
