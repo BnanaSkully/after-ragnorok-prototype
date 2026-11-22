@@ -8,14 +8,14 @@ extends RefCounted
 
 const NAME := "Sunna" # the Sun's Daughter (Nathan named her in the middle-game playtest)
 const PLAYER_START_FAVOUR := 3
-const RIVAL_FAVOUR_MIN := 3 # each AI faction's Favour is hidden and random in this range
-const RIVAL_FAVOUR_MAX := 6
+const RIVAL_FAVOUR_MIN := 4 # each AI faction's Favour is hidden and random in this range
+const RIVAL_FAVOUR_MAX := 7 # (was 3-6; contested Sunna design, 22 Nov)
 const MAX_FAVOUR := 10
 
 # What sheltering her gives
-const FOOD := 2 # extra Food per turn
-const INDUSTRY := 2 # extra Industry per turn
-const DEFENCE := 3 # extra city defence
+const FOOD := 1 # extra Food per turn (was 2: she is a prize to fight over, not an economy)
+const INDUSTRY := 1 # extra Industry per turn (was 2)
+const DEFENCE := 1 # extra city defence (was 3)
 
 # How she judges whoever shelters her: is the kingdom fed, and is it ready
 # when Sköll arrives?
