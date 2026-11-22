@@ -36,13 +36,15 @@ const TILE_MODEL_PATH := "res://assets/models/tiles/%s.glb"
 # mountain hexes join into ranges (see make_mountain). Peaks: base at y = 0, sized in hex units.
 # Nathan's outpost prop (base at y = 0, sized in hex units), at the back of its hex so a
 # unit can stand in the middle, with a small banner in the owner's colour.
-const RIFT_OVERLAY_SCALE := 0.75 # the rift laid into its land tile: this big
+const RIFT_OVERLAY_SCALE := 0.62 # the rift laid into its land tile: this big
 # The rift model is a whole crater (floor at y 0, rim 0.4-0.7 high). It sinks this far
 # (in its own height units) below the land's ground so only its rim shows, and the land
 # tile gets a round hole cut where it sits (RIFT_HOLE, cut_hole) so the land never covers
 # its pit. Standing on the land (Nathan's phone, v15) it read as a blue box.
-const RIFT_SINK := 0.45
-const RIFT_HOLE := 0.66 # the hole's radius, in hex units (inside the rim's 0.64-0.74)
+const RIFT_SINK := 0.62 # deep enough that its hex-shaped rim stays under the land (v16: the cut edge looked wrong)
+const RIFT_HOLE := 0.44 # the hole's mean radius, in hex units (inside the rim's 0.53), made rough by rift_hole_at
+const RIFT_HILL_RISE := 0.7
+const RIFT_GLOW := Color(0.7, 0.7, 0.75) # the void's blue, dulled a little
 const OUTPOST := preload("res://assets/models/props/outpost.glb")
 const OUTPOST_OFFSET := Vector3(0.0, 0.0, -0.42)
 const PEAK_TALL := preload("res://assets/models/props/peak_tall.glb")
@@ -652,12 +654,17 @@ func cut_hole(model: Node3D) -> void:
 		while node != model:
 			xf = (node as Node3D).transform * xf
 			node = node.get_parent()
-		if Vector2(xf.origin.x, xf.origin.z).length() < RIFT_HOLE + 0.04 and xf.origin.y > 0.2:
+		if Vector2(xf.origin.x, xf.origin.z).length() < RIFT_HOLE * 1.25 and xf.origin.y > 0.2:
 			mi.visible = false # a tree in the hole
 			continue
 		if not holed_meshes.has(mi.mesh):
 			holed_meshes[mi.mesh] = holed_mesh(mi.mesh, xf)
 		mi.mesh = holed_meshes[mi.mesh]
+
+# The hole's edge is rough, not round: its radius wobbles with the direction.
+func rift_hole_at(p: Vector3) -> float:
+	var a := atan2(p.z, p.x)
+	return RIFT_HOLE * (1.0 + 0.14 * sin(5.0 * a) + 0.08 * sin(11.0 * a + 1.3))
 
 func holed_mesh(mesh: Mesh, xf: Transform3D) -> ArrayMesh:
 	var out := ArrayMesh.new()
@@ -674,7 +681,7 @@ func holed_mesh(mesh: Mesh, xf: Transform3D) -> ArrayMesh:
 			for k in 3:
 				var p := xf * v[idx[t + k]]
 				y += p.y / 3.0
-				if Vector2(p.x, p.z).length() >= RIFT_HOLE:
+				if Vector2(p.x, p.z).length() >= rift_hole_at(p):
 					inside = false
 			if inside and y > 0.1:
 				continue
@@ -798,9 +805,11 @@ func update_rifts() -> void:
 			model.rotation.y = hexes[c].rotation.y if hexes.has(c) else 0.0
 			add_child(model)
 			rift_models[c] = model
-		# its rim at the land's ground (not a hill's top: the hole takes the hill's middle)
-		model.position = cell_position(c) + Vector3(0, (MODEL_GROUND - RIFT_SINK * RIFT_OVERLAY_SCALE) * HEX_RADIUS, 0)
-		var dim := Color.WHITE if state.player_can_see(c) else Color.WHITE.darkened(FOG_MEMORY_DARKEN)
+		# its rim just under the land around the hole (on a hill, part way up its slope:
+		# RIFT_HILL_RISE of the way from the ground to the top, or the hill's hollow shows)
+		var ground := lerpf(MODEL_GROUND * HEX_RADIUS, hex_top(c), RIFT_HILL_RISE)
+		model.position = cell_position(c) + Vector3(0, ground - RIFT_SINK * RIFT_OVERLAY_SCALE * HEX_RADIUS, 0)
+		var dim := RIFT_GLOW if state.player_can_see(c) else RIFT_GLOW.darkened(FOG_MEMORY_DARKEN)
 		var overlay := tint_overlay(dim)
 		for part in model.find_children("*", "GeometryInstance3D", true, false):
 			(part as GeometryInstance3D).material_overlay = overlay
