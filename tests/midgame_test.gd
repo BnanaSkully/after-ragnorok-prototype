@@ -27,7 +27,7 @@ func _initialize() -> void:
 	print("1. turn %d: Sköll active=%s, Strength %d, ash hexes %d (expect %d)" % [s.turn, sk.active, sk.strength, s.ash.size(), GameState.ASH_PER_CYCLE])
 	var rifts_before = s.rifts.cells.duplicate()
 	sk.drive_back()
-	print("   driven back on turn %d: active=%s, returns on turn %d, rifts rolled again=%s" % [s.turn, sk.active, sk.away_until, s.rifts.cells != rifts_before])
+	print("   driven back on turn %d: active=%s, returns on turn %d, rifts rolled again=%s (expect false: rifts are permanent)" % [s.turn, sk.active, sk.away_until, s.rifts.cells != rifts_before])
 	var back_turn := -1
 	for i in 5:
 		play_turn(s)

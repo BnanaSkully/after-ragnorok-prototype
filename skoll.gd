@@ -7,7 +7,7 @@ extends RefCounted
 # walks one hex a turn toward it and attacks it. Once he has found Sunna's
 # city he hunts whoever shelters her.
 # Cycles: driven back, he vanishes into the void and returns RETURN_TURNS
-# later through a new rift, STRENGTH_PER_RETURN stronger; each time he comes
+# later through a rift (they are permanent), STRENGTH_PER_RETURN stronger; each time he comes
 # through, ash spreads (GameState.spread_ash).
 # While Sunna is hidden (sheltered or rogue) he can't be killed: a unit that
 # attacks him dies but WOUNDS him (his Strength is lowered by his wounds,
@@ -188,7 +188,7 @@ func arrive() -> void:
 	wounds = 0
 	if returns > 0:
 		strength += STRENGTH_PER_RETURN
-	come_through_rift()
+	var guard := come_through_rift()
 	var hunted := her_city()
 	if hunted != null:
 		target = hunted
@@ -196,7 +196,10 @@ func arrive() -> void:
 	if returns == 0:
 		game.add_message("Sköll, the wolf who swallowed the sun, tears through a rift! He is hunting %s. Ash spreads where he walks." % target_text())
 	else:
-		game.add_message("Sköll returns through a new rift, stronger (Strength %d). He is hunting %s. More of the land turns to ash." % [strength, target_text()])
+		game.add_message("Sköll returns through a rift, stronger (Strength %d). He is hunting %s. More of the land turns to ash." % [strength, target_text()])
+	if guard != null:
+		game.add_message("He burst out of the rift %s's unit was standing on, and fell on it." % guard.faction.name)
+		attack_unit(guard)
 
 # Once he has found her, the city sheltering Sunna (or the one she rose for).
 func her_city() -> Faction:
@@ -279,26 +282,54 @@ func wound(amount: int, by: Faction = null, hunted := false) -> void:
 		game.add_message("Sköll is wounded: Strength %d for now (heals %d a turn)." % [effective_strength(), WOUND_HEAL])
 
 # Driven back: he vanishes into the void and returns RETURN_TURNS later
-# through a new rift, stronger. The rifts are rolled again now (hidden).
+# through a rift, stronger. The rifts stay where they are (Nathan, 22 Nov:
+# rifts are permanent), so a rift you found stays on your map.
 func drive_back() -> void:
 	active = false
 	pos = HexMap.NO_CELL
 	wounds = 0
 	returns += 1
 	away_until = game.turn + RETURN_TURNS
-	game.rifts.place() # new rifts every time he's driven back
 	game.add_message("Sköll slinks back into the void. He will return in %d turns, stronger." % RETURN_TURNS)
 
-# Come out of a random free rift and hunt the city nearest to it.
-func come_through_rift() -> void:
-	var free := game.rifts.free_cells()
-	pos = pick_rift(free) if not free.is_empty() else game.rifts.random_edge_cell()
-	game.rifts.revealed = pos
-	var owner: Faction = game.rifts.owner_of(pos)
+# Come out of a random rift and hunt the city it opened toward. The rifts are
+# permanent, so a faction may park a unit on one: he still comes through it,
+# bursts out onto a free hex next to it and falls on that unit (arrive attacks
+# it). Returns that unit, or null. A rift he can't use (a city or rogue Sunna
+# on it, or no free hex beside a guarded one) is skipped.
+func come_through_rift() -> Unit:
+	var choices: Array[Vector2i] = []
+	for r in game.rifts.cells:
+		if game.is_city(r):
+			continue
+		var u: Unit = game.unit_at(r)
+		if u == null and not game.is_blocked(r):
+			choices.append(r)
+		elif u != null and exit_beside(r) != HexMap.NO_CELL:
+			choices.append(r)
+	var guard: Unit = null
+	if choices.is_empty():
+		pos = game.rifts.random_edge_cell()
+		game.rifts.revealed = pos
+	else:
+		var rift := pick_rift(choices)
+		game.rifts.revealed = rift
+		guard = game.unit_at(rift)
+		pos = exit_beside(rift) if guard != null else rift
+	var owner: Faction = game.rifts.owner_of(game.rifts.revealed)
 	if owner != null and owner.is_alive():
 		target = owner # he hunts the city this rift opened toward
 	else:
 		pick_target()
+	return guard
+
+# A free hex next to a rift a unit stands on, where he comes out (the first
+# free one in a fixed order, so seeded games repeat), or NO_CELL.
+func exit_beside(rift: Vector2i) -> Vector2i:
+	for c in HexMap.neighbours(rift):
+		if HexMap.in_bounds(c) and not game.is_blocked(c) and not game.is_city(c):
+			return c
+	return HexMap.NO_CELL
 
 # He scents Sunna: the rift of the city sheltering her counts SCENT_WEIGHT
 # times (about 40% with 4 cities instead of 25%). Not while she's rogue (her

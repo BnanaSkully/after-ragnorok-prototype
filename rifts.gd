@@ -9,8 +9,9 @@ extends RefCounted
 # by map section hit the player 2:1, and "nearest city" left crowded AI
 # cities without a rift). They're rolled on RIFT_TURN (after the Landing, so
 # they can keep away from every city) and stay HIDDEN until found (a faction
-# that sees one remembers it in Faction.known_rifts) or used. Each time he's
-# driven back they're rolled again.
+# that sees one remembers it in Faction.known_rifts) or used. They are
+# PERMANENT (Nathan, 22 Nov): never rolled again, so a rift once found stays
+# on your map for the rest of the game.
 #
 # Only rules live here (no drawing): main.gd and view_3d.gd read cells and
 # revealed to show them.
@@ -43,10 +44,8 @@ func clear() -> void:
 
 # One rift per standing city: a random hex MIN_CITY_DISTANCE to
 # MAX_CITY_DISTANCE from that city and at least MIN_CITY_DISTANCE from every
-# other city. Rolling them again closes the old ones: nobody knows the new ones.
+# other city. Done once, on RIFT_TURN.
 func place() -> void:
-	if not game.player.known_rifts.is_empty():
-		game.add_message("The ground shudders: the rifts you found have closed, and new ones have torn open somewhere in the dark.")
 	game.forget_rifts()
 	cells.clear()
 	city.clear()
@@ -105,14 +104,6 @@ func move(cell: Vector2i) -> void:
 			cells.insert(i, spot)
 			city[spot] = f.name
 			return
-
-# The rifts Sköll can come through now (nothing standing on them).
-func free_cells() -> Array[Vector2i]:
-	var free: Array[Vector2i] = []
-	for r in cells:
-		if not game.is_blocked(r) and not game.is_city(r):
-			free.append(r)
-	return free
 
 # The faction whose city this rift opened toward (null if none, or it fell).
 func owner_of(cell: Vector2i) -> Faction:

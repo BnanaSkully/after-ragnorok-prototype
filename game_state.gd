@@ -1765,7 +1765,7 @@ func reveal_area(f: Faction, center: Vector2i, radius: int) -> void:
 			if HexMap.hex_distance(c, center) <= radius:
 				f.explored[c] = true
 
-# The rifts were rolled again: nobody knows where the new ones are.
+# Rifts are placed (once, on Rifts.RIFT_TURN): nobody knows where they are yet.
 func forget_rifts() -> void:
 	for f in factions:
 		f.known_rifts.clear()
