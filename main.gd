@@ -38,6 +38,8 @@ func unit_colour(f: Faction) -> Color:
 	return FACTION_COLOURS[f.name][1]
 
 # What the player is doing on screen (not part of the game rules)
+const CLICK_SLOP_3D := 12.0 # pixels the pointer may move between press and release and still click (3D view)
+var press_pos_3d := Vector2.ZERO # where the last left press started (3D view)
 var hover_cell := NO_CELL # the hex under the mouse (landing highlight, tooltips)
 var hover_pos := Vector2(-1, -1) # the mouse, for tooltips on the top bar
 var top_bar_tips: Array = [] # [Rect2, tooltip text] for each part of the top bar (filled by _draw)
@@ -640,34 +642,43 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_V:
 		toggle_3d()
 		return
-	if showing_3d:
-		return # in the 3D view the mouse moves the camera (view_3d.gd); clicking hexes is 2D only for now
 	if state.game_over or state.phase == GameState.Phase.CROSSING or state.is_waiting() or trade_panel.visible or deal_panel.visible or city_panel.visible:
 		return
 	if event is InputEventMouseMotion:
 		hover_pos = get_local_mouse_position()
-		hover_cell = HexView2D.cell_at(hover_pos) # (the landing highlight and the tooltips use this)
+		hover_cell = cell_under_mouse() # (the landing highlight and the tooltips use this)
 		queue_redraw()
 		return
+	if showing_3d and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		# In 3D a press may start dragging the map (one finger on a phone): it only
+		# counts as a click when it's let go about where it started.
+		if event.pressed:
+			press_pos_3d = event.position
+			return
+		if event.position.distance_to(press_pos_3d) > CLICK_SLOP_3D:
+			return
+		var click := event.duplicate() as InputEventMouseButton
+		click.pressed = true
+		event = click
 	if state.phase == GameState.Phase.LANDING:
 		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-			if state.try_land(HexView2D.cell_at(get_local_mouse_position())):
+			if state.try_land(cell_under_mouse()):
 				hover_cell = NO_CELL
 			refresh()
 		return
 	if placing_outpost and event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_LEFT:
-			var spot := HexView2D.cell_at(get_local_mouse_position())
+			var spot := cell_under_mouse()
 			if spot in state.outpost_spots(state.player):
 				state.player_build_outpost(spot)
 				placing_outpost = false
-		else:
+		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			placing_outpost = false # right-click cancels
 			state.messages = []
 		refresh()
 		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		var cell := HexView2D.cell_at(get_local_mouse_position())
+		var cell := cell_under_mouse()
 		var clicked := state.unit_at(cell)
 		if clicked and clicked.faction == state.player:
 			# click your unit to select it (again to deselect); units that already moved can't be picked
@@ -698,6 +709,62 @@ func _unhandled_input(event: InputEvent) -> void:
 			selected = null
 		refresh()
 
+# The colour a hex is marked with for what you can do there right now (the 2D view
+# fills the hex with it, the 3D view lays it over the tile), or transparent for none:
+# where you may land, where an outpost could go, and where the selected unit can
+# move (yellow), attack (orange-red), persuade her (pale yellow) or would cross a
+# closed border (pink).
+func highlight_of(c: Vector2i, outpost_spots: Array[Vector2i]) -> Color:
+	var s := state
+	var none := Color(0, 0, 0, 0)
+	if s.phase == GameState.Phase.LANDING:
+		return Color(0.9, 0.75, 0.3) if c == hover_cell and s.can_land_at(c) else none
+	var mark := none
+	if c in outpost_spots:
+		mark = Color(0.55, 0.8, 0.95) # you could found an outpost here
+	if selected and HexMap.is_neighbour(selected.pos, c):
+		var player := s.player
+		var daughter := s.daughter
+		var other := s.unit_at(c)
+		if daughter.is_rogue() and c == daughter.pos and s.player_can_see(c):
+			mark = Color(1.0, 0.95, 0.55) # persuade her
+		elif (s.skoll.is_at(c) or (other and other.faction != player)) and s.player_can_see(c):
+			mark = Color(0.95, 0.45, 0.2) # something to attack
+		elif s.is_city(c) and c != player.city_pos:
+			mark = Color(0.95, 0.45, 0.2) # a city you could attack (it would become your tributary)
+		elif not other and not (s.is_city(c) and c != player.city_pos) and s.passable(c) and s.can_afford_move(selected, c):
+			if s.closed_border(c):
+				mark = Color(0.75, 0.45, 0.55) # behind a closed border: entering declares war
+			elif s.zoc_blocks(player, selected.pos, c):
+				pass # zone of control: an enemy army next to both hexes holds it here
+			else:
+				mark = Color(0.9, 0.75, 0.3) # free to move
+	return mark
+
+# Every marked hex (hex -> colour), for the 3D view: only hexes that can be marked
+# are checked (the landing spot under the mouse, outpost spots, the selected unit's neighbours).
+func marked_hexes() -> Dictionary:
+	var spots: Array[Vector2i] = []
+	if placing_outpost:
+		spots = state.outpost_spots(state.player)
+	var cells: Array[Vector2i] = spots.duplicate()
+	if hover_cell != NO_CELL:
+		cells.append(hover_cell)
+	if selected:
+		cells.append_array(HexMap.neighbours(selected.pos))
+	var marks := {}
+	for c in cells:
+		var mark := highlight_of(c, spots)
+		if mark.a > 0.0:
+			marks[c] = mark
+	return marks
+
+# The hex under the mouse, in whichever view is showing.
+func cell_under_mouse() -> Vector2i:
+	if showing_3d:
+		return view_3d.cell_at_screen(get_viewport().get_mouse_position())
+	return HexView2D.cell_at(get_local_mouse_position())
+
 # --- Switching between the 2D and 3D views (V, or the 3D/2D button) ---------------
 func toggle_3d() -> void:
 	if state.phase == GameState.Phase.CROSSING:
@@ -709,6 +776,8 @@ func toggle_3d() -> void:
 		view_3d.terrain_colours = TERRAIN_COLOURS
 		view_3d.colour_of = unit_colour
 		view_3d.territory_colour_of = territory_colour
+		view_3d.marks_of = marked_hexes
+		view_3d.selected_of = func(): return selected
 	if showing_3d:
 		add_child(view_3d)
 		move_child(view_3d, 0) # behind the buttons
@@ -767,29 +836,11 @@ func draw_map() -> void:
 				fill = Color(0.07, 0.07, 0.09) # never seen
 			elif not landing and not s.player_can_see(c):
 				fill = fill.darkened(0.45) # seen before, but you can't see what's here now
-			if landing:
-				# from the ark you see the shape of the land, not who is on it
-				if not s.can_land_at(c):
-					fill = fill.darkened(0.6) # too close to another people's fires
-				elif c == hover_cell:
-					fill = Color(0.9, 0.75, 0.3)
-			if c in outpost_spots:
-				fill = Color(0.55, 0.8, 0.95) # you could found an outpost here
-			if selected and HexMap.is_neighbour(selected.pos, c):
-				var other := s.unit_at(c)
-				if daughter.is_rogue() and c == daughter.pos and s.player_can_see(c):
-					fill = Color(1.0, 0.95, 0.55) # persuade her
-				elif (skoll.is_at(c) or (other and other.faction != player)) and s.player_can_see(c):
-					fill = Color(0.95, 0.45, 0.2) # something to attack
-				elif s.is_city(c) and c != player.city_pos:
-					fill = Color(0.95, 0.45, 0.2) # a city you could attack (it would become your tributary)
-				elif not other and not (s.is_city(c) and c != player.city_pos) and s.passable(c) and s.can_afford_move(selected, c):
-					if s.closed_border(c):
-						fill = Color(0.75, 0.45, 0.55) # behind a closed border: entering declares war
-					elif s.zoc_blocks(player, selected.pos, c):
-						pass # zone of control: an enemy army next to both hexes holds it here
-					else:
-						fill = Color(0.9, 0.75, 0.3) # free to move
+			if landing and not s.can_land_at(c):
+				fill = fill.darkened(0.6) # too close to another people's fires
+			var mark := highlight_of(c, outpost_spots)
+			if mark.a > 0.0:
+				fill = mark
 			draw_colored_polygon(pts, fill)
 			if explored and s.is_ash(c):
 				draw_ash_mark(HexView2D.hex_center(c))

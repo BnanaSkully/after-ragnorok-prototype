@@ -2,6 +2,7 @@
 // Dark, cold blue-grey, smooth enough to catch a little light, with gentle waves.
 // Land tiles stand up through it, so their sides are the shoreline.
 shader_type spatial;
+render_mode cull_disabled;
 
 uniform vec3 water_colour : source_color = vec3(0.118, 0.165, 0.2); // #1E2A33
 uniform float roughness_value = 0.15;
