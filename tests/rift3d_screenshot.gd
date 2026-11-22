@@ -1,7 +1,7 @@
 extends SceneTree
-# A known rift in 3D sits INTO its land tile (a hole cut in the land, the crater sunk in
-# it) instead of standing on top of it as a box (Nathan's phone, v15). One rift on each
-# land a rift can be on: plains, forest, hills. Shots: rift3d_close.png, rift3d_far.png.
+# A known rift in 3D shows Nathan's rift tile, whole, in place of its land tile (he
+# modelled it as a tile; overlaying it on the land looked wrong). One rift on each land
+# a rift can be on: plains, forest, hills. Shots: rift3d_close.png, rift3d_far.png.
 # Run: S=<dir> xvfb-run -a -s "-screen 0 1152x648x24" godot --rendering-driver opengl3 --script tests/rift3d_screenshot.gd
 const H := preload("res://tests/helpers.gd")
 var m
@@ -44,11 +44,9 @@ func _initialize() -> void:
 	for i in 20: await process_frame
 	for c in rifts:
 		var tile: Node3D = v.hexes[c].get_node_or_null("Model")
-		check(tile != null and tile.get_meta("holed", false), "the land tile under the rift at %s has a hole" % c)
-		var crater: Node3D = v.rift_models.get(c)
-		check(crater != null and crater.position.y < v.MODEL_GROUND * v.HEX_RADIUS, "the crater at %s sits below the land's ground" % c)
+		check(tile != null and str(tile.get_meta("key")) == "rift", "the rift at %s shows the rift tile" % c)
 	var plain: Node3D = v.hexes[home].get_node_or_null("Model")
-	check(plain == null or not plain.get_meta("holed", false), "a hex with no rift has no hole")
+	check(plain != null and str(plain.get_meta("key")) != "rift", "a hex with no rift shows its own tile")
 	await shot("rift3d_close.png")
 	v.cam_target = v.cell_position(home); v.cam_distance = 16.0; v.place_camera()
 	for i in 10: await process_frame
