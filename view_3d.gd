@@ -52,6 +52,7 @@ const CITY_UNIT_OFFSET := Vector3(0.0, 0, 0.5) # a unit in its city stands at th
 const WARRIOR := preload("res://assets/models/units/warrior.glb")
 const SCOUT := preload("res://assets/models/units/scout.glb")
 const UNIT_BAND_SHADER := preload("res://assets/shaders/unit_band.gdshader")
+const SKOLL_GLOW_SHADER := preload("res://assets/shaders/skoll_glow.gdshader") # his orange glow, shifted toward gold
 const WATER_SHADER := preload("res://assets/shaders/water.gdshader")
 # Water hexes get no tile: one water plane lies under the whole map at WATER_LEVEL, below
 # the land tiles' ground (MODEL_GROUND) and the never-seen blocks' top, so neighbouring
@@ -299,6 +300,26 @@ func build_skoll() -> void:
 	skoll.scale = Vector3.ONE * k
 	skoll_feet = -box.position.y * k
 	skoll.visible = false
+	gild_skoll()
+
+# Swaps Sköll's materials for skoll_glow.gdshader: the same textures, with his orange
+# glow turned toward gold and shining a little.
+func gild_skoll() -> void:
+	for mi in skoll.find_children("*", "MeshInstance3D", true, false):
+		var m := mi as MeshInstance3D
+		for i in m.mesh.get_surface_count():
+			var own := m.mesh.surface_get_material(i) as StandardMaterial3D
+			if own == null:
+				continue
+			var sm := ShaderMaterial.new()
+			sm.shader = SKOLL_GLOW_SHADER
+			sm.set_shader_parameter("albedo_tex", own.albedo_texture)
+			if own.normal_texture:
+				sm.set_shader_parameter("normal_tex", own.normal_texture)
+				sm.set_shader_parameter("has_normal", true)
+			if own.roughness_texture:
+				sm.set_shader_parameter("orm_tex", own.roughness_texture)
+			m.set_surface_override_material(i, sm)
 
 # The model's size: every mesh's box joined together (in the model's own units).
 func model_bounds(root: Node3D) -> AABB:
