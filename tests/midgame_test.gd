@@ -122,11 +122,40 @@ func _initialize() -> void:
 	s.turn = GameState.END_TURN; s.final_ending()
 	print("   Sunna risen with you at the end: '%s'" % s.end_title)
 	m.queue_free()
+	# 7. contested Sunna: rising needs Favour, recognition and a city that held; giving her away; conquest carries her off
+	m = new_game(); s = m.state
+	s.daughter.join(s.player); s.player.favour = SunDaughter.RISE_FAVOUR
+	s.turn = GameState.RISE_TURN; s.maybe_rise()
+	print("7. Favour %d only: risen=%s (expect false), missing %s" % [s.player.favour, s.daughter.is_risen(), s.rise_missing(s.player)])
+	var jp = s.ais[0]
+	s.relation(jp).trust = SunDaughter.RECOGNISE_TRUST; s.maybe_rise()
+	print("   + the %s trust you %d: risen=%s (expect false), missing %s" % [jp.name, SunDaughter.RECOGNISE_TRUST, s.daughter.is_risen(), s.rise_missing(s.player)])
+	s.player.skoll_held = 1; s.maybe_rise()
+	print("   + your city held against Sköll once: risen=%s (expect true)" % s.daughter.is_risen())
+	m.queue_free()
+	m = new_game(); s = m.state
+	jp = s.ais[0]; var rel = s.relation(jp)
+	s.daughter.join(s.player); s.turn = SunDaughter.TRADE_TURN
+	var trust0: int = rel.trust
+	s.hand_over_daughter(s.player, jp)
+	print("   gave her to the %s: Trust %d -> %d (expect +%d), oath chance %d%% (expect 100), she shelters with them=%s" % [jp.name, trust0, rel.trust, SunDaughter.GIVEN_TRUST, roundi(rel.accept_chance() * 100), s.daughter.shelters_with(jp)])
+	rel.propose_pact()
+	print("   proposed an oath: sworn=%s (expect true), still owed=%s (expect false)" % [rel.pact_active(), rel.owes_you])
+	var celt = s.ais[1]
+	s.make_tributary(jp, celt)
+	print("   the %s make the %s a tributary: she shelters with the %s=%s (expect true); they call her %s" % [celt.name, jp.name, celt.name, s.daughter.shelters_with(celt), SunDaughter.claim_name(celt)])
+	m.queue_free()
+	m = new_game(); s = m.state
+	s.daughter.join(s.player); s.turn = SunDaughter.CLAIM_GAP * 3 - 1
+	for i in 24:
+		s.turn += 1; s.rival_claims()
+	print("   24 turns holding her: each AI's Trust %s (expect -%d each, the cap)" % [s.relations.map(func(r): return r.trust), SunDaughter.CLAIM_TRUST_MAX])
+	m.queue_free()
 
 	# Part 2: full games
 	var n_games: int = H.games(300)
 	var ends := {}; var bad := {}
-	var st := {"returns": 0.0, "ash": 0.0, "rose": 0.0, "rose with you": 0.0, "swallowed": 0.0, "requests": 0.0, "game length": 0.0, "factions devoured": 0.0, "you hold her on turn 10": 0.0, "AIs demand her": 0.0, "wars on you over her": 0.0, "AI wars over her": 0.0, "carried off by a conquest": 0.0}
+	var st := {"returns": 0.0, "ash": 0.0, "rose": 0.0, "rose with you": 0.0, "swallowed": 0.0, "requests": 0.0, "game length": 0.0, "factions devoured": 0.0, "you hold her on turn 10": 0.0, "AIs demand her": 0.0, "wars on you over her": 0.0, "AI wars over her": 0.0, "carried off by a conquest": 0.0, "blocked only by Sköll never attacking (you)": 0.0, "blocked only by Sköll never attacking (anyone)": 0.0, "you had Favour 8+ on turn 20+ but no recognition": 0.0}
 	for g in n_games:
 		m = load("res://main.tscn").instantiate()
 		root.add_child(m)
@@ -136,6 +165,7 @@ func _initialize() -> void:
 		var spots = H.landing_spots(s)
 		s.try_land(spots[(g * 7) % spots.size()])
 		var requests := 0
+		var only_held := {}; var no_recognition := false # Faction -> true: on a turn from RISE_TURN, only the "held against Sköll" condition was missing
 		while not s.game_over:
 			for c in s.pending_choices:
 				if c["title"].begins_with("SUNNA"): requests += 1
@@ -145,6 +175,11 @@ func _initialize() -> void:
 			for key in GameState.Buildings.LIST: s.player_build_building(key)
 			s.end_turn()
 			if s.turn == 10 and s.daughter.shelters_with(s.player): st["you hold her on turn 10"] += 1
+			var h = s.daughter.holder
+			if s.turn >= GameState.RISE_TURN and s.daughter.state == SunDaughter.State.SHELTERED and h != null and h.is_alive():
+				var miss = s.rise_missing(h)
+				if miss.size() == 1 and "Sköll" in miss[0]: only_held[h] = true
+				if h == s.player and h.favour >= SunDaughter.RISE_FAVOUR and not s.recognised(h): no_recognition = true
 			for msg in s.messages:
 				if "their lost sun)" in msg: st["wars on you over her" if "on you" in msg else "AI wars over her"] += 1
 				if "carried" in msg and "off from" in msg: st["carried off by a conquest"] += 1
@@ -156,6 +191,10 @@ func _initialize() -> void:
 				if s.outpost_owner(c) != null: bad["outpost on ash"] = 1
 			if s.skoll.active and not HexMap.in_bounds(s.skoll.pos): bad["Sköll active off the map"] = 1
 			if s.turn > GameState.END_TURN: bad["game ran past the end"] = 1; break
+		if not s.daughter.is_risen():
+			st["blocked only by Sköll never attacking (you)"] += int(only_held.has(s.player))
+			st["blocked only by Sköll never attacking (anyone)"] += int(not only_held.is_empty())
+			st["you had Favour 8+ on turn 20+ but no recognition"] += int(no_recognition)
 		ends[s.end_title] = ends.get(s.end_title, 0) + 1
 		st["returns"] += s.skoll.returns; st["ash"] += s.ash.size(); st["game length"] += s.turn
 		st["rose"] += int(s.daughter.is_risen()); st["rose with you"] += int(s.daughter.risen_with(s.player))

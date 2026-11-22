@@ -825,13 +825,19 @@ func player_trade_daughter(f: Faction) -> bool:
 	var deal := "you paid them %d Industry" % q["you_pay"]
 	if q["you_pay"] == 0:
 		deal = "they paid you %d Industry" % q["they_pay"] if q["they_pay"] > 0 else "for nothing"
-	remember("Turn %d: you handed %s to the %s (%s). Her Favour toward you %+d." % [turn, SunDaughter.NAME, f.name, deal, SunDaughter.TRADED_FAVOUR])
+	remember("Turn %d: you handed %s to the %s (%s), who call her %s. Her Favour toward you %+d. Their Trust %+d, and they accept your next %s or deal." % [turn, SunDaughter.NAME, f.name, deal, SunDaughter.claim_name(f), SunDaughter.TRADED_FAVOUR, SunDaughter.GIVEN_TRUST, f.pact_word])
 	return true
 
 # She moves from giver's city to receiver's. Being traded costs Favour toward the giver.
+# You giving her to an AI (a trade, or its claim): its Trust +GIVEN_TRUST and it
+# accepts your next oath or deal (contested Sunna, step 4).
 func hand_over_daughter(giver: Faction, receiver: Faction) -> void:
 	daughter.join(receiver)
 	giver.favour = clampi(giver.favour + SunDaughter.TRADED_FAVOUR, 0, SunDaughter.MAX_FAVOUR)
+	if giver == player and receiver != player:
+		var r := relation(receiver)
+		r.change_trust(SunDaughter.GIVEN_TRUST)
+		r.owes_you = true
 
 # --- Diplomacy helpers -----------------------------------------------------------
 # The player's relationship with this AI faction.
@@ -1455,8 +1461,8 @@ func maybe_sunna_request() -> void:
 func maybe_rise() -> void:
 	if turn < RISE_TURN or daughter.state != SunDaughter.State.SHELTERED or daughter.holder == null or not daughter.holder.is_alive():
 		return
-	if daughter.holder.favour < SunDaughter.RISE_FAVOUR:
-		return
+	if not rise_missing(daughter.holder).is_empty():
+		return # Favour, another people's recognition, and a city that has held against Sköll
 	daughter.state = SunDaughter.State.RISEN
 	# Mortal now, but enraged (Nathan's playtest: "the game just ends with Sunna
 	# rising"): he keeps his Strength, knows where she is and runs at her city.
@@ -1469,6 +1475,29 @@ func maybe_rise() -> void:
 		diplomacy_log.pop_front()
 	add_message("Turn %d: SUNNA HAS RISEN and stands with %s (+%d Food, +%d Industry a turn). The ash stops." % [turn, who, SunDaughter.RISEN_FOOD, SunDaughter.RISEN_INDUSTRY])
 	add_message("Sköll is MORTAL now, but enraged (Strength %d): he runs %d hexes a turn at her city. If it stands on turn %d it is Dawn; if it falls, he swallows her." % [skoll.strength, Skoll.RAGE_SPEED, END_TURN])
+
+# Does another people recognise her as f's? (Trust RECOGNISE_TRUST+ or an oath.)
+# AIs keep no Trust toward each other, so for an AI holder it is you who
+# recognise it: its relationship with you.
+func recognised(f: Faction) -> bool:
+	if f == player:
+		for r in relations:
+			if r.other.is_alive() and (r.trust >= SunDaughter.RECOGNISE_TRUST or r.pact_active()):
+				return true
+		return false
+	var rel := relation(f)
+	return rel != null and (rel.trust >= SunDaughter.RECOGNISE_TRUST or rel.pact_active())
+
+# What she still needs before she can rise with f (empty = ready, from RISE_TURN).
+func rise_missing(f: Faction) -> Array[String]:
+	var missing: Array[String] = []
+	if f.favour < SunDaughter.RISE_FAVOUR:
+		missing.append("Favour %d/%d" % [f.favour, SunDaughter.RISE_FAVOUR])
+	if not recognised(f):
+		missing.append("recognition (Trust %d+ or an oath)" % SunDaughter.RECOGNISE_TRUST)
+	if f.skoll_held < 1:
+		missing.append("her city to hold vs Sköll")
+	return missing
 
 # Every few turns after the Landing, a small event asks the player to choose.
 func maybe_turn_event() -> void:

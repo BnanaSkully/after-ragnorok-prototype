@@ -59,6 +59,14 @@ const REQUEST_REFUSED := -2
 # them: they get RISEN_FOOD and RISEN_INDUSTRY a turn (and her defence), Sköll
 # becomes mortal at his normal Strength, and the ash stops.
 const RISE_FAVOUR := 8
+# (contested Sunna, step 4) Favour alone is not enough: another people must
+# recognise her protector (Trust RECOGNISE_TRUST+ with it, or an oath), and her
+# city must have held against Sköll at least once (Faction.skoll_held).
+const RECOGNISE_TRUST := 2
+# Giving her away (trading her, or handing her to a people that claims her):
+# the receiver's Trust GIVEN_TRUST, and it accepts your next oath or deal
+# (Diplomacy.owes_you).
+const GIVEN_TRUST := 3
 const RISEN_FOOD := 3
 const RISEN_INDUSTRY := 3
 

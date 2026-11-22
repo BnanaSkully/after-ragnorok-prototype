@@ -165,6 +165,7 @@ func attack_city(f: Faction) -> void:
 			drive_back()
 	else:
 		game.add_message("%s's city (defence %d) held: it lost %d HP (%d left) and wounded Sköll by %d." % [f.name, defence, dealt, f.city_hp, taken])
+		f.skoll_held += 1
 		wound(taken, f)
 
 # She's out in the open: he sprints toward her (SPRINT hexes a turn), and if
