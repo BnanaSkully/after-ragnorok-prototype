@@ -44,12 +44,12 @@ func _initialize() -> void:
 	var v = m.view_3d
 	v.cam_target = v.cell_position(rifts[0]); v.cam_distance = 8.0; v.place_camera()
 	for i in 20: await process_frame
-	var glow = v.rift_models[rifts[0]].get_node_or_null("SeasonGlow")
+	var glow = v.season_lights.get(rifts[0])
 	check(glow != null and glow.visible, "3D: the rift's season light is on")
 	await shot("season_3d.png")
 	s.turn = Rifts.SEASON_FIRST + Rifts.SEASON_LENGTH
 	m.refresh()
 	for i in 5: await process_frame
-	check(not v.rift_models[rifts[0]].get_node("SeasonGlow").visible, "3D: the light is off once the season has passed")
+	check(not v.season_lights[rifts[0]].visible, "3D: the light is off once the season has passed")
 	print("ALL OK" if not failed else "SOME CHECKS FAILED")
 	quit()
