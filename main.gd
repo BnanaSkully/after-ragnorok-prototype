@@ -36,18 +36,18 @@ const GOLD := Color(0.86, 0.7, 0.4)
 const GOLD_DIM := Color(0.55, 0.45, 0.28)
 const TEXT := Color(0.93, 0.9, 0.82)
 const BADGE_RED := Color(0.8, 0.12, 0.1)
-const TOP_BAR_BOTTOM := 50.0 # the goal line ends here: hex tooltips stay below it
+const TOP_BAR_BOTTOM := 56.0 # the goal line ends here: hex tooltips stay below it
 const ICON_X := 14.0 # left edge of the icon column
 const ICON_SIZE := 52.0
 const ICON_Y := 84.0 # top of the first icon
 const ICON_GAP := 62.0
-const PANEL_POS := Vector2(80, 84) # where a left-edge panel opens (right of the icons)
+const PANEL_POS := Vector2(78, 76) # where a left-edge panel opens (right of the icons)
 const PANEL_W := 372.0
-const POPUP_POS := Vector2(470, 84) # deals, trading her, city buildings: beside the open panel
-const RES_RECT := Rect2(1032, 10, 112, 186) # the resource column (top right)
-const END_RING := Rect2(1028, 528, 116, 116) # the End Turn button (bottom right)
+const POPUP_POS := Vector2(512, 84) # deals, trading her, city buildings: beside the open panel
+const RES_RECT := Rect2(1030, 6, 118, 196) # the resource column (top right)
+const END_RING := Rect2(998, 494, 150, 150) # the End Turn button (bottom right), drawn on end_turn_ring.png
 const BADGE_SIZE := 34.0
-const BADGE_X := 988.0 # badges sit left of the End Turn ring
+const BADGE_X := 958.0 # badges sit left of the End Turn ring
 const TOAST_CENTRE_X := 660.0 # toasts appear here at the top (clear of the goal line and the resource column)
 const TOAST_W := 460.0
 const TOAST_TIME := 4.0 # seconds a toast stays (it fades in its last second)
@@ -55,6 +55,21 @@ const TOAST_TIME_BUSY := 2.5 # ...when more are waiting behind it
 const TOAST_SHOWN := 2 # at most this many at once
 const TOAST_QUEUE := 6 # older ones are dropped (they are still in the Chronicle)
 const CHRONICLE_MAX := 400 # entries kept
+
+# Nathan's UI art (assets/ui, cut from his asset sheet) and the art pass: Cinzel for
+# titles, game-icons.net icons (CC BY 3.0, see assets/ui/icons/CREDITS.txt), edge mist.
+const UI_DIR := "res://assets/ui/"
+const FRAME_MARGIN := 78.0 # panel_frame_plain.png: the knotwork corners, never stretched
+const FRAME_PAD := 13.0 # its transparent border
+const PANEL_FRAME_SCALE := 0.62 # the frame at this size around the HUD panels
+const SMALL_FRAME_SCALE := 0.26 # ...and around the goal line, toasts and the resource column
+var ui_tex := {} # name -> Texture2D (frames, rings, medallion, banners)
+var icons := {} # name -> Texture2D (assets/ui/icons/*.svg)
+var frame_styles := {} # scale -> StyleBoxTexture
+var title_font: Font = ThemeDB.fallback_font # Cinzel, once loaded
+var mist: ColorRect # the edge mist and void glow (above the map, below the HUD)
+var ov: Node2D # the layer the HUD overlay is drawn on (draw_overlay), above the mist
+var active_icons := {} # icon button -> it shows the open panel
 
 const ASH_COLOUR := Color(0.36, 0.34, 0.33) # land Sköll turned to ash
 # How each kind of land looks (index = Terrain.Type)
@@ -134,6 +149,20 @@ var choice_label: Label
 var choice_buttons: VBoxContainer
 
 func _ready() -> void:
+	load_art()
+	mist = ColorRect.new()
+	mist.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var shader: Shader = load("res://assets/shaders/edge_mist.gdshader")
+	if shader:
+		var mat := ShaderMaterial.new()
+		mat.shader = shader
+		mist.material = mat
+	else:
+		mist.color = Color(0, 0, 0, 0)
+	add_child(mist)
+	ov = Node2D.new()
+	ov.draw.connect(draw_overlay)
+	add_child(ov)
 	hud = Control.new()
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE # clicks between the HUD's buttons reach the map
 	add_child(hud)
@@ -153,8 +182,69 @@ func _ready() -> void:
 	build_city_ui()
 	build_trade_ui()
 	build_crossing_ui()
+	for panel in [offer_panel, choice_panel, deal_panel, city_panel, trade_panel]:
+		panel.add_theme_stylebox_override("panel", frame_style(PANEL_FRAME_SCALE, 40.0))
+	for heading in [offer_heading, choice_heading, deal_heading]:
+		heading.add_theme_font_override("font", title_font)
 	state.start_crossing()
 	refresh()
+
+# Nathan's UI pictures, the icons and the title font. Anything missing falls back
+# to the shapes drawn in code.
+func load_art() -> void:
+	for key in ["panel_frame_plain", "end_turn_ring", "icon_button_ring", "sunna_medallion", "banner_norse", "banner_japanese", "banner_celtic", "banner_greek"]:
+		var path: String = UI_DIR + key + ".png"
+		if ResourceLoader.exists(path):
+			ui_tex[key] = load(path)
+	for key in ["diplomacy", "build", "chronicle", "settings", "pop", "food", "industry", "army", "land", "offer", "request", "popup", "peace"]:
+		var path: String = UI_DIR + "icons/" + key + ".svg"
+		if ResourceLoader.exists(path):
+			icons[key] = load(path)
+	if ResourceLoader.exists("res://assets/fonts/Cinzel.ttf"):
+		title_font = load("res://assets/fonts/Cinzel.ttf")
+
+# The panel frame as a 9-slice at a given size: its knotwork corners keep their
+# shape (texture margins), only the plain edges and the dark centre stretch.
+func frame_style(frame_scale: float, content: float) -> StyleBox:
+	var key := "%.2f/%d" % [frame_scale, content]
+	if frame_styles.has(key):
+		return frame_styles[key]
+	var style: StyleBox
+	if ui_tex.has("panel_frame_plain"):
+		var tex: Texture2D = ui_tex["panel_frame_plain"]
+		if frame_scale != 1.0:
+			var img: Image = tex.get_image()
+			img.resize(roundi(img.get_width() * frame_scale), roundi(img.get_height() * frame_scale), Image.INTERPOLATE_LANCZOS)
+			tex = ImageTexture.create_from_image(img)
+		var st := StyleBoxTexture.new()
+		st.texture = tex
+		st.set_texture_margin_all(FRAME_MARGIN * frame_scale)
+		st.set_expand_margin_all(FRAME_PAD * frame_scale) # the frame's own transparent border sits outside the box
+		st.set_content_margin_all(content)
+		if content > 20: # wide frames: clear of the knotwork corners at the sides, less tall
+			st.content_margin_top = content - 8
+			st.content_margin_bottom = content - 8
+		style = st
+	else:
+		var flat := box_style(GOLD, 6, 1)
+		flat.set_content_margin_all(content)
+		style = flat
+	frame_styles[key] = style
+	return style
+
+# A texture drawn to fit inside r, keeping its shape (centred).
+func draw_fitted(ci: CanvasItem, tex: Texture2D, r: Rect2, tint := Color.WHITE) -> void:
+	var size := tex.get_size()
+	var k := minf(r.size.x / size.x, r.size.y / size.y)
+	var d := size * k
+	ci.draw_texture_rect(tex, Rect2(r.position + (r.size - d) / 2, d), false, tint)
+
+# One of the game-icons.net icons, tinted (gold by default), in r.
+func draw_game_icon(ci: CanvasItem, key: String, r: Rect2, tint := GOLD) -> bool:
+	if not icons.has(key):
+		return false
+	draw_fitted(ci, icons[key], r, tint)
+	return true
 
 func add_button(text: String, pos: Vector2, action: Callable) -> Button:
 	var b := Button.new()
@@ -184,17 +274,24 @@ func round_button(kind: String, rect: Rect2, action: Callable, parent: Node = nu
 	b.custom_minimum_size = rect.size
 	b.focus_mode = Control.FOCUS_NONE
 	var r := int(rect.size.x / 2)
-	b.add_theme_stylebox_override("normal", box_style(GOLD_DIM, r, 2))
-	b.add_theme_stylebox_override("hover", box_style(GOLD, r, 2, Color(0.1, 0.09, 0.08, 0.92)))
-	b.add_theme_stylebox_override("pressed", box_style(GOLD, r, 3, Color(0.14, 0.11, 0.07, 0.95)))
-	b.add_theme_stylebox_override("disabled", box_style(Color(0.3, 0.28, 0.25), r, 1))
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	if ui_tex.has("icon_button_ring"): # the ring picture is drawn by draw_icon
+		for state_name in ["normal", "hover", "pressed", "disabled", "focus"]:
+			b.add_theme_stylebox_override(state_name, StyleBoxEmpty.new())
+	else:
+		b.add_theme_stylebox_override("normal", box_style(GOLD_DIM, r, 2))
+		b.add_theme_stylebox_override("hover", box_style(GOLD, r, 2, Color(0.1, 0.09, 0.08, 0.92)))
+		b.add_theme_stylebox_override("pressed", box_style(GOLD, r, 3, Color(0.14, 0.11, 0.07, 0.95)))
+		b.add_theme_stylebox_override("disabled", box_style(Color(0.3, 0.28, 0.25), r, 1))
+		b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 	b.draw.connect(draw_icon.bind(b, kind))
 	b.pressed.connect(action)
 	(parent if parent else hud).add_child(b)
 	return b
 
 func set_active(b: Button, active: bool) -> void:
+	active_icons[b] = active
+	if ui_tex.has("icon_button_ring"):
+		return # (draw_icon shows it as a glow)
 	var r := int(b.size.x / 2)
 	b.add_theme_stylebox_override("normal", box_style(GOLD if active else GOLD_DIM, r, 3 if active else 2, Color(0.14, 0.11, 0.07, 0.95) if active else HUD_BG))
 
@@ -204,9 +301,7 @@ func make_panel(key: String, title: String) -> VBoxContainer:
 	var panel := PanelContainer.new()
 	panel.position = PANEL_POS
 	panel.custom_minimum_size = Vector2(PANEL_W, 0)
-	var style := box_style(GOLD, 6, 1)
-	style.set_content_margin_all(14)
-	panel.add_theme_stylebox_override("panel", style)
+	panel.add_theme_stylebox_override("panel", frame_style(PANEL_FRAME_SCALE, 40.0))
 	hud.add_child(panel)
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 8)
@@ -240,6 +335,7 @@ func line_style() -> StyleBoxLine:
 func heading_label(text: String, size := 15) -> Label:
 	var l := Label.new()
 	l.text = text
+	l.add_theme_font_override("font", title_font)
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color", GOLD)
 	return l
@@ -328,7 +424,7 @@ func build_diplomacy_panel() -> void:
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 10)
 		box.add_child(row)
-		drawn(Vector2(30, 46), func(c: Control): draw_banner(c, Rect2(0, 0, 30, 46), f), row)
+		drawn(Vector2(36, 50), func(c: Control): draw_banner(c, Rect2(0, 0, 36, 50), f), row)
 		var info := VBoxContainer.new()
 		info.add_theme_constant_override("separation", 0)
 		info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -498,11 +594,11 @@ func update_sunna_panel() -> void:
 func build_chronicle_panel() -> void:
 	var box := make_panel("chronicle", "CHRONICLE")
 	chronicle_scroll = ScrollContainer.new()
-	chronicle_scroll.custom_minimum_size = Vector2(PANEL_W - 28, 430)
+	chronicle_scroll.custom_minimum_size = Vector2(PANEL_W - 80, 390)
 	chronicle_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	box.add_child(chronicle_scroll)
 	chronicle_label = text_label(13, Color(0.88, 0.85, 0.76))
-	chronicle_label.custom_minimum_size = Vector2(PANEL_W - 44, 0)
+	chronicle_label.custom_minimum_size = Vector2(PANEL_W - 96, 0)
 	chronicle_scroll.add_child(chronicle_label)
 
 func build_settings_panel() -> void:
@@ -512,6 +608,9 @@ func build_settings_panel() -> void:
 	var help := text_label(13, Color(0.8, 0.78, 0.7))
 	help.text = "V also switches the view (remembered for your next game; 2D is lighter on slow phones).\nIn 3D: drag (or WASD, or one finger) to move, the wheel or a pinch to zoom.\nHover anything to see what it is; on a phone, press and hold."
 	box.add_child(help)
+	var credits := text_label(11, Color(0.65, 0.63, 0.58))
+	credits.text = "Credits. Icons: game-icons.net (Lorc, Delapouite and others), CC BY 3.0. Font: Cinzel, SIL Open Font License. UI art: Nathan."
+	box.add_child(credits)
 
 func on_new_game() -> void:
 	if new_game_armed:
@@ -555,6 +654,11 @@ func capture_messages() -> void:
 
 func _process(delta: float) -> void:
 	capture_messages()
+	var screen := get_viewport_rect().size
+	if mist.size != screen:
+		mist.size = screen
+		if mist.material:
+			(mist.material as ShaderMaterial).set_shader_parameter("aspect", screen.x / maxf(1.0, screen.y))
 	if not toasts.is_empty():
 		var life := TOAST_TIME_BUSY if toasts.size() > TOAST_SHOWN else TOAST_TIME
 		for i in mini(TOAST_SHOWN, toasts.size()):
@@ -1302,7 +1406,7 @@ func _draw() -> void:
 		return # the Crossing panel is shown instead of the map
 	if not showing_3d:
 		draw_map() # in the 3D view, view_3d.gd shows the map instead
-	draw_overlay()
+	ov.queue_redraw() # the HUD drawn over the map (and over the edge mist), see draw_overlay
 
 # The hex map and everything on it.
 func draw_map() -> void:
@@ -1450,13 +1554,13 @@ func draw_overlay() -> void:
 	draw_toasts(font)
 	draw_tooltip()
 	if s.game_over:
-		draw_rect(Rect2(Vector2.ZERO, screen), Color(0, 0, 0, 0.8))
-		draw_string(font, Vector2(0, screen.y / 2 - 60), s.end_title, HORIZONTAL_ALIGNMENT_CENTER, screen.x, 40, Color(0.95, 0.45, 0.15))
+		ov.draw_rect(Rect2(Vector2.ZERO, screen), Color(0, 0, 0, 0.8))
+		ov.draw_string(font, Vector2(0, screen.y / 2 - 60), s.end_title, HORIZONTAL_ALIGNMENT_CENTER, screen.x, 40, Color(0.95, 0.45, 0.15))
 		var lines := s.end_detail.split("\n")
 		for i in lines.size():
-			draw_string(font, Vector2(0, screen.y / 2 - 10 + i * 30), lines[i], HORIZONTAL_ALIGNMENT_CENTER, screen.x, 20)
+			ov.draw_string(font, Vector2(0, screen.y / 2 - 10 + i * 30), lines[i], HORIZONTAL_ALIGNMENT_CENTER, screen.x, 20)
 		var totals := "Turn %d    Food %d    Industry %d    Units %d    Army Strength %d" % [s.turn, player.food, player.industry, player.units.size(), s.army_power(player)]
-		draw_string(font, Vector2(0, screen.y / 2 + 10 + lines.size() * 30), totals, HORIZONTAL_ALIGNMENT_CENTER, screen.x, 18, Color(0.7, 0.7, 0.7))
+		ov.draw_string(font, Vector2(0, screen.y / 2 + 10 + lines.size() * 30), totals, HORIZONTAL_ALIGNMENT_CENTER, screen.x, 18, Color(0.7, 0.7, 0.7))
 
 # --- Territory borders and city banners (on the map, in 2D and 3D) -----------------
 const HEX_RADIUS_3D := 1.0 # view_3d.gd's HEX_RADIUS
@@ -1516,7 +1620,7 @@ func draw_borders() -> void:
 				var n := neighbour_across(c, i)
 				if n != NO_CELL and owners[n] == f:
 					continue
-				draw_line(pts[i].lerp(centre, 0.07), pts[(i + 1) % 6].lerp(centre, 0.07), colour, 2.5, true)
+				ov.draw_line(pts[i].lerp(centre, 0.07), pts[(i + 1) % 6].lerp(centre, 0.07), colour, 2.5, true)
 
 # Where a city's banner hangs: above its hex (Vector2.INF when the 3D camera can't see it).
 func city_anchor(c: Vector2i) -> Vector2:
@@ -1546,34 +1650,36 @@ func draw_city_banners(font: Font) -> void:
 			trust_col = Color(0.5, 0.9, 0.5) if t > 0 else (Color(1.0, 0.45, 0.35) if t < 0 else TEXT)
 		var pop_w := font.get_string_size(pop, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
 		var trust_w := font.get_string_size(trust, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-		var w := 22.0 + 16.0 + pop_w + 8.0 + (trust_w + 12.0 if trust != "" else 0.0)
-		var box := Rect2(at.x - w / 2, at.y - 20, w, 20)
-		draw_rect(box, HUD_BG)
-		draw_rect(box, GOLD_DIM, false, 1.0)
-		draw_banner(self, Rect2(box.position.x - 4, box.position.y - 6, 18, 30), f)
-		var x := box.position.x + 24
-		draw_people(self, Vector2(x + 5, box.position.y + 10), 5.0, TEXT)
-		draw_string(font, Vector2(x + 14, box.position.y + 15), pop, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, TEXT)
+		var banner_w := 20.0
+		var chip_w := 8.0 + 16.0 + pop_w + 8.0 + (trust_w + 12.0 if trust != "" else 0.0)
+		var left := at.x - (banner_w + 2 + chip_w) / 2
+		draw_banner(ov, Rect2(left, at.y - 27, banner_w, 28), f)
+		var box := Rect2(left + banner_w + 2, at.y - 20, chip_w, 20)
+		ov.draw_rect(box, HUD_BG)
+		ov.draw_rect(box, GOLD_DIM, false, 1.0)
+		var x := box.position.x + 6
+		if not draw_game_icon(ov, "pop", Rect2(x, box.position.y + 3, 14, 14), TEXT):
+			draw_people(ov, Vector2(x + 7, box.position.y + 10), 5.0, TEXT)
+		ov.draw_string(font, Vector2(x + 17, box.position.y + 15), pop, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, TEXT)
 		if trust != "":
-			x += 14 + pop_w + 6
-			draw_line(Vector2(x, box.position.y + 4), Vector2(x, box.end.y - 4), GOLD_DIM, 1.0)
-			draw_string(font, Vector2(x + 6, box.position.y + 14), trust, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, trust_col)
+			x += 17 + pop_w + 5
+			ov.draw_line(Vector2(x, box.position.y + 4), Vector2(x, box.end.y - 4), GOLD_DIM, 1.0)
+			ov.draw_string(font, Vector2(x + 6, box.position.y + 14), trust, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, trust_col)
 
 # --- Top left: your banner and the one goal line -------------------------------------
 func draw_goal(font: Font) -> void:
-	draw_banner(self, Rect2(16, 0, 40, 64), state.player)
+	draw_banner(ov, Rect2(12, 0, 50, 70), state.player)
 	var goal := goal_line()
 	var text: String = goal[0]
 	var colour: Color = goal[1]
 	text = fit_text(text, font, 15, 290)
-	var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x + 44
-	var rect := Rect2(64, 12, w, 32)
-	draw_rect(rect, HUD_BG)
-	draw_rect(rect, GOLD_DIM, false, 1.0)
-	var dot := Vector2(rect.position.x + 16, rect.get_center().y)
-	draw_colored_polygon(PackedVector2Array([dot + Vector2(0, -6), dot + Vector2(6, 0), dot + Vector2(0, 6), dot + Vector2(-6, 0)]), colour)
-	draw_string(font, Vector2(rect.position.x + 30, rect.position.y + 21), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, colour)
-	top_bar_tips.append([Rect2(16, 0, rect.end.x - 16, 64), "\n".join(status_lines())])
+	var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x + 50
+	var rect := Rect2(68, 10, w, 40)
+	ov.draw_style_box(frame_style(SMALL_FRAME_SCALE, 0), rect)
+	var dot := Vector2(rect.position.x + 20, rect.get_center().y)
+	ov.draw_colored_polygon(PackedVector2Array([dot + Vector2(0, -6), dot + Vector2(6, 0), dot + Vector2(0, 6), dot + Vector2(-6, 0)]), colour)
+	ov.draw_string(font, Vector2(rect.position.x + 34, rect.position.y + 25), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, colour)
+	top_bar_tips.append([Rect2(12, 0, rect.end.x - 12, 70), "\n".join(status_lines())])
 
 # Cuts a line to fit max_w pixels, ending it with "...".
 func fit_text(text: String, font: Font, size: int, max_w: float) -> String:
@@ -1689,20 +1795,20 @@ func draw_resources(font: Font) -> void:
 		["army", str(s.army_power(p)), 0, false, "Army: the total Strength of your units (%d armies, supply %d/%d; %d scouts; %d outposts). The AIs compare armies before demanding or declaring war; %s wants %d+ by turn %d.\nEach army eats %d Food a turn and costs rising Industry upkeep: the first %d are free, then 1, 1, 2, 2, 3, 3... (now %d a turn)." % [s.army_count(p), s.army_count(p), s.supply_cap(p), p.scout_count(), p.outposts.size(), SunDaughter.NAME, SunDaughter.READY_ARMY, Skoll.ARRIVAL_TURN, GameState.UNIT_FOOD_UPKEEP, GameState.FREE_ARMIES, s.army_upkeep(p)]],
 		["land", str(s.land_count(p)), 0, false, "Land: hexes of your territory that aren't ash (%s). On turn %d, Dominion goes to whoever holds the most." % [", ".join(s.ais.filter(func(f): return f.is_alive()).map(func(f): return "%s %d" % [f.name, s.land_count(f)])), GameState.END_TURN]],
 	]
-	draw_rect(RES_RECT, HUD_BG)
-	draw_rect(RES_RECT, GOLD_DIM, false, 1.0)
+	ov.draw_style_box(frame_style(SMALL_FRAME_SCALE, 0), RES_RECT)
 	for i in rows.size():
 		var row: Array = rows[i]
-		var y := RES_RECT.position.y + 6 + i * 35.0
-		draw_resource_icon(row[0], Vector2(RES_RECT.position.x + 18, y + 16))
-		var x := RES_RECT.position.x + 36
-		draw_string(font, Vector2(x, y + 22), row[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, TEXT)
+		var y := RES_RECT.position.y + 10 + i * 35.0
+		if not draw_game_icon(ov, row[0], Rect2(RES_RECT.position.x + 10, y + 6, 22, 22)):
+			draw_resource_icon(row[0], Vector2(RES_RECT.position.x + 21, y + 17))
+		var x := RES_RECT.position.x + 40
+		ov.draw_string(title_font, Vector2(x, y + 23), row[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, TEXT)
 		if row[3]:
-			var w := font.get_string_size(row[1] + " ", HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+			var w := title_font.get_string_size(row[1] + " ", HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
 			var change: int = row[2]
-			draw_string(font, Vector2(x + w, y + 22), "(%+d)" % change, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.55, 0.9, 0.5) if change >= 0 else Color(1.0, 0.45, 0.35))
+			ov.draw_string(font, Vector2(x + w, y + 22), "(%+d)" % change, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.55, 0.9, 0.5) if change >= 0 else Color(1.0, 0.45, 0.35))
 		if i > 0:
-			draw_line(Vector2(RES_RECT.position.x + 8, y), Vector2(RES_RECT.end.x - 8, y), Color(GOLD_DIM, 0.4), 1.0)
+			ov.draw_line(Vector2(RES_RECT.position.x + 12, y), Vector2(RES_RECT.end.x - 12, y), Color(GOLD_DIM, 0.4), 1.0)
 		top_bar_tips.append([Rect2(RES_RECT.position.x, y, RES_RECT.size.x, 35), row[4]])
 
 # --- Toasts (top centre) ------------------------------------------------------------------
@@ -1720,16 +1826,20 @@ func draw_toasts(font: Font) -> void:
 		w += 28
 		var h := lines.size() * 19.0 + 12
 		var rect := Rect2(TOAST_CENTRE_X - w / 2, y, w, h)
-		draw_rect(rect, Color(HUD_BG, HUD_BG.a * alpha))
-		draw_line(rect.position, Vector2(rect.end.x, rect.position.y), Color(GOLD, alpha), 1.0)
-		draw_line(Vector2(rect.position.x, rect.end.y), rect.end, Color(GOLD, alpha), 1.0)
+		ov.draw_rect(rect, Color(HUD_BG, HUD_BG.a * alpha))
+		ov.draw_line(rect.position, Vector2(rect.end.x, rect.position.y), Color(GOLD, alpha), 1.0)
+		ov.draw_line(Vector2(rect.position.x, rect.end.y), rect.end, Color(GOLD, alpha), 1.0)
 		for j in lines.size():
-			draw_string(font, Vector2(rect.position.x + 14, y + 20 + j * 19), lines[j], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1.0, 0.88, 0.55, alpha))
+			ov.draw_string(font, Vector2(rect.position.x + 14, y + 20 + j * 19), lines[j], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1.0, 0.88, 0.55, alpha))
 		y += h + 6
 
 # --- Pictures drawn in code (plain styling until there is art) ------------------------------
 # A faction's banner: a swallow-tailed flag in its colour with its emblem.
 func draw_banner(ci: CanvasItem, r: Rect2, f: Faction) -> void:
+	var key: String = "banner_" + f.name.to_lower()
+	if ui_tex.has(key):
+		draw_fitted(ci, ui_tex[key], r)
+		return
 	var notch := r.size.y * 0.16
 	var flag := PackedVector2Array([r.position, Vector2(r.end.x, r.position.y), r.end, Vector2(r.get_center().x, r.end.y - notch), Vector2(r.position.x, r.end.y)])
 	ci.draw_colored_polygon(flag, unit_colour(f).darkened(0.35))
@@ -1793,20 +1903,20 @@ func draw_resource_icon(kind: String, c: Vector2) -> void:
 	var col := GOLD
 	match kind:
 		"pop":
-			draw_people(self, c + Vector2(0, -1), 7.0, col)
+			draw_people(ov, c + Vector2(0, -1), 7.0, col)
 		"food": # wheat: a stem with grains
-			draw_line(c + Vector2(0, 9), c + Vector2(0, -9), col, 1.5)
+			ov.draw_line(c + Vector2(0, 9), c + Vector2(0, -9), col, 1.5)
 			for i in 3:
 				var y := -6.0 + i * 5.0
-				draw_circle(c + Vector2(-3, y), 2.4, col)
-				draw_circle(c + Vector2(3, y), 2.4, col)
-			draw_circle(c + Vector2(0, -10), 2.2, col)
+				ov.draw_circle(c + Vector2(-3, y), 2.4, col)
+				ov.draw_circle(c + Vector2(3, y), 2.4, col)
+			ov.draw_circle(c + Vector2(0, -10), 2.2, col)
 		"industry": # an anvil
-			draw_colored_polygon(PackedVector2Array([c + Vector2(-10, -5), c + Vector2(9, -5), c + Vector2(7, -1), c + Vector2(3, 0), c + Vector2(3, 4), c + Vector2(7, 8), c + Vector2(-7, 8), c + Vector2(-3, 4), c + Vector2(-3, 0), c + Vector2(-7, -1)]), col)
+			ov.draw_colored_polygon(PackedVector2Array([c + Vector2(-10, -5), c + Vector2(9, -5), c + Vector2(7, -1), c + Vector2(3, 0), c + Vector2(3, 4), c + Vector2(7, 8), c + Vector2(-7, 8), c + Vector2(-3, 4), c + Vector2(-3, 0), c + Vector2(-7, -1)]), col)
 		"army":
-			draw_swords(self, c, 9.0, col)
+			draw_swords(ov, c, 9.0, col)
 		"land": # a mountain
-			draw_colored_polygon(PackedVector2Array([c + Vector2(-11, 8), c + Vector2(-2, -8), c + Vector2(3, 0), c + Vector2(6, -4), c + Vector2(11, 8)]), col)
+			ov.draw_colored_polygon(PackedVector2Array([c + Vector2(-11, 8), c + Vector2(-2, -8), c + Vector2(3, 0), c + Vector2(6, -4), c + Vector2(11, 8)]), col)
 
 # The picture on a round HUD button (see round_button).
 func draw_icon(b: Button, kind: String) -> void:
@@ -1814,75 +1924,78 @@ func draw_icon(b: Button, kind: String) -> void:
 	var r := b.size.x / 2
 	var col := GOLD if not b.disabled else Color(0.42, 0.39, 0.35)
 	var font := ThemeDB.fallback_font
+	var lit: bool = active_icons.get(b, false) or (b.is_hovered() and not b.disabled)
+	if lit:
+		col = Color(1.0, 0.86, 0.55)
+	var ring: Texture2D = ui_tex.get("end_turn_ring" if kind == "end_turn" else "icon_button_ring")
+	if kind == "sunna" and ui_tex.has("sunna_medallion"):
+		# her medallion, the gold ring filling toward 10 around it, the Favour on a badge
+		var favour := state.player.favour
+		b.draw_arc(c, r - 1, 0, TAU, 48, Color(0.12, 0.1, 0.08, 0.85), 4.0, true)
+		if favour > 0:
+			b.draw_arc(c, r - 1, -PI / 2, -PI / 2 + TAU * clampf(float(favour) / SunDaughter.MAX_FAVOUR, 0.0, 1.0), 48, Color(1.0, 0.82, 0.35), 4.0, true)
+		draw_fitted(b, ui_tex["sunna_medallion"], Rect2(Vector2(5, 5), b.size - Vector2(10, 10)), Color(1.15, 1.1, 1.0) if lit else Color.WHITE)
+		var tag := Vector2(b.size.x - 5, b.size.y - 5)
+		b.draw_circle(tag, 10.0, Color(0.1, 0.08, 0.06))
+		b.draw_arc(tag, 10.0, 0, TAU, 20, GOLD, 1.5, true)
+		b.draw_string(title_font, tag + Vector2(-10, 5), str(favour), HORIZONTAL_ALIGNMENT_CENTER, 20, 13, TEXT)
+		return
+	if ring != null:
+		if lit:
+			b.draw_circle(c, r * 0.95, Color(1.0, 0.75, 0.35, 0.18))
+		draw_fitted(b, ring, Rect2(Vector2.ZERO, b.size), Color(0.55, 0.52, 0.48) if b.disabled else (Color(1.2, 1.12, 1.0) if lit else Color.WHITE))
+	var icon_rect := Rect2(c - Vector2(r, r) * 0.46, Vector2(r, r) * 0.92)
 	match kind:
-		"diplomacy": # a handshake: two sleeves, the hands clasped between them
-			var s := r * 0.5
-			for side in [-1.0, 1.0]:
-				var cuff := PackedVector2Array([c + Vector2(side * 1.2, -0.15) * s, c + Vector2(side * 0.75, -0.45) * s, c + Vector2(side * 0.45, 0.05) * s, c + Vector2(side * 0.9, 0.35) * s])
-				b.draw_colored_polygon(cuff, col)
-			var clasp := PackedVector2Array([c + Vector2(-0.55, -0.25) * s, c + Vector2(0.1, -0.55) * s, c + Vector2(0.6, -0.15) * s, c + Vector2(0.5, 0.25) * s, c + Vector2(-0.05, 0.55) * s, c + Vector2(-0.6, 0.2) * s])
-			b.draw_colored_polygon(clasp, col)
-			for i in 3: # fingers
-				var y := -0.12 + i * 0.22
-				b.draw_line(c + Vector2(-0.2, y) * s, c + Vector2(0.35, y - 0.18) * s, HUD_BG, 1.2)
-		"build": # a hammer
-			var s := r * 0.5
-			b.draw_line(c + Vector2(-0.9, 0.9) * s, c + Vector2(0.3, -0.3) * s, col, s * 0.24)
-			var hc := c + Vector2(0.35, -0.35) * s
-			var along := Vector2(1, 1).normalized() * 0.55 * s
-			var across := Vector2(1, -1).normalized() * 0.2 * s
-			b.draw_colored_polygon(PackedVector2Array([hc - along - across, hc + along - across, hc + along + across, hc - along + across]), col)
-		"sunna": # her sun with the Favour ring, the number on a small badge
-			draw_favour_sun(b, c, r * 0.72, 0)
-			var tag := Vector2(b.size.x - 4, 5)
-			b.draw_circle(tag, 10.0, Color(0.1, 0.08, 0.06))
-			b.draw_arc(tag, 10.0, 0, TAU, 20, GOLD, 1.5, true)
-			b.draw_string(font, tag + Vector2(-10, 5), str(state.player.favour), HORIZONTAL_ALIGNMENT_CENTER, 20, 13, TEXT)
-		"chronicle": # an open book
-			var s := r * 0.5
-			for side in [-1.0, 1.0]:
-				var page := PackedVector2Array([c + Vector2(0, -0.5) * s, c + Vector2(side * 0.95, -0.7) * s, c + Vector2(side * 0.95, 0.55) * s, c + Vector2(0, 0.75) * s])
-				b.draw_colored_polygon(page, col)
-				for i in 3:
-					var y := -0.3 + i * 0.3
-					b.draw_line(c + Vector2(side * 0.2, y) * s, c + Vector2(side * 0.75, y - 0.1) * s, HUD_BG, 1.0)
-		"settings": # a gear
-			var s := r * 0.5
-			for i in 8:
-				var dir := Vector2.RIGHT.rotated(TAU * i / 8.0)
-				b.draw_line(c + dir * s * 0.5, c + dir * s * 0.95, col, s * 0.32)
-			b.draw_circle(c, s * 0.68, col)
-			b.draw_circle(c, s * 0.28, HUD_BG)
 		"end_turn":
-			b.draw_arc(c, r - 7, 0, TAU, 64, Color(col, 0.5), 1.0, true)
 			var waiting := state.is_waiting() and not state.game_over
-			b.draw_string(font, Vector2(0, c.y - 16), "ANSWER" if waiting else "END", HORIZONTAL_ALIGNMENT_CENTER, b.size.x, 19, col)
-			b.draw_string(font, Vector2(0, c.y + 4), "FIRST" if waiting else "TURN", HORIZONTAL_ALIGNMENT_CENTER, b.size.x, 19, col)
-			b.draw_line(Vector2(c.x - 26, c.y + 13), Vector2(c.x + 26, c.y + 13), Color(col, 0.6), 1.0)
-			b.draw_string(font, Vector2(0, c.y + 32), "TURN %d / %d" % [state.turn, GameState.END_TURN], HORIZONTAL_ALIGNMENT_CENTER, b.size.x, 12, TEXT)
+			var big := 15 if waiting else 18
+			b.draw_string(title_font, Vector2(0, c.y - 12), "ANSWER" if waiting else "END", HORIZONTAL_ALIGNMENT_CENTER, b.size.x, big, col)
+			b.draw_string(title_font, Vector2(0, c.y + 7), "FIRST" if waiting else "TURN", HORIZONTAL_ALIGNMENT_CENTER, b.size.x, big, col)
+			b.draw_line(Vector2(c.x - 24, c.y + 15), Vector2(c.x + 24, c.y + 15), Color(col, 0.6), 1.0)
+			b.draw_string(title_font, Vector2(0, c.y + 31), "TURN %d/%d" % [state.turn, GameState.END_TURN], HORIZONTAL_ALIGNMENT_CENTER, b.size.x, 11, TEXT)
+			return
 		"offer", "request", "popup":
-			var s := r * 0.5
-			if kind == "offer": # a sealed letter
-				b.draw_rect(Rect2(c - Vector2(0.85, 0.6) * s, Vector2(1.7, 1.2) * s), col, false, 1.5)
-				b.draw_polyline(PackedVector2Array([c + Vector2(-0.85, -0.6) * s, c + Vector2(0, 0.1) * s, c + Vector2(0.85, -0.6) * s]), col, 1.5)
-			elif kind == "request":
-				draw_sun_icon(b, c, s * 0.5)
-			else:
+			if not draw_game_icon(b, kind, Rect2(c - Vector2(r, r) * 0.5, Vector2(r, r)), col):
 				b.draw_string(font, Vector2(0, c.y + 8), "!", HORIZONTAL_ALIGNMENT_CENTER, b.size.x, 22, col)
-			var badge := Vector2(b.size.x - 3, 3)
+			var badge := Vector2(b.size.x - 4, 4)
 			b.draw_circle(badge, 9.0, BADGE_RED)
 			b.draw_string(font, badge + Vector2(-9, 5), str(badge_count(kind)), HORIZONTAL_ALIGNMENT_CENTER, 18, 13, Color.WHITE)
+			return
+	if draw_game_icon(b, kind, icon_rect, col):
+		return
+	match kind: # the shapes drawn in code, if an icon is missing
+		"diplomacy":
+			var s := r * 0.5
+			for side in [-1.0, 1.0]:
+				b.draw_colored_polygon(PackedVector2Array([c + Vector2(side * 1.2, -0.15) * s, c + Vector2(side * 0.75, -0.45) * s, c + Vector2(side * 0.45, 0.05) * s, c + Vector2(side * 0.9, 0.35) * s]), col)
+			b.draw_colored_polygon(PackedVector2Array([c + Vector2(-0.55, -0.25) * s, c + Vector2(0.1, -0.55) * s, c + Vector2(0.6, -0.15) * s, c + Vector2(0.5, 0.25) * s, c + Vector2(-0.05, 0.55) * s, c + Vector2(-0.6, 0.2) * s]), col)
+		"build":
+			var s := r * 0.5
+			b.draw_line(c + Vector2(-0.9, 0.9) * s, c + Vector2(0.3, -0.3) * s, col, s * 0.24)
+			b.draw_circle(c + Vector2(0.35, -0.35) * s, s * 0.4, col)
+		"sunna":
+			draw_favour_sun(b, c, r * 0.72, 14)
+		"chronicle":
+			var s := r * 0.5
+			for side in [-1.0, 1.0]:
+				b.draw_colored_polygon(PackedVector2Array([c + Vector2(0, -0.5) * s, c + Vector2(side * 0.95, -0.7) * s, c + Vector2(side * 0.95, 0.55) * s, c + Vector2(0, 0.75) * s]), col)
+		"settings":
+			b.draw_circle(c, r * 0.34, col)
+			b.draw_circle(c, r * 0.14, HUD_BG)
 
 # How the map shows what is at war or at peace in the Diplomacy panel.
 func draw_stance(c: Control, f: Faction) -> void:
 	var d: Diplomacy = state.relation(f)
 	var centre := c.size / 2
+	var r := Rect2(centre - Vector2(12, 12), Vector2(24, 24))
 	if d.at_war or state.player.overlord == f.name:
-		draw_swords(c, centre, 9.0, Color(1.0, 0.4, 0.3))
+		if not draw_game_icon(c, "army", r, Color(1.0, 0.4, 0.3)):
+			draw_swords(c, centre, 9.0, Color(1.0, 0.4, 0.3))
 	elif d.pact_active():
-		c.draw_circle(centre, 8.0, Color(0.55, 0.85, 0.6))
-		c.draw_circle(centre, 4.0, HUD_BG)
-	else: # a dove: two wings
+		if not draw_game_icon(c, "diplomacy", r, Color(0.55, 0.85, 0.6)):
+			c.draw_circle(centre, 8.0, Color(0.55, 0.85, 0.6))
+			c.draw_circle(centre, 4.0, HUD_BG)
+	elif not draw_game_icon(c, "peace", r, Color(0.75, 0.9, 0.8)):
 		var col := Color(0.75, 0.9, 0.8)
 		c.draw_arc(centre + Vector2(-6, 2), 6.0, PI * 1.1, PI * 1.9, 8, col, 2.5)
 		c.draw_arc(centre + Vector2(6, 2), 6.0, PI * 1.1, PI * 1.9, 8, col, 2.5)
@@ -1947,9 +2060,9 @@ func draw_tooltip() -> void:
 	var screen := get_viewport_rect().size
 	at.x = clampf(at.x, 8, screen.x - RES_RECT.size.x - w - 30) # stay left of the resource column
 	at.y = clampf(at.y, 18, screen.y - lines.size() * 17 - 4)
-	draw_rect(Rect2(at - Vector2(6, 14), Vector2(w + 12, lines.size() * 17 + 6)), Color(0.06, 0.06, 0.06, 0.9))
+	ov.draw_rect(Rect2(at - Vector2(6, 14), Vector2(w + 12, lines.size() * 17 + 6)), Color(0.06, 0.06, 0.06, 0.9))
 	for i in lines.size():
-		draw_string(font, at + Vector2(0, i * 17), lines[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.95, 0.95, 0.85) if i == 0 else Color(0.8, 0.8, 0.75))
+		ov.draw_string(font, at + Vector2(0, i * 17), lines[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.95, 0.95, 0.85) if i == 0 else Color(0.8, 0.8, 0.75))
 
 # Breaks lines wider than max_w at spaces (continuations are indented).
 func wrap_lines(lines: Array[String], font: Font, max_w: float, size := 13) -> Array[String]:
