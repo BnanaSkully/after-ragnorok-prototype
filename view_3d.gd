@@ -36,6 +36,8 @@ const TILE_MODEL_PATH := "res://assets/models/tiles/%s.glb"
 # mountain hexes join into ranges (see make_mountain). Peaks: base at y = 0, sized in hex units.
 # Nathan's outpost prop (base at y = 0, sized in hex units), at the back of its hex so a
 # unit can stand in the middle, with a small banner in the owner's colour.
+const RIFT_OVERLAY_SCALE := 0.75 # the rift laid over its land tile: this big
+const RIFT_SINK := 0.0 # how far its base sinks into the land (0: it stands on the land, so the land never covers its pit)
 const OUTPOST := preload("res://assets/models/props/outpost.glb")
 const OUTPOST_OFFSET := Vector3(0.0, 0.0, -0.42)
 const PEAK_TALL := preload("res://assets/models/props/peak_tall.glb")
@@ -123,6 +125,7 @@ var touches := {} # finger index -> where it is on the screen (phones and touch 
 
 var hexes := {} # Vector2i -> MeshInstance3D
 var rifts_now: Array = [] # shown_rifts(), worked out once a frame
+var rift_models := {} # hex -> the rift drawn over its land (update_rifts)
 var tiles := {} # the tile models, from TileKit3D.build_all(), shared by all hexes
 var tile_scenes := {} # tile key (a land, "settlement", "ruins", "rift") -> PackedScene
 var overlays := {} # tint -> material that multiplies a real model's colours by the tint
@@ -209,8 +212,6 @@ func tile_key(c: Vector2i) -> Variant:
 		for r in s.ruins:
 			if r["cell"] == c and not r["taken"]:
 				return "ruins"
-		if rifts_now.has(c):
-			return "rift"
 	var land := s.terrain_at(c)
 	if land == Terrain.Type.MOUNTAINS and basalt_base != null:
 		return mountain_key(c)
@@ -404,6 +405,7 @@ func _process(delta: float) -> void:
 	rifts_now = shown_rifts()
 	update_board()
 	update_cities()
+	update_rifts()
 	update_marks()
 	update_units(delta)
 	update_skoll(delta)
@@ -730,6 +732,28 @@ func cell_at_screen(screen_pos: Vector2) -> Vector2i:
 	return cell_at_point(from + dir * t)
 
 # Whose city: a banner in the owner's colour on each settlement you've found.
+# Rifts you know of: the rift model laid over the hex's own land tile (Nathan: "draw the
+# rift as an overlay on the hex's own land tile instead of replacing it"), smaller
+# (RIFT_OVERLAY_SCALE) and lifted so its pit sits on the land's ground.
+func update_rifts() -> void:
+	for c in rifts_now:
+		var model: Node3D = rift_models.get(c)
+		if model == null:
+			model = tile_scenes["rift"].instantiate()
+			model.scale = Vector3.ONE * HEX_RADIUS * RIFT_OVERLAY_SCALE
+			model.rotation.y = hexes[c].rotation.y if hexes.has(c) else 0.0
+			add_child(model)
+			rift_models[c] = model
+		model.position = cell_position(c) + Vector3(0, hex_top(c) - RIFT_SINK * HEX_RADIUS * RIFT_OVERLAY_SCALE, 0)
+		var dim := Color.WHITE if state.player_can_see(c) else Color.WHITE.darkened(FOG_MEMORY_DARKEN)
+		var overlay := tint_overlay(dim)
+		for part in model.find_children("*", "GeometryInstance3D", true, false):
+			(part as GeometryInstance3D).material_overlay = overlay
+	for c in rift_models.keys():
+		if not rifts_now.has(c):
+			rift_models[c].queue_free()
+			rift_models.erase(c)
+
 func update_cities() -> void:
 	var used := 0
 	for f in state.factions:
