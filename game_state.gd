@@ -104,6 +104,7 @@ var ais: Array[Faction] = [
 var factions: Array[Faction] = []
 var daughter := SunDaughter.new()
 var skoll: Skoll
+var rifts: Rifts # the rifts in the void Sköll comes through (rifts.gd)
 var relations: Array[Diplomacy] = [] # the player's relationship with each AI faction
 var diplomacy_action_used := false # the player's one diplomatic action this turn (shared)
 var diplomacy_log: Array[String] = [] # what the factions remember, newest last
@@ -135,6 +136,7 @@ var ash := {} # hexes turned to ash by Sköll (hex -> true): dead land, see "Ash
 func _init() -> void:
 	terrain = Terrain.generate(ais.map(func(f): return f.city_pos))
 	skoll = Skoll.new(self)
+	rifts = Rifts.new(self)
 	player.is_player = true
 	factions.append(player)
 	for f in ais:
@@ -152,8 +154,7 @@ func start_crossing() -> void:
 	player.food = Crossing.START_FOOD
 	player.industry = Crossing.START_INDUSTRY
 	daughter.reset(player, ais)
-	skoll.rifts.clear() # rolled on Skoll.RIFT_TURN, after both cities exist
-	skoll.revealed_rift = NO_CELL
+	rifts.clear() # rolled on Rifts.RIFT_TURN, after every city exists
 	messages.clear()
 
 # Apply a choice's effects. Nothing can drop below 0 (Strength below 1).
@@ -227,13 +228,14 @@ func end_turn() -> void:
 	for f in ais:
 		ai_take_turn(f)
 	turn += 1
-	if turn == Skoll.RIFT_TURN:
-		skoll.place_rifts() # hidden until Sköll comes through one
+	if turn == Rifts.RIFT_TURN:
+		rifts.place() # hidden until Sköll comes through one
 	skoll.take_turn()
 	if game_over: # Sköll may have destroyed the player's city or found the Daughter
 		eject_trespassers()
 		update_sight()
 		return
+	rifts.walkers_turn() # Rift Walkers come out in the season and wander (rifts.gd)
 	daughter_flee()
 	for f in factions:
 		if f.city_pos == NO_CELL:
@@ -279,6 +281,7 @@ func end_turn() -> void:
 			if r.has_pending():
 				break
 		maybe_turn_event()
+		rifts.announce_season()
 		maybe_sunna_request()
 	maybe_rise()
 	eject_trespassers()
@@ -504,6 +507,9 @@ func food_parts(f: Faction) -> Array:
 		eaten += u.upkeep(UNIT_FOOD_UPKEEP)
 	if eaten != 0:
 		parts.append(["armies eat", -eaten])
+	var walkers := rifts.walkers_on_land(f)
+	if walkers > 0:
+		parts.append(["Rift Walkers on your land" if f == player else "Rift Walkers on its land", -walkers * Rifts.WALKER_FOOD])
 	return parts
 
 # --- Army limits ---------------------------------------------------------------
@@ -623,6 +629,10 @@ func ai_take_turn(f: Faction) -> void:
 			break
 		if target:
 			attack_hex(u, target.pos)
+			continue
+		var walker := ai_walker_target(u)
+		if walker != null:
+			attack_walker(u, walker)
 			continue
 		if u.pos == f.city_pos and f.units.size() > 1:
 			continue # this one guards the city
@@ -957,6 +967,8 @@ func player_build_outpost(cell: Vector2i) -> bool:
 # its unit, or walking into its outpost, while at peace with it (null if none).
 # The view asks for a second click before it does.
 func war_target(cell: Vector2i) -> Faction:
+	if rifts.walker_at(cell) != null:
+		return null # a Rift Walker belongs to nobody: attacking it is never an act of war
 	var other := unit_at(cell)
 	if other != null:
 		return other.faction if other.faction != player and not at_war(player, other.faction) else null
@@ -985,7 +997,8 @@ func player_unit_act(u: Unit, cell: Vector2i) -> bool:
 	var other := unit_at(cell)
 	if other and other.faction == player:
 		return false # can't move onto your own unit
-	var attacking := skoll.is_at(cell) or other != null or (is_city(cell) and cell != player.city_pos)
+	var walker := rifts.walker_at(cell)
+	var attacking := skoll.is_at(cell) or other != null or walker != null or (is_city(cell) and cell != player.city_pos)
 	if not attacking and not (daughter.is_rogue() and cell == daughter.pos) and zoc_blocks(player, u.pos, cell):
 		var holder := zoc_holder(player, u.pos)
 		messages = ["Zone of control: your unit is next to a %s army and can't slip past it." % holder.faction.name, "Attack it, step away from it, or stay."]
@@ -994,6 +1007,8 @@ func player_unit_act(u: Unit, cell: Vector2i) -> bool:
 	u.acted = true # (moving or fighting: no healing this turn)
 	if skoll.is_at(cell):
 		skoll.attacked_by(u)
+	elif walker != null:
+		attack_walker(u, walker)
 	elif daughter.is_rogue() and cell == daughter.pos:
 		try_persuade(u)
 	else:
@@ -1802,17 +1817,17 @@ func can_place_outpost(f: Faction, c: Vector2i) -> bool:
 	for r in ruins:
 		if r["cell"] == c and not r["taken"]:
 			return false
-	if f.known_rifts.has(c) or c == skoll.revealed_rift:
+	if f.known_rifts.has(c) or c == rifts.revealed:
 		return false # never on a rift you know of (a hidden one moves away: build_outpost)
 	var u := unit_at(c)
-	return (u == null or u.faction == f) and not skoll.is_at(c) and not (daughter.is_rogue() and daughter.pos == c)
+	return (u == null or u.faction == f) and not skoll.is_at(c) and rifts.walker_at(c) == null and not (daughter.is_rogue() and daughter.pos == c)
 
 func build_outpost(f: Faction, cell: Vector2i) -> bool:
 	if f.industry < OUTPOST_COST or f.outposts.size() >= MAX_OUTPOSTS or not can_place_outpost(f, cell):
 		return false
 	f.industry -= OUTPOST_COST
 	f.outposts.append(cell)
-	skoll.move_rift(cell) # a hidden rift under it tears open elsewhere
+	rifts.move(cell) # a hidden rift under it tears open elsewhere
 	return true
 
 # Whose outpost stands on this hex (null if none).
@@ -1867,6 +1882,52 @@ func resolve_combat(attacker: Unit, defender: Unit) -> void:
 	elif defender.hp <= 0 and not is_city(cell):
 		enter_hex(attacker, cell)
 	add_message(what + ".")
+
+# A unit attacks a Rift Walker (rift_walker.gd): the same HP fight as unit
+# against unit, both sides take damage. It fights back but never attacks
+# first. If it dies and the attacker lives, the attacker moves in (where it
+# may go). Never an act of war: Walkers belong to nobody.
+func attack_walker(u: Unit, w: RiftWalker) -> void:
+	var dealt := combat_damage(u.fighting_strength(), walker_defence(w))
+	var taken := combat_damage(walker_defence(w), u.fighting_strength())
+	u.acted = true
+	w.acted = true
+	w.hp -= dealt
+	u.hp -= taken
+	var who := "Your unit" if u.faction == player else "A %s unit" % u.faction.name
+	var what := "%s attacked a Rift Walker: dealt %d, took %d" % [who, dealt, taken]
+	var cell := w.pos
+	if w.hp <= 0:
+		rifts.remove_walker(w)
+		what += ". The Walker sank back into the roots"
+	if u.hp <= 0:
+		u.faction.remove_unit(u)
+		what += ". The attacker was destroyed"
+	elif w.hp <= 0 and may_enter(u.faction, cell):
+		enter_hex(u, cell)
+	if u.faction == player or player_can_see(cell):
+		add_message(what + ".")
+
+# A Walker's Strength when attacked: weakened by wounds; forest and hills help.
+func walker_defence(w: RiftWalker) -> int:
+	return w.fighting_strength() + Terrain.DEFENCE[terrain_at(w.pos)]
+
+# Expected damage both ways if u attacks Walker w (for the view).
+func expected_walker_combat(u: Unit, w: RiftWalker) -> Vector2i:
+	var a := u.fighting_strength()
+	var d := walker_defence(w)
+	return Vector2i(roundi(COMBAT_DAMAGE * float(a) / (a + d)), roundi(COMBAT_DAMAGE * float(d) / (a + d)))
+
+# An AI army attacks a Walker next to it that stands on its own land (eating
+# its Food), unless the army is hurt.
+func ai_walker_target(u: Unit) -> RiftWalker:
+	if u.hp <= AI_REST_HP:
+		return null
+	for c in HexMap.neighbours(u.pos):
+		var w := rifts.walker_at(c)
+		if w != null and territory_owner(c) == u.faction:
+			return w
+	return null
 
 # The damage one side deals the other: its share of COMBAT_DAMAGE, varied.
 func combat_damage(mine: int, theirs: int) -> int:
@@ -1941,7 +2002,7 @@ func update_sight_for(f: Faction) -> void:
 				f.explored[c] = true
 				if f == player:
 					discover(c)
-			if c in skoll.rifts and not f.known_rifts.has(c):
+			if rifts.has(c) and not f.known_rifts.has(c):
 				f.known_rifts[c] = true
 				if f == player:
 					add_message("You found a rift in the void: torn earth that hums at night. Sköll could come through here.")
@@ -1963,7 +2024,7 @@ func reveal_area(f: Faction, center: Vector2i, radius: int) -> void:
 			if HexMap.hex_distance(c, center) <= radius:
 				f.explored[c] = true
 
-# The rifts were rolled again: nobody knows where the new ones are.
+# Rifts are placed (once, on Rifts.RIFT_TURN): nobody knows where they are yet.
 func forget_rifts() -> void:
 	for f in factions:
 		f.known_rifts.clear()
@@ -1977,10 +2038,10 @@ func unit_at(cell: Vector2i) -> Unit:
 				return u
 	return null
 
-# True if a unit, Sköll or the Daughter (in the open) is standing on this hex.
-# (Mountains and water count as blocked: nothing can stand there except Sköll.)
+# True if a unit, Sköll, a Rift Walker or the Daughter (in the open) is standing
+# on this hex. (Mountains and water count as blocked: nothing can stand there except Sköll.)
 func is_blocked(cell: Vector2i) -> bool:
-	return not passable(cell) or unit_at(cell) != null or skoll.is_at(cell) or (daughter.is_rogue() and cell == daughter.pos)
+	return not passable(cell) or unit_at(cell) != null or skoll.is_at(cell) or rifts.walker_at(cell) != null or (daughter.is_rogue() and cell == daughter.pos)
 
 # --- Terrain ------------------------------------------------------------------
 func terrain_at(cell: Vector2i) -> int:

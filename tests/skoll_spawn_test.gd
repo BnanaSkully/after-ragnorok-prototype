@@ -3,7 +3,7 @@ const H := preload("res://tests/helpers.gd")
 # Where Sköll comes out: distance from the rift he uses to the nearest city
 # (and to yours), on arrival and every time he's driven back; that every city
 # owns one rift; who he hunts first (fair share 25% each). Checks no rift is
-# closer than Skoll.RIFT_MIN_CITY_DISTANCE.
+# closer than Rifts.MIN_CITY_DISTANCE.
 func _initialize() -> void:
 	await process_frame
 	seed(61)
@@ -26,14 +26,14 @@ func _initialize() -> void:
 			s.end_turn()
 			if s.has_pending_offer(): s.pending_relation().answer(false)
 			if s.turn == 3:
-				rift_counts[s.skoll.rifts.size()] = rift_counts.get(s.skoll.rifts.size(), 0) + 1
+				rift_counts[s.rifts.cells.size()] = rift_counts.get(s.rifts.cells.size(), 0) + 1
 				for f in s.factions: # every city must own exactly one rift
-					if s.skoll.rift_city.values().count(f.name) != 1: no_rift[f.name] = no_rift.get(f.name, 0) + 1
-			for r in s.skoll.rifts:
+					if s.rifts.city.values().count(f.name) != 1: no_rift[f.name] = no_rift.get(f.name, 0) + 1
+			for r in s.rifts.cells:
 				for f in s.factions:
-					if f.is_alive() and HexMap.hex_distance(r, f.city_pos) < Skoll.RIFT_MIN_CITY_DISTANCE: bad += 1
+					if f.is_alive() and HexMap.hex_distance(r, f.city_pos) < Rifts.MIN_CITY_DISTANCE: bad += 1
 			# a fresh appearance: he's at the rift he last came through
-			if s.skoll.active and s.skoll.pos == s.skoll.revealed_rift and s.skoll.pos != last_pos:
+			if s.skoll.active and s.skoll.pos == s.rifts.revealed and s.skoll.pos != last_pos:
 				last_pos = s.skoll.pos
 				var near := 99
 				for f in s.factions:
@@ -55,5 +55,5 @@ func _initialize() -> void:
 	print("%d appearances; distance to the nearest city: %s" % [outs, ", ".join(keys.map(func(k): return "%d: %d%%" % [k, roundi(100.0 * dist[k] / outs)]))])
 	var yk = yours.keys(); yk.sort()
 	print("distance to YOUR city: %s" % ", ".join(yk.map(func(k): return "%d: %d%%" % [k, roundi(100.0 * yours[k] / outs)])))
-	print("Rifts closer than %d to a city: %d" % [Skoll.RIFT_MIN_CITY_DISTANCE, bad])
+	print("Rifts closer than %d to a city: %d" % [Rifts.MIN_CITY_DISTANCE, bad])
 	quit()
