@@ -62,6 +62,7 @@ Run a test:
 | choices_test.gd | ruins and events: nothing useless offered (Favour at 10), every event option costs something, every event can always be answered |
 | buildings_test.gd | each city building's effect exactly; 300 games: buildings the AIs own and Industry left unspent on turn 15 |
 | health_test.gd | unit health: damage both ways over 1000 fights, wounded units weaker, healing at rest and at home, AI resting; full games (HP in range) |
+| queue_test.gd | production queue: Industry into the queue, finishing, limits, taking items out, Finish now, an item that waits; 300 seeded games bought at once vs queued only |
 | army_test.gd | the army snowball: a strong player's armies, Strength, Food/Industry and Sköll's fate at the end |
 | midgame_test.gd | Part 2: Sköll returning stronger, wounds and driving him back, ash, support against him, Sunna's requests and rising, swallowing, the endings; full 40-turn games (returns, ash, rising, endings, impossible states) |
 | zoc_test.gd | zone of control: each rule on a set-up game (stop next to an enemy army, no slipping past, attack allowed, peace, scouts, own city, the AI obeys it); full games with the rule off and on |

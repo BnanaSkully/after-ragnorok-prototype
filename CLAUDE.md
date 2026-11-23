@@ -170,7 +170,16 @@ Keep game rules separate from drawing. The game state and rules (map data, terra
 Claude's recommendation, waiting on Nathan's choice:
 1. Nathan plays Part 2 to turn 40 (Sköll returning, ash, Sunna's requests and rising, the endings). All its numbers are placeholders tuned only by simulation
 2. Tune from that playtest (Sunna rises with the player only ~23% when passive; devoured ~32%)
-3. Production queue (the last default still missing; zone of control and healing are built)
+3. DONE: production queue (see "Production queue" below)
+
+## Production queue: built (standard 4X, Nathan: "3 very important")
+
+- Each city has a queue of up to 5 items (QUEUE_MAX; Faction.queue): army, scout, walls or a city building. The Build panel has a Queue button beside Army and Scout, the city buildings panel one beside each building, and a QUEUE section lists the items (each with an x), what the city works on ("Army 2/5, done in 2 turns") and Finish now
+- How it works (GameState "Production queue", work_queue in end_turn): the Industry a turn brings in (after army upkeep and tribute) goes into the queue (Faction.production) instead of the store. When enough is in, the item is finished at the end of the turn (a new unit can move at once) and any extra goes on to the next item. An item that can't be finished right now (supply full, no free hex at the city) waits and the next one is worked on; if nothing in the queue can be finished, the Industry goes to the store as usual
+- Industry in the queue belongs to the city: it can't pay for deals, demands or Sunna's requests. Taking an item out keeps it for the next item; taking the last one out (or finishing the last one) gives what's left back to the store
+- Finish now: pays what the front item still needs from the store, 1 to 1 (a unit finished this way waits a turn, like buying at once). Buying at once from Build still works as before (Civ-style buying, without a premium, so the queue costs nothing extra: it saves clicks and lets you plan)
+- Outposts aren't queued (they need a hex chosen on the map). The AIs keep buying at once (unchanged), so the AI and every simulation that doesn't queue play exactly as before (four_test, early_game_test, war_test: identical output on main and this branch, 20 seeded games)
+- Measured (tests/queue_test.gd: every rule on a set-up game, then the same 300 seeds played by a player who buys at once and one who only queues): on turn 20 armies 3.4 -> 3.2, buildings 1.2 -> 1.3, Industry left in the store 11.6 -> 14.8 (the queue only spends each turn's income, so windfalls from the Landing and ruins sit in the store unless you press Finish now); devoured 73 -> 75 of 300; no army ever built over supply. tests/queue_screenshot.gd shows the Build panel with 5 items and the city buildings panel
 
 ## Zone of control: built (standard 4X, the classic rule)
 
@@ -201,8 +210,7 @@ Claude's recommendation, waiting on Nathan's choice:
 
 ## Missing 4X mechanics (backlog)
 
-Defaults from "How Nathan works" not built yet (build without asking):
-- Production queue: today things are bought instantly with stored Industry; standard is the city working on one item until it's finished
+Defaults from "How Nathan works" not built yet (build without asking): none left (the production queue was the last)
 Other standard 4X mechanics (ask Nathan before building, they change the game's shape):
 - Territory that grows with the city (borders pushing against each other: friction and reasons for war, now that borders are closed)
 - Resources on the map (iron, horses, fertile land): worth fighting over, and more for trading than Food and Industry

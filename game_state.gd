@@ -29,6 +29,7 @@ const LANDING_INDUSTRY := 5 # Industry everyone unloads from the ark at the Land
 const UNIT_COST := 5 # Industry to build a new army unit
 const SCOUT_COST := 3 # Industry to build a scout
 const MAX_SCOUTS := 2 # scouts each faction may have at once
+const QUEUE_MAX := 5 # items a city's production queue can hold
 const CITY_FOOD := 2 # Food a city produces each turn
 const CITY_INDUSTRY := 2 # Industry a city produces each turn
 const UNIT_FOOD_UPKEEP := 1 # Food each army unit eats each turn (scouts eat nothing)
@@ -241,10 +242,12 @@ func end_turn() -> void:
 			continue # this faction's city has fallen; it's out of the game
 		f.food += food_change(f)
 		f.city_hp = mini(CITY_MAX_HP, f.city_hp + CITY_HEAL) # the city repairs itself
+		var stored := f.industry
 		f.industry += industry_change(f)
 		pay_tribute(f)
 		if f.industry < 0:
 			disband_for_upkeep(f)
+		work_queue(f, f.industry - stored) # this turn's Industry goes into the queue, if any
 		var starved := f.food < 0
 		if starved:
 			starve(f)
@@ -1578,6 +1581,202 @@ func build_scout(f: Faction) -> bool:
 	f.industry -= SCOUT_COST
 	f.add_unit(free_spot_near(f.city_pos), Unit.Kind.SCOUT)
 	return true
+
+# --- Production queue (standard 4X) --------------------------------------------
+# The city works through its queue in order. At the end of each turn the
+# Industry the turn brought in (after upkeep and tribute) goes into the queue
+# instead of the store; once enough is in for an item, it is finished (a unit
+# appears at the city, ready to move) and any extra goes on to the next item.
+# An item that can't be finished right now (supply full, no free hex) waits
+# and the next one is worked on; if nothing can be finished the Industry goes
+# to the store as usual. The Industry in the queue can't be spent on anything
+# else (deals, Sunna's requests); taking the last item out gives it back to the
+# store. "Finish now" pays what the front item still needs from the store.
+# Buying at once (Build) still works as before. The AIs keep buying at once.
+func item_cost(key: String) -> int:
+	match key:
+		"army":
+			return UNIT_COST
+		"scout":
+			return SCOUT_COST
+		"walls":
+			return WALL_COST
+	return Buildings.cost(key)
+
+func item_name(key: String) -> String:
+	match key:
+		"army":
+			return "Army"
+		"scout":
+			return "Scout"
+		"walls":
+			return "Walls"
+	return Buildings.LIST[key]["name"]
+
+# Why the item can't be added to the queue ("" = it can).
+func queue_problem(f: Faction, key: String) -> String:
+	var queued := f.queue.count(key)
+	if not f.is_alive():
+		return "your city has fallen"
+	if f.queue.size() >= QUEUE_MAX:
+		return "the queue is full (%d items)" % QUEUE_MAX
+	match key:
+		"army":
+			if army_count(f) + queued >= supply_cap(f):
+				return "your supply is full (%d armies)" % supply_cap(f)
+		"scout":
+			if f.scout_count() + queued >= MAX_SCOUTS:
+				return "at most %d scouts" % MAX_SCOUTS
+		"walls":
+			if f.walls + queued >= MAX_WALLS:
+				return "walls go up to level %d" % MAX_WALLS
+		_:
+			if f.buildings.has(key):
+				return "already built"
+			if queued > 0:
+				return "already in the queue"
+	return ""
+
+# Why a queued item can't be finished right now, whatever its cost ("" = it can).
+func item_blocked(f: Faction, key: String) -> String:
+	match key:
+		"army":
+			if army_count(f) >= supply_cap(f):
+				return "supply full"
+			if free_spot_near(f.city_pos) == NO_CELL:
+				return "no free hex at the city"
+		"scout":
+			if f.scout_count() >= MAX_SCOUTS:
+				return "at most %d scouts" % MAX_SCOUTS
+			if free_spot_near(f.city_pos) == NO_CELL:
+				return "no free hex at the city"
+		"walls":
+			if f.walls >= MAX_WALLS:
+				return "walls complete"
+		_:
+			if f.buildings.has(key):
+				return "already built"
+	return ""
+
+# The queued item the city works on now: the first one it could finish (-1 = none).
+func queue_front(f: Faction) -> int:
+	for i in f.queue.size():
+		if item_blocked(f, f.queue[i]) == "":
+			return i
+	return -1
+
+# Turns until the front item is done at this turn's income (-1 = never at this rate).
+func queue_turns(f: Faction) -> int:
+	var i := queue_front(f)
+	if i < 0:
+		return -1
+	var left := item_cost(f.queue[i]) - f.production
+	if left <= 0:
+		return 1
+	var income := industry_change(f) - tribute_amount(f)
+	if income <= 0:
+		return -1
+	return ceili(float(left) / income)
+
+# Makes the item (its cost is paid by the caller).
+func make_item(f: Faction, key: String) -> void:
+	match key:
+		"army":
+			f.add_unit(free_spot_near(f.city_pos))
+		"scout":
+			f.add_unit(free_spot_near(f.city_pos), Unit.Kind.SCOUT)
+		"walls":
+			f.walls += 1
+		_:
+			f.buildings[key] = true
+			if key == "forge":
+				f.strength += Buildings.FORGE_STRENGTH
+
+func finished_message(f: Faction, key: String) -> String:
+	var text := "Your city finished: %s." % item_name(key)
+	match key:
+		"army":
+			text = "Your city finished an army unit. Armies: %d/%d, upkeep now %d Industry a turn." % [army_count(f), supply_cap(f), army_upkeep(f)]
+			if food_change(f) < 0:
+				text += " Warning: your army now eats more Food than you make (%+d a turn)." % food_change(f)
+		"scout":
+			text = "Your city finished a scout."
+		"walls":
+			text = "Your city finished walls (level %d): defence +%d." % [f.walls, WALL_DEFENCE]
+		_:
+			text = "Your city finished the %s: %s." % [item_name(key), Buildings.LIST[key]["text"]]
+	return text
+
+# End of turn: put this turn's Industry (gain) into the queue and finish what it pays for.
+func work_queue(f: Faction, gain: int) -> void:
+	if f.queue.is_empty() or queue_front(f) < 0:
+		return # nothing it could finish: the Industry stays in the store
+	var take := clampi(gain, 0, f.industry)
+	f.industry -= take
+	f.production += take
+	while true:
+		var i := queue_front(f)
+		if i < 0 or f.production < item_cost(f.queue[i]):
+			break
+		var key: String = f.queue[i]
+		f.production -= item_cost(key)
+		f.queue.remove_at(i)
+		make_item(f, key)
+		if f == player:
+			add_message(finished_message(f, key))
+	if f.queue.is_empty() and f.production > 0:
+		f.industry += f.production # nothing left to work on: the rest goes back to the store
+		f.production = 0
+
+func player_queue(key: String) -> void:
+	if not can_act():
+		return
+	var problem := queue_problem(player, key)
+	if problem != "":
+		messages = ["Can't add %s to the queue: %s." % [item_name(key), problem]]
+		return
+	player.queue.append(key)
+	messages = ["%s added to your city's queue. Each turn your Industry goes into the queue instead of your store." % item_name(key)]
+
+func player_unqueue(index: int) -> void:
+	if not can_act() or index < 0 or index >= player.queue.size():
+		return
+	var key: String = player.queue[index]
+	player.queue.remove_at(index)
+	messages = ["%s taken out of the queue." % item_name(key)]
+	if player.queue.is_empty() and player.production > 0:
+		add_message("The %d Industry already in the queue goes back to your store." % player.production)
+		player.industry += player.production
+		player.production = 0
+
+# Pays what the item the city is working on still needs, and finishes it now.
+func hurry_cost(f: Faction) -> int:
+	var i := queue_front(f)
+	return -1 if i < 0 else maxi(0, item_cost(f.queue[i]) - f.production)
+
+func player_hurry() -> void:
+	if not can_act():
+		return
+	var i := queue_front(player)
+	if i < 0:
+		messages = ["Nothing in the queue can be finished right now."]
+		return
+	var pay := hurry_cost(player)
+	if player.industry < pay:
+		messages = ["Can't finish it now: it needs %d more Industry and you have %d." % [pay, player.industry]]
+		return
+	var key: String = player.queue[i]
+	player.industry -= pay
+	player.production = maxi(0, player.production - item_cost(key))
+	player.queue.remove_at(i)
+	make_item(player, key)
+	if key == "army" or key == "scout":
+		player.units[-1].moves = 0 # bought this turn: it waits a turn, like buying at once
+	messages = [finished_message(player, key) + " (finished now for %d Industry)" % pay]
+	if player.queue.is_empty() and player.production > 0:
+		player.industry += player.production
+		player.production = 0
+	update_sight()
 
 # The city hex if it's free, otherwise a free hex next to it (NO_CELL if none).
 func free_spot_near(cell: Vector2i) -> Vector2i:

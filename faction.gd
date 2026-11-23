@@ -16,6 +16,11 @@ var favour := 0 # how much the Sun's Daughter trusts this faction (0 to 10)
 var walls := 0 # city wall level (each level adds defence)
 var city_hp := 20 # GameState.CITY_MAX_HP: attacks wear it down; at 0 the city falls
 var buildings := {} # city buildings it has (key from buildings.gd -> true)
+# Production queue (standard 4X): what the city works on, in order (keys:
+# "army", "scout", "walls" or a building from buildings.gd), and the Industry
+# already put into it. See GameState "Production queue".
+var queue: Array[String] = []
+var production := 0
 var population := 1 # city size: grows from surplus Food, each extra point makes +1 Food and +1 Industry
 var pact_word := "oath" # what this faction calls a sworn agreement (Norse factions swear oaths)
 var is_player := false
