@@ -39,11 +39,18 @@ const TILE_MODEL_PATH := "res://assets/models/tiles/%s.glb"
 const SEASON_GLOW_COLOUR := Color(0.55, 0.75, 1.0) # the season: a cold blue light over each rift you can see
 const SEASON_GLOW_ENERGY := 6.0
 const SEASON_GLOW_RANGE := 3.0 # world units (a hex is about 1.7 across): lights the hexes around it too
-# Rift Walkers (rifts.gd): no model yet, so a figure made in code: three dark
-# roots twisting up round a cold blue glowing heart, on a blue ring.
-const WALKER_HEIGHT := 0.8 # a little shorter than a unit
-const WALKER_ROOT_COLOUR := Color(0.07, 0.08, 0.12)
-const WALKER_GLOW := 2.5 # how bright its heart and ring shine
+# Rift Walkers (rifts.gd) are Nathan's brood model (units/brood.glb, a static
+# serpent made to fit a hex), on a cold blue ring like the units' rings.
+const BROOD := preload("res://assets/models/units/brood.glb")
+const BROOD_SCALE := 1.3 # the model is about 1.1 long and 0.75 tall; a little bigger so it reads next to units (1.4 long still fits a hex)
+const WALKER_HEIGHT := 1.0 # how tall it stands, scaled (for its map pin)
+const WALKER_GLOW := 1.5 # how bright its ring shines
+# Skeleton hordes: PLACEHOLDER until Nathan's skeleton model is in the repo
+# (none found on 23 Nov): the warrior model painted bone-white, standing still
+# on the same blue ring. To use the real model, preload it here (and drop the
+# bone paint in make_walker_figure).
+const HORDE_MODEL := preload("res://assets/models/units/warrior.glb")
+const HORDE_BONE := Color(0.5, 0.47, 0.4) # bone (lighter washed out to white under the lights)
 const OUTPOST := preload("res://assets/models/props/outpost.glb")
 const OUTPOST_OFFSET := Vector3(0.0, 0.0, -0.42)
 const PEAK_TALL := preload("res://assets/models/props/peak_tall.glb")
@@ -882,48 +889,39 @@ func update_walkers(delta: float) -> void:
 		seen[w] = true
 		var fig: Node3D = walker_figures.get(w)
 		if fig == null:
-			fig = make_walker_figure()
+			fig = make_walker_figure(w.is_horde())
 			walker_figures[w] = fig
 		walk_figure(fig, w.pos, cell_position(w.pos) + Vector3(0, hex_top(w.pos), 0), delta)
-		fig.rotate_y(delta * 0.4) # it turns slowly, as if looking for something
 	for w in walker_figures.keys():
 		if not seen.has(w):
 			walker_figures[w].queue_free()
 			walker_figures.erase(w)
 
-func make_walker_figure() -> Node3D:
+func make_walker_figure(horde := false) -> Node3D:
 	var fig := Node3D.new()
 	fig.set_meta("cell", NO_CELL)
 	fig.set_meta("walk", 0.0)
 	fig.set_meta("marker", SEASON_GLOW_COLOUR)
-	var root_mesh := CylinderMesh.new()
-	root_mesh.top_radius = 0.02
-	root_mesh.bottom_radius = 0.09
-	root_mesh.height = WALKER_HEIGHT
-	root_mesh.radial_segments = 6
-	for i in 3: # three roots leaning in, twisted round each other
-		var root := MeshInstance3D.new()
-		root.mesh = root_mesh
-		root.material_override = material(WALKER_ROOT_COLOUR)
-		var a := TAU * i / 3.0
-		root.position = Vector3(cos(a) * 0.12, WALKER_HEIGHT / 2.0, sin(a) * 0.12)
-		root.rotation = Vector3(sin(a) * 0.35, a, -cos(a) * 0.35)
-		fig.add_child(root)
-	var heart := MeshInstance3D.new()
-	var ball := SphereMesh.new()
-	ball.radius = 0.11
-	ball.height = 0.22
-	heart.mesh = ball
-	heart.material_override = glow_material(SEASON_GLOW_COLOUR, WALKER_GLOW)
-	heart.position = Vector3(0, WALKER_HEIGHT * 0.55, 0)
-	heart.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	fig.add_child(heart)
+	if horde:
+		var skel: Node3D = HORDE_MODEL.instantiate()
+		skel.scale = Vector3.ONE * UNIT_HEIGHT / UNIT_MODEL_HEIGHT
+		var bone := StandardMaterial3D.new()
+		bone.albedo_color = HORDE_BONE
+		bone.roughness = 0.9
+		for m in skel.find_children("*", "MeshInstance3D", true, false):
+			(m as MeshInstance3D).material_override = bone
+		fig.add_child(skel)
+	else:
+		var brood: Node3D = BROOD.instantiate()
+		brood.scale = Vector3.ONE * BROOD_SCALE
+		fig.add_child(brood)
 	var ring := MeshInstance3D.new()
 	ring.mesh = unit_ring_mesh
 	ring.position = Vector3(0, 0.02, 0)
-	ring.material_override = glow_material(SEASON_GLOW_COLOUR, WALKER_GLOW * 0.6)
+	ring.material_override = glow_material(SEASON_GLOW_COLOUR, WALKER_GLOW)
 	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	fig.add_child(ring)
+	fig.rotation.y = randf() * TAU # (until it first moves; then it faces the way it goes)
 	add_child(fig)
 	return fig
 

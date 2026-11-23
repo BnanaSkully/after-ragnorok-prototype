@@ -1611,8 +1611,8 @@ func draw_map() -> void:
 	# Rift Walkers you can see: a dark knot of roots with a cold blue rim.
 	for w in s.rifts.walkers:
 		if s.player_can_see(w.pos):
-			draw_walker(HexView2D.hex_center(w.pos))
-			draw_hp_bar(HexView2D.hex_center(w.pos) + Vector2(0, HexView2D.HEX_SIZE * 0.62), roundi(float(w.hp) / RiftWalker.MAX_HP * Unit.MAX_HP))
+			draw_walker(HexView2D.hex_center(w.pos), w.is_horde())
+			draw_hp_bar(HexView2D.hex_center(w.pos) + Vector2(0, HexView2D.HEX_SIZE * 0.62), roundi(float(w.hp) / w.max_hp * Unit.MAX_HP))
 
 	# The Sun's Daughter alone in the open: a bright sun on her hex.
 	if daughter.is_rogue() and s.player_can_see(daughter.pos):
@@ -2227,8 +2227,9 @@ func hex_tooltip(c: Vector2i) -> Array[String]:
 			lines.append("   If your selected unit attacks: it deals about %d and takes about %d (of %d HP)." % [e.x, e.y, selected.hp])
 	var walker: RiftWalker = s.rifts.walker_at(c)
 	if walker != null and seen:
-		var line := "A Rift Walker, out of the roots of Yggdrasil: HP %d/%d, Strength %d" % [walker.hp, RiftWalker.MAX_HP, RiftWalker.STRENGTH]
-		if s.walker_defence(walker) != RiftWalker.STRENGTH:
+		var what := "A skeleton horde, the dead risen near a rift" if walker.is_horde() else "A brood, Yggdrasil's rogue army"
+		var line := "%s: HP %d/%d, Strength %d" % [what, walker.hp, walker.max_hp, walker.strength]
+		if s.walker_defence(walker) != walker.strength:
 			line += ", defends at %d here" % s.walker_defence(walker)
 		lines.append(line)
 		var land_owner := s.territory_owner(c)
@@ -2303,8 +2304,17 @@ func draw_hp_bar(at: Vector2, hp: int) -> void:
 	draw_rect(Rect2(at - Vector2(w / 2, 0), Vector2(w * frac, 3)), col)
 
 # A Rift Walker: a dark knot of roots with a cold blue rim (the season's colour).
-func draw_walker(c: Vector2) -> void:
+func draw_walker(c: Vector2, horde := false) -> void:
 	var r := HexView2D.HEX_SIZE * 0.5
+	if horde: # a skeleton horde: a pale skull on a blue rim
+		var bone := Color(0.88, 0.85, 0.76)
+		draw_circle(c, r + 2.0, SEASON_COLOUR)
+		draw_circle(c, r, Color(0.1, 0.1, 0.12))
+		draw_circle(c + Vector2(0, -2), r * 0.55, bone)
+		draw_rect(Rect2(c + Vector2(-r * 0.3, r * 0.15), Vector2(r * 0.6, r * 0.35)), bone)
+		draw_circle(c + Vector2(-r * 0.22, -3), r * 0.14, Color(0.1, 0.1, 0.12))
+		draw_circle(c + Vector2(r * 0.22, -3), r * 0.14, Color(0.1, 0.1, 0.12))
+		return
 	draw_circle(c, r + 2.0, SEASON_COLOUR)
 	draw_circle(c, r, Color(0.08, 0.1, 0.16))
 	for i in 3: # three roots twisting out from the middle

@@ -228,7 +228,7 @@ func attack_unit(u: Unit) -> void:
 	if u.hp <= 0:
 		game.add_message("Sköll attacked %s's unit and destroyed it (dealt %d, took %d)." % [u.faction.name, dealt, taken])
 		var cell := u.pos
-		u.faction.remove_unit(u)
+		game.unit_died(u)
 		pos = cell
 	else:
 		game.add_message("%s's unit held against Sköll: it lost %d HP and wounded him by %d." % [u.faction.name, dealt, taken])
@@ -247,10 +247,10 @@ func attacked_by(u: Unit) -> void:
 		game.add_message("Your attack (%d against %d) wounded Sköll by %d; your unit lost %d HP." % [attack, effective_strength(), dealt, taken])
 		if u.hp <= 0:
 			game.add_message("Your unit died.")
-			u.faction.remove_unit(u)
+			game.unit_died(u)
 	else:
 		game.add_message("Sköll can't be killed while %s is hidden. Your unit died, but its attack of %d wounded him by %d." % [SunDaughter.NAME, attack, dealt])
-		u.faction.remove_unit(u)
+		game.unit_died(u)
 	wound(dealt, u.faction, true)
 
 # Wounds lower his Strength until they heal (WOUND_HEAL a turn). Wounds of half

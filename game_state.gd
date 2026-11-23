@@ -509,7 +509,7 @@ func food_parts(f: Faction) -> Array:
 		parts.append(["armies eat", -eaten])
 	var walkers := rifts.walkers_on_land(f)
 	if walkers > 0:
-		parts.append(["Rift Walkers on your land" if f == player else "Rift Walkers on its land", -walkers * Rifts.WALKER_FOOD])
+		parts.append(["Broods and hordes on your land" if f == player else "Broods and hordes on its land", -walkers * Rifts.WALKER_FOOD])
 	return parts
 
 # --- Army limits ---------------------------------------------------------------
@@ -1235,13 +1235,13 @@ func attack_city(u: Unit, f: Faction) -> void:
 	u.hp -= taken
 	add_message("%s attacked %s (attack %d against defence %d): the city lost %d HP (%d left), the attacker %d." % [who, whose, attack, defence, dealt, maxi(0, f.city_hp), taken])
 	if u.hp <= 0:
-		conqueror.remove_unit(u)
+		unit_died(u)
 		add_message("The attacking unit died.")
 	if f.city_hp > 0:
 		return
 	var garrison := unit_at(f.city_pos)
 	if garrison and garrison.faction == f:
-		f.remove_unit(garrison)
+		unit_died(garrison)
 	f.walls = maxi(0, f.walls - 1)
 	@warning_ignore("integer_division")
 	f.city_hp = CITY_MAX_HP / 2 # it restarts at half
@@ -1874,10 +1874,10 @@ func resolve_combat(attacker: Unit, defender: Unit) -> void:
 	attacker.hp -= taken
 	var what := "%s attacked %s: dealt %d, took %d" % [attacker.faction.name, defender.faction.name, dealt, taken]
 	if defender.hp <= 0:
-		defender.faction.remove_unit(defender)
+		unit_died(defender)
 		what += ". The %s unit was destroyed" % defender.faction.name
 	if attacker.hp <= 0:
-		attacker.faction.remove_unit(attacker)
+		unit_died(attacker)
 		what += ". The %s attacker was destroyed" % attacker.faction.name
 	elif defender.hp <= 0 and not is_city(cell):
 		enter_hex(attacker, cell)
@@ -1895,18 +1895,26 @@ func attack_walker(u: Unit, w: RiftWalker) -> void:
 	w.hp -= dealt
 	u.hp -= taken
 	var who := "Your unit" if u.faction == player else "A %s unit" % u.faction.name
-	var what := "%s attacked a Rift Walker: dealt %d, took %d" % [who, dealt, taken]
+	var what := "%s attacked a %s: dealt %d, took %d" % [who, w.label(), dealt, taken]
 	var cell := w.pos
 	if w.hp <= 0:
 		rifts.remove_walker(w)
-		what += ". The Walker sank back into the roots"
+		what += ". The horde fell back into bones" if w.is_horde() else ". The brood sank back into the roots"
 	if u.hp <= 0:
-		u.faction.remove_unit(u)
+		unit_died(u)
 		what += ". The attacker was destroyed"
 	elif w.hp <= 0 and may_enter(u.faction, cell):
 		enter_hex(u, cell)
 	if u.faction == player or player_can_see(cell):
 		add_message(what + ".")
+
+# A unit dies in a fight (with a unit, a city, Sköll or a Walker): it is
+# removed, and where it fell is remembered, because the dead near a rift rise
+# as a skeleton horde at the end of the turn (Rifts.raise_hordes). Starving
+# and disbanding are not deaths in a fight.
+func unit_died(u: Unit) -> void:
+	rifts.fallen.append(u.pos)
+	u.faction.remove_unit(u)
 
 # A Walker's Strength when attacked: weakened by wounds; forest and hills help.
 func walker_defence(w: RiftWalker) -> int:

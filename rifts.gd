@@ -43,7 +43,13 @@ const MAX_WALKERS_PER_RIFT := 2
 const WANDER_RANGE := 3
 const WANDER_CHANCE := 0.5
 const WALKER_FOOD := 1
-const WALKER_HEAL := 2 # HP it heals in a turn nobody fought it
+const WALKER_HEAL := 2 # HP it heals in a turn nobody fought it (a brood; a horde doesn't heal)
+# Skeleton hordes (Nathan's lore, 23 Nov: the dead near a rift rise): a unit
+# that dies in a fight within HORDE_RANGE of a rift rises as a skeleton horde
+# at the end of the turn, where it fell (or on a free hex next to it), up to
+# MAX_HORDES_PER_RIFT alive per rift. Then the same rules as a brood.
+const HORDE_RANGE := 2
+const MAX_HORDES_PER_RIFT := 2
 # The GameState (game_state.gd). A "weak" link: the game keeps this object alive,
 # but this object doesn't keep the game alive, so Godot can free both later.
 var game: GameState:
@@ -53,7 +59,8 @@ var _game: WeakRef
 var cells: Array[Vector2i] = [] # the current rifts (hidden until found)
 var city := {} # rift hex -> name of the faction whose city that rift opened toward
 var revealed := HexMap.NO_CELL # the rift Sköll last came through (shown to whoever sees it)
-var walkers: Array[RiftWalker] = [] # the Rift Walkers out on the map
+var walkers: Array[RiftWalker] = [] # the Rift Walkers out on the map (broods and hordes)
+var fallen: Array[Vector2i] = [] # where units died in fights this turn (GameState.unit_died): the dead near a rift rise
 
 func _init(p_game: GameState) -> void:
 	_game = weakref(p_game)
@@ -120,8 +127,8 @@ func walkers_turn() -> void:
 	var t: int = game.turn
 	var old := walkers.duplicate()
 	for w in old:
-		if not w.acted and w.hp < RiftWalker.MAX_HP:
-			w.hp = mini(RiftWalker.MAX_HP, w.hp + WALKER_HEAL)
+		if not w.acted and w.hp < w.max_hp and not w.is_horde():
+			w.hp = mini(w.max_hp, w.hp + WALKER_HEAL)
 		w.acted = false
 		if randf() < WANDER_CHANCE:
 			var options: Array[Vector2i] = []
@@ -133,7 +140,7 @@ func walkers_turn() -> void:
 	if season_on(t) and not season_on(t - 1):
 		var seen := 0
 		for rift in cells:
-			var out := walkers.filter(func(w): return w.home == rift).size()
+			var out := walkers.filter(func(w): return w.home == rift and not w.is_horde()).size()
 			for i in mini(WALKERS_PER_SEASON, MAX_WALKERS_PER_RIFT - out):
 				var spots: Array[Vector2i] = []
 				for c in HexMap.neighbours(rift):
@@ -146,13 +153,53 @@ func walkers_turn() -> void:
 				if game.player.known_rifts.has(rift) or game.player_can_see(w.pos):
 					seen += 1
 		if seen > 0:
-			game.add_message("%s out of the rifts you know. They never attack first, but each one on your land eats %d Food a turn." % ["A Rift Walker crawls" if seen == 1 else "%d Rift Walkers crawl" % seen, WALKER_FOOD])
+			game.add_message("%s out of the rifts you know: Yggdrasil's rogue army. They never attack first, but each one on your land eats %d Food a turn." % ["A brood crawls" if seen == 1 else "%d broods crawl" % seen, WALKER_FOOD])
+	raise_hordes()
 	for w in walkers:
 		var land: Faction = game.territory_owner(w.pos)
 		var whose: String = land.name if land != null else ""
 		if land == game.player and w.on_land != whose:
-			game.add_message("A Rift Walker wandered onto your land: -%d Food a turn while it stays. Attack it to drive it off." % WALKER_FOOD)
+			game.add_message("A %s wandered onto your land: -%d Food a turn while it stays. Attack it to drive it off." % [w.label(), WALKER_FOOD])
 		w.on_land = whose
+
+# The rift nearest this hex within HORDE_RANGE, or NO_CELL.
+func rift_near(c: Vector2i) -> Vector2i:
+	var best := HexMap.NO_CELL
+	for rift in cells:
+		var d := HexMap.hex_distance(c, rift)
+		if d <= HORDE_RANGE and (best == HexMap.NO_CELL or d < HexMap.hex_distance(c, best)):
+			best = rift
+	return best
+
+# The dead near a rift rise (end of turn): one skeleton horde for each unit
+# that fell in a fight within HORDE_RANGE of a rift this turn.
+func raise_hordes() -> void:
+	var seen := 0
+	for c in fallen:
+		var rift := rift_near(c)
+		if rift == HexMap.NO_CELL:
+			continue
+		if walkers.filter(func(w): return w.home == rift and w.is_horde()).size() >= MAX_HORDES_PER_RIFT:
+			continue
+		var spot := HexMap.NO_CELL
+		if walker_may_stand(c) and HexMap.hex_distance(c, rift) <= WANDER_RANGE:
+			spot = c
+		else:
+			var spots: Array[Vector2i] = []
+			for n in HexMap.neighbours(c):
+				if walker_may_stand(n) and HexMap.hex_distance(n, rift) <= WANDER_RANGE:
+					spots.append(n)
+			if not spots.is_empty():
+				spot = spots.pick_random()
+		if spot == HexMap.NO_CELL:
+			continue
+		var h := RiftWalker.new(spot, rift, RiftWalker.Kind.HORDE)
+		walkers.append(h)
+		if game.player_can_see(spot):
+			seen += 1
+	fallen.clear()
+	if seen > 0:
+		game.add_message("%s where the fallen lay near a rift. It never attacks first, but on your land it eats %d Food a turn." % ["The dead rise: a skeleton horde stands" if seen == 1 else "The dead rise: %d skeleton hordes stand" % seen, WALKER_FOOD])
 
 # A Walker killed in a fight.
 func remove_walker(w: RiftWalker) -> void:
@@ -160,6 +207,7 @@ func remove_walker(w: RiftWalker) -> void:
 
 # Forget every rift (a new game's Crossing).
 func clear() -> void:
+	fallen.clear()
 	cells.clear()
 	city.clear()
 	revealed = HexMap.NO_CELL
