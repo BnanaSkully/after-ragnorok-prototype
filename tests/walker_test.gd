@@ -34,9 +34,10 @@ func problems(s) -> Array[String]:
 		if seen.has(w.pos): bad.append("two walkers on a hex")
 		seen[w.pos] = true
 		if HexMap.hex_distance(w.pos, w.home) > Rifts.WANDER_RANGE: bad.append("walker strayed from its rift")
-		if w.hp <= 0 or w.hp > RiftWalker.MAX_HP: bad.append("walker HP %d" % w.hp)
+		if w.hp <= 0 or w.hp > w.max_hp: bad.append("walker HP %d" % w.hp)
 	for rift in s.rifts.cells:
-		if s.rifts.walkers.filter(func(w): return w.home == rift).size() > Rifts.MAX_WALKERS_PER_RIFT: bad.append("too many walkers from one rift")
+		if s.rifts.walkers.filter(func(w): return w.home == rift and not w.is_horde()).size() > Rifts.MAX_WALKERS_PER_RIFT: bad.append("too many broods from one rift")
+		if s.rifts.walkers.filter(func(w): return w.home == rift and w.is_horde()).size() > Rifts.MAX_HORDES_PER_RIFT: bad.append("too many hordes from one rift")
 	return bad
 
 func _initialize() -> void:
@@ -98,17 +99,48 @@ func _initialize() -> void:
 		ai_u.pos = jp.city_pos; ai_u.hp = Unit.MAX_HP
 		s.ai_take_turn(jp)
 		print("5. a walker next to the %s city: attacked by its army=%s (expect true)" % [jp.name, w2.hp < RiftWalker.MAX_HP or not w2 in s.rifts.walkers])
+	# 7. skeleton hordes: a unit that dies in a fight near a rift rises as one
+	var rift0: Vector2i = s.rifts.cells[0]
+	for x in s.rifts.walkers.duplicate(): s.rifts.remove_walker(x)
+	var near := HexMap.NO_CELL
+	var far := HexMap.NO_CELL
+	for c in HexMap.neighbours(rift0):
+		if s.rifts.walker_may_stand(c) and s.passable(c) and s.skoll.pos != c:
+			near = c
+			break
+	for x in HexMap.COLS:
+		for y in HexMap.ROWS:
+			var c := Vector2i(x, y)
+			if far == HexMap.NO_CELL and s.rifts.rift_near(c) == HexMap.NO_CELL and s.rifts.walker_may_stand(c) and s.passable(c):
+				far = c
+	s.rifts.fallen.clear() # (deaths from the fights above)
+	var dead_near = s.player.add_unit(near)
+	var dead_far = s.player.add_unit(far)
+	s.unit_died(dead_near); s.unit_died(dead_far)
+	s.rifts.raise_hordes()
+	var hordes: Array = s.rifts.walkers.filter(func(x): return x.is_horde())
+	print("7. a unit dies next to a rift and one far from any: hordes %d (expect 1), on its hex %s, home the rift %s, HP %d Strength %d (expect %d, %d)" % [hordes.size(), hordes.size() == 1 and hordes[0].pos == near, hordes.size() == 1 and hordes[0].home == rift0, hordes[0].hp if hordes.size() > 0 else 0, hordes[0].strength if hordes.size() > 0 else 0, RiftWalker.HORDE_MAX_HP, RiftWalker.HORDE_STRENGTH])
+	for i in 3:
+		var d = s.player.add_unit(far)
+		d.pos = near
+		s.unit_died(d)
+	s.rifts.raise_hordes()
+	print("   three more die there: hordes from that rift %d (at most %d)" % [s.rifts.walkers.filter(func(x): return x.is_horde() and x.home == rift0).size(), Rifts.MAX_HORDES_PER_RIFT])
+	var hw: RiftWalker = hordes[0]
+	hw.hp = 3; hw.acted = false
+	s.rifts.walkers_turn()
+	print("   a wounded horde after a quiet turn: HP %d (expect 3: the dead don't heal); problems %s" % [hw.hp, problems(s)])
 	# 6. the next season brings more, up to the cap per rift
 	while s.turn < Rifts.SEASON_FIRST + Rifts.SEASON_EVERY * 3 and not s.game_over: play_turn(s)
 	var most := 0
 	for rift in s.rifts.cells:
-		most = maxi(most, s.rifts.walkers.filter(func(x): return x.home == rift).size())
+		most = maxi(most, s.rifts.walkers.filter(func(x): return x.home == rift and not x.is_horde()).size())
 	print("6. turn %d: walkers %d, most from one rift %d (at most %d); problems %s" % [s.turn, s.rifts.walkers.size(), most, Rifts.MAX_WALKERS_PER_RIFT, problems(s)])
 	m.queue_free()
 
 	# Part 2: whole games, a passive player
 	var n_games: int = H.games(300)
-	var st := {"walkers out on turn 20": 0.0, "walkers out on turn 40": 0.0, "walkers came out": 0.0, "walkers killed": 0.0, "your Food lost to them": 0.0, "AI Food lost to them (each)": 0.0, "turns one was on your land": 0.0}
+	var st := {"hordes risen": 0.0, "hordes out on turn 40": 0.0, "walkers out on turn 20": 0.0, "walkers out on turn 40": 0.0, "walkers came out": 0.0, "walkers killed": 0.0, "your Food lost to them": 0.0, "AI Food lost to them (each)": 0.0, "turns one was on your land": 0.0}
 	var ends := {}
 	var bad := {}
 	for g in n_games:
@@ -120,7 +152,7 @@ func _initialize() -> void:
 			var now := {}
 			for x in s.rifts.walkers:
 				now[x] = true
-				if not known.has(x): st["walkers came out"] += 1
+				if not known.has(x): st["hordes risen" if x.is_horde() else "walkers came out"] += 1
 			for x in known:
 				if not now.has(x): st["walkers killed"] += 1
 			known = now
@@ -131,7 +163,9 @@ func _initialize() -> void:
 				st["AI Food lost to them (each)"] += s.rifts.walkers_on_land(f) * Rifts.WALKER_FOOD / 3.0
 			if s.turn == 20: st["walkers out on turn 20"] += s.rifts.walkers.size()
 			for p in problems(s): bad[p] = bad.get(p, 0) + 1
-		if s.turn >= GameState.END_TURN: st["walkers out on turn 40"] += s.rifts.walkers.size()
+		if s.turn >= GameState.END_TURN:
+			st["walkers out on turn 40"] += s.rifts.walkers.size()
+			st["hordes out on turn 40"] += s.rifts.walkers.filter(func(x): return x.is_horde()).size()
 		ends[s.end_title] = ends.get(s.end_title, 0) + 1
 		m.queue_free()
 		await process_frame

@@ -131,3 +131,9 @@ Faction names, the Daughter's name, Crossing text, small-event and ruin text, a 
 ## Broods in the game text (23 Nov)
 
 Nathan's lore: the broods (his brood.glb model) are Yggdrasil's rogue army; a skeleton horde rises from the dead near a rift (a different creature, not built). Every message and tooltip now says "brood" instead of "Rift Walker" (rifts.gd, game_state.gd, main.gd); code names (RiftWalker, walkers_*) are unchanged to keep the change small. walker_test and walker_screenshot pass; 0 editor warnings.
+
+## Skeleton hordes (23 Nov)
+
+Nathan: "The skeleton horde that spawns is from dead near rift", and "Models should already be created". No skeleton model is in any branch (checked every .glb/.gltf/.fbx/.blend/.obj in all 27 branches and the uploads); the only skeleton art is concept art (chaos_warbands_concepts.png's undead warrior, the Frostbound Ossuary). So the 3D figure is a placeholder (warrior.glb painted bone) behind one constant, view_3d.HORDE_MODEL.
+Rules (Claude's defaults, like the broods): every death in a fight goes through GameState.unit_died, which remembers the hex (Rifts.fallen); at the end of the turn each one within HORDE_RANGE 2 of a rift raises a horde there (or next to it), at most 2 per rift; Strength 2, 6 HP, no healing; otherwise the brood rules. RiftWalker gained a kind, and strength/max_hp are per creature now.
+Measured (full suite, 300 games): about 2 hordes rise a game, 0.7 still out on turn 40, no impossible states in any test. Passive player (midgame_test) devoured 116 -> 102, Dawn with you 10 -> 5 of 300; strong player (army_test, 200 games) devoured 37 -> 41. All within noise of the brood numbers.

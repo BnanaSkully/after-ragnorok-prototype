@@ -1,7 +1,8 @@
 extends SceneTree
 # Full rifts step 4: Rift Walkers on the map. 2D: a dark knot of roots with a
-# blue rim and an HP bar; 3D: a figure made in code (three dark roots round a
-# glowing blue heart) with a blue pin when zoomed out. The tooltip says what it
+# blue rim and an HP bar; 3D: Nathan's brood model with a blue pin when zoomed
+# out. The second one is a skeleton horde (2D a pale skull; 3D a placeholder,
+# the warrior painted bone-white). The tooltip says what it
 # is and what it costs; the hex is marked for attack next to a selected unit.
 # Shots: walker_2d.png, walker_3d.png, walker_3d_far.png.
 # Run: S=<dir> xvfb-run -a -s "-screen 0 1152x648x24" godot --rendering-driver opengl3 --script tests/walker_screenshot.gd
@@ -39,8 +40,8 @@ func _initialize() -> void:
 		if far == HexMap.NO_CELL and HexMap.hex_distance(c, home) == 3 and not s.is_blocked(c):
 			far = c
 	s.rifts.walkers.append(RiftWalker.new(near, far))
-	s.rifts.walkers.append(RiftWalker.new(far, far))
-	s.rifts.walkers[1].hp = 6
+	s.rifts.walkers.append(RiftWalker.new(far, far, RiftWalker.Kind.HORDE)) # a skeleton horde
+	s.rifts.walkers[1].hp = 4
 	s.turn = Rifts.SEASON_FIRST
 	s.messages.clear()
 	s.update_sight()
@@ -53,6 +54,7 @@ func _initialize() -> void:
 	check(tip.any(func(l): return "If your selected unit attacks" in l), "tooltip predicts the fight")
 	var no_spots: Array[Vector2i] = []
 	check(m.highlight_of(near, no_spots) == Color(0.95, 0.45, 0.2), "its hex is marked for attack next to your army")
+	check(m.hex_tooltip(far).any(func(l): return "skeleton horde" in l and "4/6" in l), "tooltip names the skeleton horde: %s" % [m.hex_tooltip(far).slice(0, 2)])
 	check(s.food_parts(s.player).any(func(p): return "Brood" in p[0]), "Food breakdown lists it")
 	m.hover_cell = near
 	await shot("walker_2d.png")
@@ -62,6 +64,10 @@ func _initialize() -> void:
 	for i in 20: await process_frame
 	check(v.walker_figures.size() == 2, "3D: both Walkers have a figure (%d)" % v.walker_figures.size())
 	await shot("walker_3d.png")
+	v.cam_target = v.cell_position(far); v.place_camera()
+	for i in 10: await process_frame
+	await shot("horde_3d.png")
+	v.cam_target = v.cell_position(near)
 	v.cam_distance = 22.0; v.place_camera()
 	for i in 10: await process_frame
 	var pins := 0
