@@ -55,7 +55,7 @@ func _initialize() -> void:
 	var w: RiftWalker = s.rifts.walkers[0]
 	var food0: int = s.food_change(s.player)
 	w.pos = Vector2i(7, 4) # next to your city at (6, 4): your land
-	var parts: Array = s.food_parts(s.player).filter(func(p): return "Walker" in p[0])
+	var parts: Array = s.food_parts(s.player).filter(func(p): return "Brood" in p[0])
 	print("2. a walker on your land: Food a turn %d -> %d (expect -%d), breakdown %s" % [food0, s.food_change(s.player), Rifts.WALKER_FOOD, parts])
 	# 3. it blocks: nothing can step there; it never attacks first
 	print("3. its hex is blocked=%s (expect true)" % s.is_blocked(w.pos))

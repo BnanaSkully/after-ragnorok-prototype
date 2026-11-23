@@ -48,12 +48,12 @@ func _initialize() -> void:
 	m.refresh()
 	for i in 5: await process_frame
 	var tip: Array = m.hex_tooltip(near)
-	check(tip.any(func(l): return "Rift Walker" in l), "tooltip names the Rift Walker: %s" % [tip.slice(0, 3)])
+	check(tip.any(func(l): return "brood" in l), "tooltip names the brood: %s" % [tip.slice(0, 3)])
 	check(tip.any(func(l): return "eating 1 of your Food" in l), "tooltip says it eats your Food")
 	check(tip.any(func(l): return "If your selected unit attacks" in l), "tooltip predicts the fight")
 	var no_spots: Array[Vector2i] = []
 	check(m.highlight_of(near, no_spots) == Color(0.95, 0.45, 0.2), "its hex is marked for attack next to your army")
-	check(s.food_parts(s.player).any(func(p): return "Walker" in p[0]), "Food breakdown lists it")
+	check(s.food_parts(s.player).any(func(p): return "Brood" in p[0]), "Food breakdown lists it")
 	m.hover_cell = near
 	await shot("walker_2d.png")
 	m.toggle_3d()

@@ -509,7 +509,7 @@ func food_parts(f: Faction) -> Array:
 		parts.append(["armies eat", -eaten])
 	var walkers := rifts.walkers_on_land(f)
 	if walkers > 0:
-		parts.append(["Rift Walkers on your land" if f == player else "Rift Walkers on its land", -walkers * Rifts.WALKER_FOOD])
+		parts.append(["Broods on your land" if f == player else "Broods on its land", -walkers * Rifts.WALKER_FOOD])
 	return parts
 
 # --- Army limits ---------------------------------------------------------------
@@ -1895,11 +1895,11 @@ func attack_walker(u: Unit, w: RiftWalker) -> void:
 	w.hp -= dealt
 	u.hp -= taken
 	var who := "Your unit" if u.faction == player else "A %s unit" % u.faction.name
-	var what := "%s attacked a Rift Walker: dealt %d, took %d" % [who, dealt, taken]
+	var what := "%s attacked a brood: dealt %d, took %d" % [who, dealt, taken]
 	var cell := w.pos
 	if w.hp <= 0:
 		rifts.remove_walker(w)
-		what += ". The Walker sank back into the roots"
+		what += ". The brood sank back into the roots"
 	if u.hp <= 0:
 		u.faction.remove_unit(u)
 		what += ". The attacker was destroyed"

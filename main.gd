@@ -2227,7 +2227,7 @@ func hex_tooltip(c: Vector2i) -> Array[String]:
 			lines.append("   If your selected unit attacks: it deals about %d and takes about %d (of %d HP)." % [e.x, e.y, selected.hp])
 	var walker: RiftWalker = s.rifts.walker_at(c)
 	if walker != null and seen:
-		var line := "A Rift Walker, out of the roots of Yggdrasil: HP %d/%d, Strength %d" % [walker.hp, RiftWalker.MAX_HP, RiftWalker.STRENGTH]
+		var line := "A brood, Yggdrasil's rogue army: HP %d/%d, Strength %d" % [walker.hp, RiftWalker.MAX_HP, RiftWalker.STRENGTH]
 		if s.walker_defence(walker) != RiftWalker.STRENGTH:
 			line += ", defends at %d here" % s.walker_defence(walker)
 		lines.append(line)

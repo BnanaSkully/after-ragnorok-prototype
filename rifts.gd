@@ -146,12 +146,12 @@ func walkers_turn() -> void:
 				if game.player.known_rifts.has(rift) or game.player_can_see(w.pos):
 					seen += 1
 		if seen > 0:
-			game.add_message("%s out of the rifts you know. They never attack first, but each one on your land eats %d Food a turn." % ["A Rift Walker crawls" if seen == 1 else "%d Rift Walkers crawl" % seen, WALKER_FOOD])
+			game.add_message("%s out of the rifts you know: Yggdrasil's rogue army. They never attack first, but each one on your land eats %d Food a turn." % ["A brood crawls" if seen == 1 else "%d broods crawl" % seen, WALKER_FOOD])
 	for w in walkers:
 		var land: Faction = game.territory_owner(w.pos)
 		var whose: String = land.name if land != null else ""
 		if land == game.player and w.on_land != whose:
-			game.add_message("A Rift Walker wandered onto your land: -%d Food a turn while it stays. Attack it to drive it off." % WALKER_FOOD)
+			game.add_message("A brood wandered onto your land: -%d Food a turn while it stays. Attack it to drive it off." % WALKER_FOOD)
 		w.on_land = whose
 
 # A Walker killed in a fight.

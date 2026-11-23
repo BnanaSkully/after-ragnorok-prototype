@@ -127,3 +127,7 @@ CLAUDE.md holds the rules for working; this file holds the history.
 ## Ideas parked (see CLAUDE.md "Later")
 
 Faction names, the Daughter's name, Crossing text, small-event and ruin text, a choice when you find a rift (e.g. seal it: changes Sköll, ask first), AIs using fog of war to chase a rogue Daughter, AI landing choice, AI-to-AI diplomacy and trading, combat defence bonus, paying an AI to join your war, mini-games, full rifts (Doom-creatures, seasons, underground travel). The old Long Night design (chain, rogues, warbands) is parked in CLAUDE.md "Later".
+
+## Broods in the game text (23 Nov)
+
+Nathan's lore: the broods (his brood.glb model) are Yggdrasil's rogue army; a skeleton horde rises from the dead near a rift (a different creature, not built). Every message and tooltip now says "brood" instead of "Rift Walker" (rifts.gd, game_state.gd, main.gd); code names (RiftWalker, walkers_*) are unchanged to keep the change small. walker_test and walker_screenshot pass; 0 editor warnings.
