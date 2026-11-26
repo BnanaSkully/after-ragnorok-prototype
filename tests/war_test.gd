@@ -119,7 +119,7 @@ func _initialize() -> void:
 				H.answer_choices(s)
 			if s.player.industry >= 10 and s.player.walls < 2 and s.turn >= 8: s.player_build_walls()
 			elif s.player.outposts.size() < 2 and s.player.industry >= GameState.OUTPOST_COST and not s.outpost_spots(s.player).is_empty(): s.player_build_outpost(s.outpost_spots(s.player).pick_random())
-			elif s.food_change(s.player) > 0: s.player_build_unit()
+			elif s.gold_change(s.player) >= GameState.ARMY_GOLD: s.player_build_unit()
 			var f = s.ais[randi() % 3]
 			if randf() < 0.5: s.player_propose_pact(f)
 			# now and then, attack an AI unit next to one of yours (declaring war)

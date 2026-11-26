@@ -21,7 +21,7 @@ const DEFENCE := 1 # extra city defence (was 3)
 # when Sköll arrives?
 const FED_TURNS_PER_FAVOUR := 3 # every 3 turns in a row without starving: Favour +1...
 const FED_FAVOUR_CAP := 7 # ...but only up to this: to reach RISE_FAVOUR you must grant her requests
-const STARVING_FAVOUR := -2 # a turn in which the kingdom starves (a unit deserts)
+const STARVING_FAVOUR := -2 # a turn in which the kingdom starves (Food runs out)
 const READY_DEFENCE := 10 # what she wants by the time Sköll arrives:
 const READY_ARMY := 6 #   city defence and total army Strength
 const READY_FAVOUR := 2 # both met

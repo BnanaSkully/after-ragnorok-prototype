@@ -172,7 +172,7 @@ func _initialize() -> void:
 				if c["title"].begins_with("SUNNA"): requests += 1
 			H.answer_choices(s)
 			if s.player.walls < 2 and s.player.industry >= GameState.WALL_COST and s.turn >= 8: s.player_build_walls()
-			elif s.food_change(s.player) > 0: s.player_build_unit()
+			elif s.gold_change(s.player) >= GameState.ARMY_GOLD: s.player_build_unit()
 			for key in GameState.Buildings.LIST: s.player_build_building(key)
 			s.end_turn()
 			if s.turn == 10 and s.daughter.shelters_with(s.player): st["you hold her on turn 10"] += 1

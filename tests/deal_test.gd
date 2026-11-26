@@ -82,7 +82,7 @@ func _initialize() -> void:
 		while not s.game_over:
 			H.answer_choices(s)
 			if s.player.industry >= 10 and s.player.walls < 2 and s.turn >= 8: s.player_build_walls()
-			elif s.food_change(s.player) > 0: s.player_build_unit()
+			elif s.gold_change(s.player) >= GameState.ARMY_GOLD: s.player_build_unit()
 			var f = s.ais[randi() % 3]; var rr = s.relation(f)
 			var pick := randi() % 4
 			if pick == 0 and rr.trade_quote("food") > 0 and s.player.food >= 5:

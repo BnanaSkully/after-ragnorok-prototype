@@ -33,15 +33,16 @@ func strong_turn(s) -> void:
 			if step == HexMap.NO_CELL or not s.player_unit_act(u, step): break
 		H.answer_choices(s)
 	# build, like a player who wants a big army: outposts (plains first: Food),
-	# a Granary, then armies while Food stays positive, then everything else
+	# a Market and a Granary, then armies while Gold stays positive, then everything else
 	for i in 2:
 		var spots = s.outpost_spots(p)
 		if spots.is_empty() or p.industry < GameState.OUTPOST_COST: break
 		spots.sort_custom(func(a, b): return Terrain.OUTPOST_FOOD[s.terrain_at(a)] > Terrain.OUTPOST_FOOD[s.terrain_at(b)])
 		s.player_build_outpost(spots[0])
+	s.player_build_building("market")
 	s.player_build_building("granary")
 	for i in 4:
-		if s.food_change(p) - GameState.UNIT_FOOD_UPKEEP < 0: break
+		if s.gold_change(p) - GameState.ARMY_GOLD < 0: break
 		var before: int = p.units.size()
 		s.player_build_unit()
 		if p.units.size() == before: break

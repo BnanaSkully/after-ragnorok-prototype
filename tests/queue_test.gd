@@ -87,7 +87,7 @@ func _initialize() -> void:
 			s.try_land(spots[(g * 7) % spots.size()])
 			while not s.game_over:
 				H.answer_choices(s)
-				var want := "army" if s.food_change(p) > 0 and s.army_count(p) < s.supply_cap(p) else ""
+				var want := "army" if s.gold_change(p) >= GameState.ARMY_GOLD and s.army_count(p) < s.supply_cap(p) else ""
 				if want == "":
 					for key in Buildings.LIST:
 						if not p.buildings.has(key): want = key; break

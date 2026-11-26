@@ -154,7 +154,7 @@ func _initialize() -> void:
 			while not s.game_over:
 				H.answer_choices(s)
 				if s.player.outposts.size() < 2 and s.player.industry >= GameState.OUTPOST_COST and not s.outpost_spots(s.player).is_empty(): s.player_build_outpost(s.outpost_spots(s.player).pick_random())
-				elif s.food_change(s.player) > 0: s.player_build_unit()
+				elif s.gold_change(s.player) >= GameState.ARMY_GOLD: s.player_build_unit()
 				for u in s.player.units.duplicate():
 					if not u in s.player.units or u.moves <= 0: continue
 					var opts = HexMap.neighbours(u.pos).filter(func(c): return s.passable(c) and s.war_target(c) == null and s.can_afford_move(u, c) and not s.is_city(c))

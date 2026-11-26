@@ -61,7 +61,7 @@ func _initialize() -> void:
 					var os = s.outpost_spots(p)
 					if not os.is_empty() and s.player_build_outpost(os.pick_random()): stats["outposts: you"] += 1
 				elif what == "scout": s.player_build_scout()
-				elif what == "army" and s.food_change(p) > 0: s.player_build_unit()
+				elif what == "army" and s.gold_change(p) >= GameState.ARMY_GOLD: s.player_build_unit()
 				elif what == "walls" and s.turn >= 8: s.player_build_walls()
 				if p.industry != before: break
 				H.answer_choices(s)

@@ -12,6 +12,7 @@ var outposts: Array[Vector2i] = [] # hexes of its outposts (each claims the hexe
 var strength := 3 # Strength of new army units (higher = better odds in combat)
 var food := 0
 var industry := 0
+var gold := 0 # pays army and scout upkeep (GameState.ARMY_GOLD); Food only grows the city
 var favour := 0 # how much the Sun's Daughter trusts this faction (0 to 10)
 var walls := 0 # city wall level (each level adds defence)
 var city_hp := 20 # GameState.CITY_MAX_HP: attacks wear it down; at 0 the city falls
