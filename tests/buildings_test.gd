@@ -41,7 +41,7 @@ func _initialize() -> void:
 		s.try_land(spots[(g * 7) % spots.size()])
 		while not s.game_over:
 			H.answer_choices(s)
-			if s.food_change(s.player) > 0: s.player_build_unit()
+			if s.gold_change(s.player) >= GameState.ARMY_GOLD: s.player_build_unit()
 			for key in Buildings.LIST: s.player_build_building(key)
 			s.end_turn()
 			if s.has_pending_offer(): s.pending_relation().answer(false)

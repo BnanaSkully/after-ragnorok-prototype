@@ -75,7 +75,7 @@ func _initialize() -> void:
 		s.try_land(spots[(g * 7) % spots.size()])
 		while not s.game_over:
 			H.answer_choices(s)
-			if s.food_change(s.player) > 0: s.player_build_unit()
+			if s.gold_change(s.player) >= GameState.ARMY_GOLD: s.player_build_unit()
 			var f = s.ais[randi() % 3]
 			if randf() < 0.4 and s.relation(f).can_ask_borders():
 				if s.relation(f).ask_open_borders(): st["borders agreed"] += 1

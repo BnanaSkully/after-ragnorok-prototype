@@ -44,7 +44,7 @@ const ICON_GAP := 62.0
 const PANEL_POS := Vector2(78, 76) # where a left-edge panel opens (right of the icons)
 const PANEL_W := 372.0
 const POPUP_POS := Vector2(512, 84) # deals, trading her, city buildings: beside the open panel
-const RES_RECT := Rect2(1030, 6, 118, 196) # the resource column (top right)
+const RES_RECT := Rect2(1030, 6, 118, 231) # the resource column (top right)
 const END_RING := Rect2(998, 494, 150, 150) # the End Turn button (bottom right), drawn on end_turn_ring.png
 const BADGE_SIZE := 34.0
 const BADGE_X := 958.0 # badges sit left of the End Turn ring
@@ -554,7 +554,7 @@ func build_build_panel() -> void:
 	outpost_button = panel_button("", on_outpost_button, box)
 	walls_button = panel_button("City buildings...", on_open_city, box)
 	trade_button = panel_button("Trade %s..." % SunDaughter.NAME, on_open_trade, box)
-	scout_button.tooltip_text = "A scout: 2 moves, sees 3 hexes, eats nothing, but Strength %d. Up to %d." % [Unit.SCOUT_STRENGTH, GameState.MAX_SCOUTS]
+	scout_button.tooltip_text = "A scout: 2 moves, sees 3 hexes, costs %d Gold a turn, but Strength %d. Up to %d." % [GameState.SCOUT_GOLD, Unit.SCOUT_STRENGTH, GameState.MAX_SCOUTS]
 	outpost_button.tooltip_text = "Found an outpost on a hex you can see, within %d of your city. Income by land: plains +2 Food, forest +1 Food +1 Industry, hills +2 Industry. An enemy at war can take it if nobody guards it." % GameState.OUTPOST_RANGE
 	walls_button.tooltip_text = "City buildings: walls, granary, workshop, watchtower, forge, barracks. Each costs Industry once and gives a permanent bonus."
 	var line := HSeparator.new()
@@ -824,7 +824,7 @@ func update_buttons() -> void:
 	update_queue(playing)
 	build_button.text = "Army (%d) %d/%d" % [GameState.UNIT_COST, armies, cap]
 	build_button.disabled = not playing or p.industry < GameState.UNIT_COST or armies >= cap
-	build_button.tooltip_text = "An army unit: Strength %d, 1 move, eats %d Food a turn. Supply %d/%d (%d + population, +%d with a Barracks).\nUpkeep: your first %d armies are free; this one would add %d Industry a turn (now %d)." % [p.strength, GameState.UNIT_FOOD_UPKEEP, armies, cap, GameState.SUPPLY_BASE, GameState.Buildings.BARRACKS_SUPPLY, GameState.FREE_ARMIES, state.next_army_upkeep(p), state.army_upkeep(p)]
+	build_button.tooltip_text = "An army unit: Strength %d, 1 move, costs %d Gold a turn. Supply %d/%d (%d + population, +%d with a Barracks).\nYour troops cost %d Gold a turn now; you make %+d Gold a turn after upkeep." % [p.strength, GameState.ARMY_GOLD, armies, cap, GameState.SUPPLY_BASE, GameState.Buildings.BARRACKS_SUPPLY, state.army_upkeep(p), state.gold_change(p)]
 	scout_button.disabled = not playing or not state.can_build_scout(p)
 	outpost_button.disabled = not playing or (not placing_outpost and (p.industry < GameState.OUTPOST_COST or state.outpost_spots(p).is_empty()))
 	outpost_button.text = "Cancel the outpost" if placing_outpost else "Outpost (%d)" % GameState.OUTPOST_COST
@@ -1899,9 +1899,10 @@ func draw_resources(font: Font) -> void:
 	var industry_net: int = s.industry_change(p) - s.tribute_amount(p)
 	var rows := [
 		["pop", str(p.population), 0, false, "Population %d (your city's size). Every point above 1 gives +1 Food, +1 Industry and +%d city defence a turn.\nThe city grows by 1 when stored Food reaches %d and Food isn't falling." % [p.population, GameState.POP_DEFENCE, s.growth_cost(p)]],
-		["food", str(p.food), s.food_change(p), true, "Food: %d stored; at %d your city grows. Each army unit eats %d a turn (scouts nothing); if it runs out, a unit deserts.\nThis turn: %s" % [p.food, s.growth_cost(p), GameState.UNIT_FOOD_UPKEEP, parts_text(s.food_parts(p))]],
+		["food", str(p.food), s.food_change(p), true, "Food: %d stored; at %d your city grows. Food only grows your city (Gold pays your armies).\nThis turn: %s" % [p.food, s.growth_cost(p), parts_text(s.food_parts(p))]],
+		["gold", str(p.gold), s.gold_change(p), true, "Gold: %d stored. Each army costs %d a turn, each scout %d; if Gold runs out, a unit deserts. A Market adds +%d.\nThis turn: %s" % [p.gold, GameState.ARMY_GOLD, GameState.SCOUT_GOLD, GameState.Buildings.MARKET_GOLD, parts_text(s.gold_parts(p))]],
 		["industry", str(p.industry), industry_net, true, "Industry: %d stored, spent on units, outposts and city buildings (Build).\nThis turn: %s%s" % [p.industry, parts_text(s.industry_parts(p)), ", tribute %+d" % -s.tribute_amount(p) if s.tribute_amount(p) > 0 else ""]],
-		["army", str(s.army_power(p)), 0, false, "Army: the total Strength of your units (%d armies, supply %d/%d; %d scouts; %d outposts). The AIs compare armies before demanding or declaring war; %s wants %d+ by turn %d.\nEach army eats %d Food a turn and costs rising Industry upkeep: the first %d are free, then 1, 1, 2, 2, 3, 3... (now %d a turn)." % [s.army_count(p), s.army_count(p), s.supply_cap(p), p.scout_count(), p.outposts.size(), SunDaughter.NAME, SunDaughter.READY_ARMY, Skoll.ARRIVAL_TURN, GameState.UNIT_FOOD_UPKEEP, GameState.FREE_ARMIES, s.army_upkeep(p)]],
+		["army", str(s.army_power(p)), 0, false, "Army: the total Strength of your units (%d armies, supply %d/%d; %d scouts; %d outposts). The AIs compare armies before demanding or declaring war; %s wants %d+ by turn %d.\nEach army costs %d Gold a turn, each scout %d (now %d a turn)." % [s.army_count(p), s.army_count(p), s.supply_cap(p), p.scout_count(), p.outposts.size(), SunDaughter.NAME, SunDaughter.READY_ARMY, Skoll.ARRIVAL_TURN, GameState.ARMY_GOLD, GameState.SCOUT_GOLD, s.army_upkeep(p)]],
 		["land", str(s.land_count(p)), 0, false, "Land: hexes of your territory that aren't ash (%s). On turn %d, Dominion goes to whoever holds the most." % [", ".join(s.ais.filter(func(f): return f.is_alive()).map(func(f): return "%s %d" % [f.name, s.land_count(f)])), GameState.END_TURN]],
 	]
 	ov.draw_style_box(frame_style(SMALL_FRAME_SCALE, 0), RES_RECT)
@@ -2022,6 +2023,9 @@ func draw_resource_icon(kind: String, c: Vector2) -> void:
 			ov.draw_circle(c + Vector2(0, -10), 2.2, col)
 		"industry": # an anvil
 			ov.draw_colored_polygon(PackedVector2Array([c + Vector2(-10, -5), c + Vector2(9, -5), c + Vector2(7, -1), c + Vector2(3, 0), c + Vector2(3, 4), c + Vector2(7, 8), c + Vector2(-7, 8), c + Vector2(-3, 4), c + Vector2(-3, 0), c + Vector2(-7, -1)]), col)
+		"gold": # a coin
+			ov.draw_circle(c, 9.0, col)
+			ov.draw_arc(c, 6.0, 0, TAU, 24, HUD_BG, 1.5)
 		"army":
 			draw_swords(ov, c, 9.0, col)
 		"land": # a mountain
@@ -2141,7 +2145,7 @@ func draw_ash_mark(c: Vector2) -> void:
 	for v in [Vector2(-8, -4), Vector2(5, -8), Vector2(9, 5), Vector2(-3, 7), Vector2(0, -1)]:
 		draw_circle(c + v, 1.8, Color(0.62, 0.6, 0.58))
 
-# [["city", 2], ["armies eat", -1]] -> "city +2, armies eat -1"
+# [["city", 2], ["army upkeep", -2]] -> "city +2, army upkeep -2"
 func parts_text(parts: Array) -> String:
 	return ", ".join(parts.map(func(p): return "%s %+d" % [p[0], p[1]]))
 

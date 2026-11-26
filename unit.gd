@@ -3,8 +3,8 @@ extends RefCounted
 
 # One unit on the map. Each faction can have several (see Faction.units).
 # Only one unit can stand on a hex. There are two kinds:
-#   ARMY  - the normal fighting unit (1 move, the faction's Strength, eats Food)
-#   SCOUT - fast and weak: 2 moves, Strength 1, sees further, eats nothing
+#   ARMY  - the normal fighting unit (1 move, the faction's Strength)
+#   SCOUT - fast and weak: 2 moves, Strength 1, sees further
 #           (the usual 4X explorer)
 
 enum Kind { ARMY, SCOUT }
@@ -54,6 +54,7 @@ func max_moves() -> int:
 func sight() -> int:
 	return SCOUT_SIGHT if is_scout() else ARMY_SIGHT
 
-# Food it eats each turn (scouts live off the land).
-func upkeep(per_army: int) -> int:
-	return 0 if is_scout() else per_army
+# Gold it costs each turn (GameState.ARMY_GOLD / SCOUT_GOLD are passed in, so
+# this file doesn't need GameState).
+func upkeep(per_army: int, per_scout: int) -> int:
+	return per_scout if is_scout() else per_army

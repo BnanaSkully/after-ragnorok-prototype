@@ -107,7 +107,7 @@ func _initialize() -> void:
 		while not s.game_over:
 			H.answer_choices(s)
 			if s.player.industry >= 10 and s.player.walls < 2 and s.turn >= 8: s.player_build_walls()
-			elif s.food_change(s.player) > 0: s.player_build_unit()
+			elif s.gold_change(s.player) >= GameState.ARMY_GOLD: s.player_build_unit()
 			if randf() < 0.3: s.player_propose_pact(s.ais[randi() % 3])
 			# sometimes attack a city next to one of your units
 			if g % 4 == 0:
